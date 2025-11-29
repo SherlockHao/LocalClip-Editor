@@ -77,7 +77,7 @@ const App: React.FC = () => {
         video_info: result.video_info
       };
 
-      // 刷新视频列表以确保最新状态
+      // 刷新视频列表以获取最新状态，而不是添加到现有列表
       await refreshVideos();
       setCurrentVideo(newVideo);
     } catch (error) {
