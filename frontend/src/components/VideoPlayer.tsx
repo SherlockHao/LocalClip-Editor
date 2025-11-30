@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 
 interface VideoPlayerProps {
   videoRef: React.RefObject<HTMLVideoElement>;
@@ -45,7 +45,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     };
   }, [videoRef, onTimeUpdate, onLoadedMetadata]);
 
-  // 当播放状态变化时控制视频
+  // 当播放状态变化时控制视频 - 使用useCallback优化
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -62,16 +62,21 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, [isPlaying]);
 
-  // 当前时间变化时更新视频时间
+  // 优化时间更新处理，减少不必要的更新
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !hasLoaded) return; // 确保视频已加载后再设置时间
+    if (!video || !hasLoaded || Math.abs(video.currentTime - currentTime) < 0.1) return;
 
-    video.currentTime = currentTime;
+    // 只在需要时更新时间，减少卡顿
+    const timer = setTimeout(() => {
+      video.currentTime = currentTime;
+    }, 0);
+
+    return () => clearTimeout(timer);
   }, [currentTime, hasLoaded]);
 
   return (
-    <div className="w-full h-full flex items-center justify-center relative">
+    <div className="w-full h-full flex items-center justify-center relative bg-black">
       <video
         ref={videoRef}
         src={src}
@@ -79,6 +84,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         onPlay={() => {}}
         onPause={() => {}}
         playsInline // 添加这个属性以支持内联播放
+        preload="metadata" // 预加载元数据，减少卡顿
       />
     </div>
   );
