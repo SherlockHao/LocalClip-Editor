@@ -177,8 +177,8 @@ const App: React.FC = () => {
         />
 
         {/* 中央视频预览区 */}
-        <main className="flex-1 flex flex-col p-4">
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 flex-1 flex flex-col">
+        <main className="flex-1 flex flex-col p-4 overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 flex flex-col min-h-[500px]">
             <div className="p-4 border-b border-gray-200 flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-800">
                 {currentVideo ? currentVideo.original_name : '视频预览'}
@@ -195,7 +195,7 @@ const App: React.FC = () => {
                 )}
               </div>
             </div>
-            <div className="flex-1 flex items-center justify-center bg-black/5">
+            <div className="flex-1 flex items-center justify-center bg-black/5 min-h-[400px]">
               {currentVideo ? (
                 <VideoPlayer
                   videoRef={videoRef}
@@ -217,7 +217,7 @@ const App: React.FC = () => {
 
           {/* 字幕时间轴 */}
           {subtitles.length > 0 && (
-            <div className="mt-4 bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+            <div className="mt-4 bg-white rounded-lg shadow-sm border border-gray-200 p-4 flex-shrink-0">
               <SubtitleTimeline
                 subtitles={subtitles}
                 currentTime={currentTime}
