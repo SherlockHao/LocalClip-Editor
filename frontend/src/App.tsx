@@ -108,6 +108,17 @@ const App: React.FC = () => {
     }
   };
 
+  const handleEditSubtitle = (index: number, newSubtitle: Subtitle) => {
+    const updatedSubtitles = [...subtitles];
+    updatedSubtitles[index] = newSubtitle;
+    setSubtitles(updatedSubtitles);
+  };
+
+  const handleDeleteSubtitle = (index: number) => {
+    const updatedSubtitles = subtitles.filter((_, i) => i !== index);
+    setSubtitles(updatedSubtitles);
+  };
+
   const handlePlayPause = () => {
     if (videoRef.current) {
       if (isPlaying) {
@@ -223,6 +234,8 @@ const App: React.FC = () => {
                 currentTime={currentTime}
                 duration={duration}
                 onSeek={handleSeek}
+                onEditSubtitle={handleEditSubtitle}
+                onDeleteSubtitle={handleDeleteSubtitle}
               />
             </div>
           )}

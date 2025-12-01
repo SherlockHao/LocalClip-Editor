@@ -13,13 +13,17 @@ interface SubtitleTimelineProps {
   currentTime: number;
   duration: number;
   onSeek: (time: number) => void;
+  onEditSubtitle?: (index: number, newSubtitle: Subtitle) => void;
+  onDeleteSubtitle?: (index: number) => void;
 }
 
 const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
   subtitles,
   currentTime,
   duration,
-  onSeek
+  onSeek,
+  onEditSubtitle,
+  onDeleteSubtitle
 }) => {
   const timelineWidth = 1000; // 固定像素宽度，可以根据容器大小调整
 
@@ -28,6 +32,27 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
     const clickPosition = e.clientX - rect.left;
     const time = (clickPosition / timelineWidth) * duration;
     onSeek(time);
+  };
+
+  const handleDeleteSubtitle = (index: number) => {
+    if (onDeleteSubtitle) {
+      onDeleteSubtitle(index);
+    }
+  };
+
+  const handleEditSubtitle = (index: number) => {
+    if (onEditSubtitle) {
+      // 提供一个默认的编辑功能，实际应用中可能需要弹出编辑对话框
+      const currentSubtitle = subtitles[index];
+      const newText = prompt('编辑字幕文本:', currentSubtitle.text);
+      if (newText !== null) {
+        const updatedSubtitle = {
+          ...currentSubtitle,
+          text: newText
+        };
+        onEditSubtitle(index, updatedSubtitle);
+      }
+    }
   };
 
   return (
@@ -94,10 +119,22 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
                 {subtitle.start_time_formatted} → {subtitle.end_time_formatted}
               </span>
               <div className="flex space-x-2">
-                <button className="text-xs bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded">
+                <button 
+                  className="text-xs bg-blue-500 hover:bg-blue-600 text-white px-2 py-1 rounded"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleEditSubtitle(index);
+                  }}
+                >
                   编辑
                 </button>
-                <button className="text-xs bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded">
+                <button 
+                  className="text-xs bg-red-500 hover:bg-red-600 text-white px-2 py-1 rounded"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteSubtitle(index);
+                  }}
+                >
                   删除
                 </button>
               </div>
