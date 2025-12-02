@@ -62,17 +62,16 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, [isPlaying]);
 
-  // 优化时间更新处理，减少不必要的更新
+  // 仅在视频加载完成且视频时间与状态时间差异较大时更新视频时间
+  // 避免频繁更新导致性能问题或跳转冲突
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !hasLoaded || Math.abs(video.currentTime - currentTime) < 0.1) return;
+    if (!video || !hasLoaded) return;
 
-    // 只在需要时更新时间，减少卡顿
-    const timer = setTimeout(() => {
+    // 只有当时间差异较大时才更新（>1秒），避免频繁同步导致跳转问题
+    if (Math.abs(video.currentTime - currentTime) > 1.0) {
       video.currentTime = currentTime;
-    }, 0);
-
-    return () => clearTimeout(timer);
+    }
   }, [currentTime, hasLoaded]);
 
   return (

@@ -305,6 +305,7 @@ const App: React.FC = () => {
                 <VideoPlayer
                   videoRef={videoRef}
                   src={`/uploads/${currentVideo.filename}`}
+                  key={`/uploads/${currentVideo.filename}`}  // 添加key确保视频源不变时不会重新创建
                   onTimeUpdate={handleTimeUpdate}
                   onLoadedMetadata={handleLoadedMetadata}
                   isPlaying={isPlaying}

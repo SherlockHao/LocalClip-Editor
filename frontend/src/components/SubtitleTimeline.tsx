@@ -76,7 +76,7 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
             return (
               <div
                 key={index}
-                className={`absolute top-3 h-12 flex flex-col items-center justify-center border border-gray-600 rounded-md ${
+                className={`absolute top-3 h-12 flex flex-col items-center justify-center border border-gray-600 rounded-md overflow-hidden ${
                   currentTime >= subtitle.start_time && currentTime <= subtitle.end_time
                     ? 'bg-blue-600 text-white'  // 使用更深的蓝色
                     : subtitle.speaker_id !== undefined ? 
@@ -96,9 +96,11 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
                 }}
               >
                 {subtitle.speaker_id !== undefined && (
-                  <span className="text-xs font-bold">说话人 {subtitle.speaker_id}</span>
+                  <span className="text-xs font-bold truncate max-w-[80px]">说话人 {subtitle.speaker_id}</span>
                 )}
-                <span className="text-xs px-1 truncate">{subtitle.text}</span>
+                <span className="text-xs px-1 truncate max-w-full">
+                  {subtitle.text.length > 25 ? `${subtitle.text.substring(0, 25)}...` : subtitle.text}
+                </span>
               </div>
             );
           })}
