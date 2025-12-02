@@ -6,6 +6,7 @@ interface Subtitle {
   start_time_formatted: string;
   end_time_formatted: string;
   text: string;
+  speaker_id?: number;  // 新增说话人ID
 }
 
 interface SubtitleTimelineProps {
@@ -75,10 +76,12 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
             return (
               <div
                 key={index}
-                className={`absolute top-3 h-10 flex items-center justify-center border border-gray-400 rounded ${
+                className={`absolute top-3 h-12 flex flex-col items-center justify-center border border-gray-400 rounded ${
                   currentTime >= subtitle.start_time && currentTime <= subtitle.end_time
                     ? 'bg-blue-500 text-white'
-                    : 'bg-blue-200 text-gray-800'
+                    : subtitle.speaker_id !== undefined ? 
+                      `bg-slate-${100 + subtitle.speaker_id * 100} text-gray-800` : // 根据说话人ID设置不同颜色
+                      'bg-blue-200 text-gray-800'
                 }`}
                 style={{
                   left: `${left}%`,
@@ -86,6 +89,9 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
                   minWidth: '60px'
                 }}
               >
+                {subtitle.speaker_id !== undefined && (
+                  <span className="text-xs font-bold">说话人 {subtitle.speaker_id}</span>
+                )}
                 <span className="text-xs px-1 truncate">{subtitle.text}</span>
               </div>
             );
@@ -117,6 +123,11 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
             <div className="flex justify-between">
               <span className="text-xs font-mono text-gray-500">
                 {subtitle.start_time_formatted} → {subtitle.end_time_formatted}
+                {subtitle.speaker_id !== undefined && (
+                  <span className="ml-2 bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded text-xs">
+                    说话人 {subtitle.speaker_id}
+                  </span>
+                )}
               </span>
               <div className="flex space-x-2">
                 <button 

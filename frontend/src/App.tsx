@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Upload, Video, Clock, Settings, Play, Pause, RotateCcw } from 'lucide-react';
 import VideoPlayer from './components/VideoPlayer';
 import SubtitleTimeline from './components/SubtitleTimeline';
@@ -26,12 +26,14 @@ interface Subtitle {
   start_time_formatted: string;
   end_time_formatted: string;
   text: string;
+  speaker_id?: number;  // 新增说话人ID
 }
 
 const App: React.FC = () => {
   const [videos, setVideos] = useState<VideoFile[]>([]);
   const [currentVideo, setCurrentVideo] = useState<VideoFile | null>(null);
   const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
+  const [subtitleFilename, setSubtitleFilename] = useState<string | null>(null); // 新增：SRT文件名
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -39,6 +41,8 @@ const App: React.FC = () => {
     hardSubtitles: false,
     quality: 'high'
   });
+  const [isProcessingSpeakerDiarization, setIsProcessingSpeakerDiarization] = useState(false);
+  const [speakerDiarizationTaskId, setSpeakerDiarizationTaskId] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -102,6 +106,7 @@ const App: React.FC = () => {
 
       const result = await response.json();
       setSubtitles(result.subtitles);
+      setSubtitleFilename(result.filename); // 保存SRT文件名
     } catch (error) {
       console.error('上传字幕时出错:', error);
       alert('上传字幕失败: ' + (error as Error).message);
@@ -154,6 +159,93 @@ const App: React.FC = () => {
     // 这里应该调用后端API导出视频
   };
 
+  const handleRunSpeakerDiarization = async () => {
+    if (!currentVideo) {
+      alert('请先上传并选择视频文件');
+      return;
+    }
+    
+    if (!subtitleFilename) {
+      alert('请先上传SRT字幕文件');
+      return;
+    }
+    
+    try {
+      setIsProcessingSpeakerDiarization(true);
+      
+      // 发送请求到后端启动说话人识别
+      const response = await fetch('/api/speaker-diarization/process', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          video_filename: currentVideo.filename,
+          subtitle_filename: subtitleFilename
+        }),
+      });
+      
+      if (!response.ok) {
+        throw new Error(`请求失败: ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      setSpeakerDiarizationTaskId(result.task_id);
+      
+      // 开始轮询状态
+      pollSpeakerDiarizationStatus(result.task_id);
+    } catch (error) {
+      console.error('启动说话人识别失败:', error);
+      alert('启动说话人识别失败: ' + (error as Error).message);
+      setIsProcessingSpeakerDiarization(false);
+    }
+  };
+
+  const pollSpeakerDiarizationStatus = async (taskId: string) => {
+    try {
+      const response = await fetch(`/api/speaker-diarization/status/${taskId}`);
+      
+      if (!response.ok) {
+        throw new Error(`获取状态失败: ${response.statusText}`);
+      }
+      
+      const status = await response.json();
+      
+      if (status.status === 'completed') {
+        // 处理完成，将说话人ID添加到字幕中
+        if (status.speaker_labels) {
+          const updatedSubtitles = subtitles.map((subtitle, index) => {
+            const speakerId = status.speaker_labels[index];
+            return {
+              ...subtitle,
+              speaker_id: speakerId !== null && speakerId !== undefined ? speakerId : undefined
+            };
+          });
+          setSubtitles(updatedSubtitles);
+        }
+        
+        setIsProcessingSpeakerDiarization(false);
+        setSpeakerDiarizationTaskId(null);
+        alert(`说话人识别完成！识别出 ${status.unique_speakers} 个不同说话人`);
+      } else if (status.status === 'failed') {
+        console.error('说话人识别失败:', status.message);
+        alert('说话人识别失败: ' + status.message);
+        setIsProcessingSpeakerDiarization(false);
+        setSpeakerDiarizationTaskId(null);
+      } else {
+        // 继续轮询
+        setTimeout(() => pollSpeakerDiarizationStatus(taskId), 2000);
+      }
+    } catch (error) {
+      console.error('轮询说话人识别状态失败:', error);
+      alert('获取说话人识别状态失败: ' + (error as Error).message);
+      setIsProcessingSpeakerDiarization(false);
+      setSpeakerDiarizationTaskId(null);
+    }
+  };
+
+  
+
   return (
     <div className="h-screen flex flex-col bg-gray-50">
       {/* 顶部工具栏 */}
@@ -184,7 +276,9 @@ const App: React.FC = () => {
           videos={videos}
           onVideoSelect={setCurrentVideo}
           onVideoUpload={handleVideoUpload}
-          onSubtitleUpload={handleSubtitleUpload}
+          onSubtitleUpload={(file) => {
+            handleSubtitleUpload(file);
+          }}
         />
 
         {/* 中央视频预览区 */}
@@ -246,6 +340,8 @@ const App: React.FC = () => {
           exportSettings={exportSettings}
           onExportSettingsChange={setExportSettings}
           onExport={handleExport}
+          onRunSpeakerDiarization={handleRunSpeakerDiarization}
+          isProcessingSpeakerDiarization={isProcessingSpeakerDiarization}
           currentVideo={currentVideo}
         />
       </div>

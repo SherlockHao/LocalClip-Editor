@@ -1,5 +1,5 @@
 import React from 'react';
-import { Settings, Download } from 'lucide-react';
+import { Settings, Download, Users, Zap } from 'lucide-react';
 
 interface VideoFile {
   filename: string;
@@ -25,6 +25,8 @@ interface PropertiesPanelProps {
   exportSettings: ExportSettings;
   onExportSettingsChange: (settings: ExportSettings) => void;
   onExport: () => void;
+  onRunSpeakerDiarization: () => void;
+  isProcessingSpeakerDiarization: boolean;
   currentVideo: VideoFile | null;
 }
 
@@ -32,6 +34,8 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   exportSettings,
   onExportSettingsChange,
   onExport,
+  onRunSpeakerDiarization,
+  isProcessingSpeakerDiarization,
   currentVideo
 }) => {
   return (
@@ -93,6 +97,29 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             </select>
           </div>
         </div>
+      </div>
+
+      {/* 新增：说话人识别按钮 */}
+      <div className="mb-4">
+        <button
+          onClick={onRunSpeakerDiarization}
+          disabled={isProcessingSpeakerDiarization}
+          className={`w-full flex items-center justify-center space-x-2 py-2.5 rounded-md transition-colors ${
+            isProcessingSpeakerDiarization 
+              ? 'bg-gray-400 cursor-not-allowed' 
+              : 'bg-purple-600 hover:bg-purple-700 text-white'
+          }`}
+        >
+          <Users size={18} />
+          <span>
+            {isProcessingSpeakerDiarization ? '处理中...' : '运行说话人识别'}
+          </span>
+        </button>
+        {isProcessingSpeakerDiarization && (
+          <div className="mt-2 text-xs text-center text-gray-600">
+            正在分析音频并识别说话人...
+          </div>
+        )}
       </div>
 
       <button

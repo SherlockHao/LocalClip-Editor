@@ -29,6 +29,7 @@ export interface SubtitleEntry {
   end_formatted: string;
   left_percent?: number;
   width_percent?: number;
+  speaker_id?: number;  // 新增：说话人ID
 }
 
 export interface ExportRequest {

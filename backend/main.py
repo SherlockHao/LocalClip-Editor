@@ -10,6 +10,13 @@ import json
 from video_processor import VideoProcessor
 from srt_parser import SRTParser
 
+# 添加对说话人识别功能的支持
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), 'speaker_diarization_processing'))
+from audio_extraction import AudioExtractor
+from embedding_extraction import SpeakerEmbeddingExtractor
+from speaker_clustering import SpeakerClusterer
+
 app = FastAPI(title="LocalClip Editor API", version="1.0.0")
 
 # 添加CORS中间件
@@ -35,6 +42,9 @@ app.mount("/exports", StaticFiles(directory=EXPORTS_DIR), name="exports")
 # 初始化处理器
 video_processor = VideoProcessor()
 srt_parser = SRTParser()
+
+# 全局变量用于存储说话人识别处理状态
+speaker_processing_status = {}
 
 @app.get("/")
 async def root():
@@ -117,6 +127,107 @@ async def get_videos():
     videos.sort(key=lambda x: UPLOADS_DIR.joinpath(x["filename"]).stat().st_mtime, reverse=True)
     
     return {"videos": videos}
+
+@app.post("/speaker-diarization/process")
+async def process_speaker_diarization(
+    video_filename: str,
+    subtitle_filename: str
+):
+    """启动说话人识别和聚类处理流程"""
+    try:
+        video_path = UPLOADS_DIR / video_filename
+        subtitle_path = UPLOADS_DIR / subtitle_filename
+        
+        if not video_path.exists():
+            raise HTTPException(status_code=404, detail="视频文件不存在")
+        if not subtitle_path.exists():
+            raise HTTPException(status_code=404, detail="字幕文件不存在")
+        
+        # 生成唯一的处理任务ID
+        task_id = str(uuid.uuid4())
+        
+        # 设置处理状态
+        speaker_processing_status[task_id] = {
+            "status": "processing",
+            "message": "正在提取音频片段...",
+            "progress": 0
+        }
+        
+        # 在后台执行处理
+        import asyncio
+        asyncio.create_task(run_speaker_diarization_process(task_id, str(video_path), str(subtitle_path)))
+        
+        return {
+            "task_id": task_id,
+            "message": "说话人识别任务已启动",
+            "status": "processing"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def run_speaker_diarization_process(task_id: str, video_path: str, subtitle_path: str):
+    """后台执行说话人识别和聚类处理"""
+    try:
+        # 更新状态
+        speaker_processing_status[task_id] = {
+            "status": "processing",
+            "message": "正在提取音频片段...",
+            "progress": 10
+        }
+        
+        # 提取音频片段
+        extractor = AudioExtractor(cache_dir=os.path.join("audio_cache", task_id))
+        audio_paths = extractor.extract_audio_segments(video_path, subtitle_path)
+        
+        # 更新状态
+        speaker_processing_status[task_id] = {
+            "status": "processing",
+            "message": "正在提取说话人嵌入...",
+            "progress": 40
+        }
+        
+        # 提取嵌入
+        embedding_extractor = SpeakerEmbeddingExtractor(offline_mode=True)
+        embeddings = embedding_extractor.extract_embeddings(audio_paths)
+        
+        # 更新状态
+        speaker_processing_status[task_id] = {
+            "status": "processing",
+            "message": "正在聚类识别说话人...",
+            "progress": 70
+        }
+        
+        # 聚类识别说话人
+        clusterer = SpeakerClusterer()
+        speaker_labels = clusterer.cluster_embeddings(embeddings)
+        
+        # 更新状态为完成
+        speaker_processing_status[task_id] = {
+            "status": "completed",
+            "message": "说话人识别完成",
+            "progress": 100,
+            "speaker_labels": speaker_labels,
+            "unique_speakers": clusterer.get_unique_speakers_count(speaker_labels)
+        }
+        
+    except Exception as e:
+        # 更新状态为失败
+        speaker_processing_status[task_id] = {
+            "status": "failed",
+            "message": f"处理失败: {str(e)}",
+            "progress": 0
+        }
+
+
+@app.get("/speaker-diarization/status/{task_id}")
+async def get_speaker_diarization_status(task_id: str):
+    """获取说话人识别处理状态"""
+    if task_id not in speaker_processing_status:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    return speaker_processing_status[task_id]
+
 
 @app.post("/export")
 async def export_video(
