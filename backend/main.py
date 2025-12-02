@@ -12,10 +12,12 @@ from srt_parser import SRTParser
 
 # 添加对说话人识别功能的支持
 import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), 'speaker_diarization_processing'))
+import os
+# 添加项目根目录到路径，以便导入speaker_diarization_processing模块
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'speaker_diarization_processing'))
 from audio_extraction import AudioExtractor
 from embedding_extraction import SpeakerEmbeddingExtractor
-from speaker_clustering import SpeakerClusterer
+from cluster_processor import SpeakerClusterer
 
 app = FastAPI(title="LocalClip Editor API", version="1.0.0")
 
@@ -128,15 +130,18 @@ async def get_videos():
     
     return {"videos": videos}
 
-@app.post("/speaker-diarization/process")
-async def process_speaker_diarization(
-    video_filename: str,
+from pydantic import BaseModel
+
+class SpeakerDiarizationRequest(BaseModel):
+    video_filename: str
     subtitle_filename: str
-):
+
+@app.post("/speaker-diarization/process")
+async def process_speaker_diarization(request: SpeakerDiarizationRequest):
     """启动说话人识别和聚类处理流程"""
     try:
-        video_path = UPLOADS_DIR / video_filename
-        subtitle_path = UPLOADS_DIR / subtitle_filename
+        video_path = UPLOADS_DIR / request.video_filename
+        subtitle_path = UPLOADS_DIR / request.subtitle_filename
         
         if not video_path.exists():
             raise HTTPException(status_code=404, detail="视频文件不存在")
@@ -177,7 +182,7 @@ async def run_speaker_diarization_process(task_id: str, video_path: str, subtitl
         }
         
         # 提取音频片段
-        extractor = AudioExtractor(cache_dir=os.path.join("audio_cache", task_id))
+        extractor = AudioExtractor(cache_dir=os.path.join("..", "audio_segments", task_id))
         audio_paths = extractor.extract_audio_segments(video_path, subtitle_path)
         
         # 更新状态

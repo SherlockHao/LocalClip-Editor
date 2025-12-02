@@ -13,7 +13,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'speaker_diarizati
 
 from audio_extraction import AudioExtractor
 from embedding_extraction import SpeakerEmbeddingExtractor
-from speaker_clustering import SpeakerClusterer
+from cluster_processor import SpeakerClusterer
 
 
 class SpeakerDiarizationProcessor:
