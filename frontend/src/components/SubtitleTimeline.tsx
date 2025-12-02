@@ -26,11 +26,10 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
   onEditSubtitle,
   onDeleteSubtitle
 }) => {
-  const timelineWidth = 1000; // 固定像素宽度，可以根据容器大小调整
-
   const handleTimelineClick = (e: React.MouseEvent<HTMLDivElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const clickPosition = e.clientX - rect.left;
+    const timelineWidth = rect.width; // 使用实际宽度而不是固定值
     const time = (clickPosition / timelineWidth) * duration;
     onSeek(time);
   };
@@ -63,11 +62,12 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
         <span>{new Date(duration * 1000).toISOString().substr(11, 8)}</span>
       </div>
       <div 
-        className="relative h-20 bg-gray-100 rounded cursor-pointer border border-gray-300"
+        className="relative h-20 bg-gray-200 rounded cursor-pointer border border-gray-300"
         onClick={handleTimelineClick}
+        style={{ width: '100%', maxWidth: '100%' }}
       >
         {/* 时间轴 */}
-        <div className="absolute top-0 left-0 w-full h-full flex">
+        <div className="absolute top-0 left-0 w-full h-full">
           {/* 字幕块 */}
           {subtitles.map((subtitle, index) => {
             const left = (subtitle.start_time / duration) * 100;
@@ -76,12 +76,18 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
             return (
               <div
                 key={index}
-                className={`absolute top-3 h-12 flex flex-col items-center justify-center border border-gray-400 rounded ${
+                className={`absolute top-3 h-12 flex flex-col items-center justify-center border border-gray-600 rounded-md ${
                   currentTime >= subtitle.start_time && currentTime <= subtitle.end_time
-                    ? 'bg-blue-500 text-white'
+                    ? 'bg-blue-600 text-white'  // 使用更深的蓝色
                     : subtitle.speaker_id !== undefined ? 
-                      `bg-slate-${100 + subtitle.speaker_id * 100} text-gray-800` : // 根据说话人ID设置不同颜色
-                      'bg-blue-200 text-gray-800'
+                      // 根据说话人ID设置不同颜色，使用更不透明的颜色
+                      subtitle.speaker_id % 6 === 0 ? 'bg-blue-400 text-gray-900' :
+                      subtitle.speaker_id % 6 === 1 ? 'bg-green-400 text-gray-900' :
+                      subtitle.speaker_id % 6 === 2 ? 'bg-yellow-400 text-gray-900' :
+                      subtitle.speaker_id % 6 === 3 ? 'bg-purple-400 text-gray-900' :
+                      subtitle.speaker_id % 6 === 4 ? 'bg-pink-400 text-gray-900' :
+                      'bg-indigo-400 text-gray-900' :  // speaker_id % 6 === 5
+                      'bg-blue-400 text-gray-900'  // 使用更深更不透明的蓝色
                 }`}
                 style={{
                   left: `${left}%`,
@@ -100,12 +106,12 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
 
         {/* 播放头 */}
         <div
-          className="absolute top-0 h-full w-0.5 bg-red-500 z-10"
+          className="absolute top-0 h-full w-0.5 bg-red-600 z-10"
           style={{
             left: `${(currentTime / duration) * 100}%`
           }}
         >
-          <div className="absolute -top-1 -ml-1.5 w-3 h-3 bg-red-500 rounded-full"></div>
+          <div className="absolute -top-1 -ml-1.5 w-3 h-3 bg-red-600 rounded-full"></div>
         </div>
       </div>
 
@@ -116,15 +122,30 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
             key={index}
             className={`p-2 rounded border ${
               currentTime >= subtitle.start_time && currentTime <= subtitle.end_time
-                ? 'bg-blue-100 border-blue-300'
-                : 'bg-white border-gray-200'
+                ? 'bg-blue-100 border-blue-500'  // 使用更深的边框颜色
+                : subtitle.speaker_id !== undefined ?
+                  // 根据说话人ID设置背景色
+                  subtitle.speaker_id % 6 === 0 ? 'bg-blue-50 border-blue-200' :
+                  subtitle.speaker_id % 6 === 1 ? 'bg-green-50 border-green-200' :
+                  subtitle.speaker_id % 6 === 2 ? 'bg-yellow-50 border-yellow-200' :
+                  subtitle.speaker_id % 6 === 3 ? 'bg-purple-50 border-purple-200' :
+                  subtitle.speaker_id % 6 === 4 ? 'bg-pink-50 border-pink-200' :
+                  'bg-indigo-50 border-indigo-200' :  // speaker_id % 6 === 5
+                  'bg-gray-50 border-gray-200'
             }`}
           >
             <div className="flex justify-between">
-              <span className="text-xs font-mono text-gray-500">
+              <span className="text-xs font-mono text-gray-600">
                 {subtitle.start_time_formatted} → {subtitle.end_time_formatted}
                 {subtitle.speaker_id !== undefined && (
-                  <span className="ml-2 bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded text-xs">
+                  <span className={`ml-2 px-1.5 py-0.5 rounded text-xs ${
+                    subtitle.speaker_id % 6 === 0 ? 'bg-blue-200 text-blue-800' :
+                    subtitle.speaker_id % 6 === 1 ? 'bg-green-200 text-green-800' :
+                    subtitle.speaker_id % 6 === 2 ? 'bg-yellow-200 text-yellow-800' :
+                    subtitle.speaker_id % 6 === 3 ? 'bg-purple-200 text-purple-800' :
+                    subtitle.speaker_id % 6 === 4 ? 'bg-pink-200 text-pink-800' :
+                    'bg-indigo-200 text-indigo-800'
+                  }`}>
                     说话人 {subtitle.speaker_id}
                   </span>
                 )}

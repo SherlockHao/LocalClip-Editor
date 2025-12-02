@@ -18,7 +18,7 @@ except ImportError as e:
 
 
 class SpeakerClusterer:
-    def __init__(self, n_clusters=None, metric='cosine', linkage='average', distance_threshold=0.71):
+    def __init__(self, n_clusters=None, metric='cosine', linkage='average', distance_threshold=0.9):
         """
         初始化说话人聚类器
         
