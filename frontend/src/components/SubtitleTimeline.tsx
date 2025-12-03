@@ -1,5 +1,4 @@
 import React from 'react';
-import { Trash2, Edit2, Play, Users } from 'lucide-react';
 
 interface Subtitle {
   start_time: number;
@@ -15,25 +14,21 @@ interface SubtitleTimelineProps {
   currentTime: number;
   duration: number;
   onSeek: (time: number) => void;
-  onEditSubtitle?: (index: number, newSubtitle: Subtitle) => void;
-  onDeleteSubtitle?: (index: number) => void;
 }
 
 const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
   subtitles,
   currentTime,
   duration,
-  onSeek,
-  onEditSubtitle,
-  onDeleteSubtitle
+  onSeek
 }) => {
   const speakerColors = [
-    { bg: 'bg-blue-500/30', border: 'border-blue-400/50', text: 'text-blue-300', badge: 'bg-blue-500/50 text-blue-200' },
-    { bg: 'bg-green-500/30', border: 'border-green-400/50', text: 'text-green-300', badge: 'bg-green-500/50 text-green-200' },
-    { bg: 'bg-yellow-500/30', border: 'border-yellow-400/50', text: 'text-yellow-300', badge: 'bg-yellow-500/50 text-yellow-200' },
-    { bg: 'bg-purple-500/30', border: 'border-purple-400/50', text: 'text-purple-300', badge: 'bg-purple-500/50 text-purple-200' },
-    { bg: 'bg-pink-500/30', border: 'border-pink-400/50', text: 'text-pink-300', badge: 'bg-pink-500/50 text-pink-200' },
-    { bg: 'bg-indigo-500/30', border: 'border-indigo-400/50', text: 'text-indigo-300', badge: 'bg-indigo-500/50 text-indigo-200' }
+    { bg: 'from-blue-600 to-blue-500', border: 'border-blue-400' },
+    { bg: 'from-green-600 to-green-500', border: 'border-green-400' },
+    { bg: 'from-yellow-600 to-yellow-500', border: 'border-yellow-400' },
+    { bg: 'from-purple-600 to-purple-500', border: 'border-purple-400' },
+    { bg: 'from-pink-600 to-pink-500', border: 'border-pink-400' },
+    { bg: 'from-indigo-600 to-indigo-500', border: 'border-indigo-400' }
   ];
 
   const getColorBySpacker = (speakerId: number | undefined) => {
@@ -49,37 +44,17 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
     onSeek(time);
   };
 
-  const handleDeleteSubtitle = (index: number) => {
-    if (onDeleteSubtitle) {
-      onDeleteSubtitle(index);
-    }
-  };
-
-  const handleEditSubtitle = (index: number) => {
-    if (onEditSubtitle) {
-      const currentSubtitle = subtitles[index];
-      const newText = prompt('编辑字幕文本:', currentSubtitle.text);
-      if (newText !== null) {
-        const updatedSubtitle = {
-          ...currentSubtitle,
-          text: newText
-        };
-        onEditSubtitle(index, updatedSubtitle);
-      }
-    }
-  };
-
   return (
     <div className="w-full">
       {/* 时间轴标签 */}
-      <div className="flex justify-between text-xs font-mono text-slate-400 mb-2">
-        <span>00:00</span>
-        <span>{new Date(duration * 1000).toISOString().substr(11, 8)}</span>
+      <div className="flex justify-between text-xs font-mono text-slate-400 mb-3">
+        <span className="font-semibold">00:00</span>
+        <span className="font-semibold">{new Date(duration * 1000).toISOString().substr(11, 8)}</span>
       </div>
 
       {/* 主时间轴 */}
       <div 
-        className="relative h-24 bg-gradient-to-b from-slate-700 to-slate-800 rounded-lg cursor-pointer border border-slate-600 hover:border-slate-500 transition-colors shadow-lg overflow-hidden"
+        className="relative h-28 bg-gradient-to-b from-slate-700 to-slate-800 rounded-lg cursor-pointer border-2 border-slate-600 hover:border-slate-500 transition-colors shadow-lg overflow-hidden"
         onClick={handleTimelineClick}
       >
         {/* 背景网格 */}
@@ -104,28 +79,29 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
             return (
               <div
                 key={index}
-                className={`absolute top-2.5 h-16 flex flex-col items-center justify-center rounded-md overflow-hidden border-2 transition-all duration-200 cursor-pointer group
+                className={`absolute top-3 h-20 flex flex-col items-center justify-center rounded-md overflow-hidden border-2 transition-all duration-200 cursor-pointer group
                   ${isPlaying 
-                    ? 'bg-gradient-to-br from-blue-600 to-blue-500 border-blue-300 shadow-lg shadow-blue-500/50 scale-105' 
-                    : `${colors.bg} border-slate-500 hover:border-blue-400 hover:shadow-md`
+                    ? `bg-gradient-to-br ${colors.bg} ${colors.border} shadow-lg scale-110` 
+                    : `bg-slate-600/40 border-slate-500 hover:border-slate-300 hover:shadow-md hover:bg-slate-600/60`
                   }`}
                 style={{
                   left: `${left}%`,
-                  width: `${Math.max(width, 2)}%`,
-                  minWidth: '50px'
+                  width: `${Math.max(width, 2.5)}%`,
+                  minWidth: '45px'
                 }}
                 onClick={(e) => {
                   e.stopPropagation();
                   onSeek(subtitle.start_time);
                 }}
+                title={subtitle.text}
               >
                 {subtitle.speaker_id !== undefined && (
                   <span className={`text-xs font-bold truncate max-w-[70px] ${isPlaying ? 'text-white' : 'text-slate-300'}`}>
-                    说话人 {subtitle.speaker_id}
+                    说话人{subtitle.speaker_id}
                   </span>
                 )}
                 <span className={`text-xs px-1 truncate max-w-full text-center leading-tight ${isPlaying ? 'text-white' : 'text-slate-300'}`}>
-                  {subtitle.text.length > 20 ? `${subtitle.text.substring(0, 20)}...` : subtitle.text}
+                  {subtitle.text.length > 15 ? `${subtitle.text.substring(0, 15)}...` : subtitle.text}
                 </span>
               </div>
             );
@@ -139,77 +115,13 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
             left: `${(currentTime / duration) * 100}%`
           }}
         >
-          <div className="absolute -top-1.5 -left-1.5 w-4 h-4 bg-red-500 border-2 border-white rounded-full shadow-lg"></div>
+          <div className="absolute -top-2 -left-2 w-5 h-5 bg-red-500 border-2 border-white rounded-full shadow-lg"></div>
         </div>
       </div>
 
-      {/* 字幕列表区域 */}
-      <div className="mt-5 space-y-2 max-h-56 overflow-y-auto">
-        {subtitles.length === 0 ? (
-          <div className="text-center py-8 text-slate-400">
-            <p className="text-sm">暂无字幕</p>
-          </div>
-        ) : (
-          subtitles.map((subtitle, index) => {
-            const isPlaying = currentTime >= subtitle.start_time && currentTime <= subtitle.end_time;
-            const colors = getColorBySpacker(subtitle.speaker_id);
-            
-            return (
-              <div 
-                key={index}
-                className={`p-3.5 rounded-lg border-2 transition-all duration-200 group
-                  ${isPlaying
-                    ? 'bg-blue-500/20 border-blue-400 shadow-lg shadow-blue-500/20'
-                    : `${colors.bg} border-slate-600 hover:border-slate-500`
-                  }`}
-              >
-                {/* 时间戳和操作按钮 */}
-                <div className="flex justify-between items-center mb-2.5">
-                  <span className={`text-xs font-mono font-semibold ${isPlaying ? 'text-blue-300' : 'text-slate-400'}`}>
-                    {subtitle.start_time_formatted} → {subtitle.end_time_formatted}
-                  </span>
-                  <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    {subtitle.speaker_id !== undefined && (
-                      <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded ${colors.badge}`}>
-                        <Users size={12} />
-                        说话人 {subtitle.speaker_id}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* 字幕文本 */}
-                <p className={`text-sm leading-relaxed mb-3 ${isPlaying ? 'text-slate-100 font-medium' : 'text-slate-300'}`}>
-                  {subtitle.text}
-                </p>
-
-                {/* 操作按钮 */}
-                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button 
-                    className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold bg-blue-600/20 border border-blue-500/30 text-blue-300 px-2.5 py-1.5 rounded hover:bg-blue-600/40 hover:border-blue-400/50 transition-colors"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleEditSubtitle(index);
-                    }}
-                  >
-                    <Edit2 size={14} />
-                    编辑
-                  </button>
-                  <button 
-                    className="flex-1 flex items-center justify-center gap-1.5 text-xs font-semibold bg-red-600/20 border border-red-500/30 text-red-300 px-2.5 py-1.5 rounded hover:bg-red-600/40 hover:border-red-400/50 transition-colors"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteSubtitle(index);
-                    }}
-                  >
-                    <Trash2 size={14} />
-                    删除
-                  </button>
-                </div>
-              </div>
-            );
-          })
-        )}
+      {/* 提示信息 */}
+      <div className="mt-3 text-xs text-slate-500 text-center font-medium">
+        点击时间轴或字幕卡片快速定位 • 总共 {subtitles.length} 条字幕
       </div>
     </div>
   );

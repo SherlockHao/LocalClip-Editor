@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Upload, Video, Clock, Settings, Play, Pause, RotateCcw, Zap } from 'lucide-react';
 import VideoPlayer from './components/VideoPlayer';
 import SubtitleTimeline from './components/SubtitleTimeline';
+import SubtitleDetails from './components/SubtitleDetails';
 import Sidebar from './components/Sidebar';
 import PropertiesPanel from './components/PropertiesPanel';
 
@@ -240,7 +241,7 @@ const App: React.FC = () => {
 
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      {/* 顶部工具栏 - 现代设计 */}
+      {/* 顶部工具栏 */}
       <header className="bg-gradient-to-r from-slate-900 to-slate-800 border-b border-slate-700 px-6 py-4 flex items-center justify-between shadow-lg backdrop-blur-sm bg-opacity-95">
         <div className="flex items-center space-x-3">
           <div className="p-2 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg shadow-lg">
@@ -267,67 +268,78 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      {/* 主内容区域 */}
+      {/* 主内容区域 - 新布局 */}
       <div className="flex flex-1 overflow-hidden gap-3 p-3">
-        {/* 左侧边栏 */}
+        {/* 左侧边栏（素材库）- 不变 */}
         <Sidebar 
           videos={videos}
           onVideoSelect={setCurrentVideo}
           onVideoUpload={handleVideoUpload}
-          onSubtitleUpload={(file) => {
-            handleSubtitleUpload(file);
-          }}
+          onSubtitleUpload={handleSubtitleUpload}
         />
 
-        {/* 中央视频预览区 */}
-        <main className="flex-1 flex flex-col overflow-y-auto gap-3">
-          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl shadow-xl border border-slate-700 flex flex-col min-h-[500px] overflow-hidden">
-            {/* 视频头部信息 */}
-            <div className="p-5 border-b border-slate-700 flex items-center justify-between bg-gradient-to-r from-slate-800 via-slate-800 to-slate-900">
-              <h2 className="text-lg font-semibold text-slate-100">
-                {currentVideo ? currentVideo.original_name : '视频预览'}
-              </h2>
-              <div className="flex items-center space-x-6 text-sm text-slate-300">
-                <div className="flex items-center space-x-2 bg-slate-700/50 px-3 py-1.5 rounded-lg">
-                  <Clock size={16} className="text-blue-400" />
-                  <span className="font-mono">{currentTime.toFixed(2)}s / {duration.toFixed(2)}s</span>
+        {/* 中央区域（新布局：上方播放器+信息，下方时间轴） */}
+        <div className="flex-1 flex flex-col overflow-hidden gap-3">
+          {/* 上层：字幕详情 + 播放器 */}
+          <div className="flex gap-3 flex-1 overflow-hidden">
+            {/* 左侧：字幕详细信息列表 */}
+            <SubtitleDetails
+              subtitles={subtitles}
+              currentTime={currentTime}
+              onEditSubtitle={handleEditSubtitle}
+              onDeleteSubtitle={handleDeleteSubtitle}
+              onSeek={handleSeek}
+            />
+
+            {/* 右侧：播放器 + 视频信息 */}
+            <div className="flex-1 flex flex-col overflow-hidden bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl shadow-xl border border-slate-700">
+              {/* 视频头部信息 */}
+              <div className="p-5 border-b border-slate-700 flex items-center justify-between bg-gradient-to-r from-slate-800 via-slate-800 to-slate-900 flex-shrink-0">
+                <h2 className="text-lg font-semibold text-slate-100">
+                  {currentVideo ? currentVideo.original_name : '视频预览'}
+                </h2>
+                <div className="flex items-center space-x-6 text-sm text-slate-300">
+                  <div className="flex items-center space-x-2 bg-slate-700/50 px-3 py-1.5 rounded-lg">
+                    <Clock size={16} className="text-blue-400" />
+                    <span className="font-mono">{currentTime.toFixed(2)}s / {duration.toFixed(2)}s</span>
+                  </div>
+                  {currentVideo && (
+                    <span className="bg-gradient-to-r from-blue-600/20 to-purple-600/20 px-3 py-1.5 rounded-lg border border-blue-500/30 text-blue-300 font-medium">
+                      {currentVideo.video_info.resolution}
+                    </span>
+                  )}
                 </div>
-                {currentVideo && (
-                  <span className="bg-gradient-to-r from-blue-600/20 to-purple-600/20 px-3 py-1.5 rounded-lg border border-blue-500/30 text-blue-300 font-medium">
-                    {currentVideo.video_info.resolution}
-                  </span>
+              </div>
+
+              {/* 视频播放器区域 */}
+              <div className="flex-1 flex items-center justify-center bg-black/40 overflow-hidden">
+                {currentVideo ? (
+                  <VideoPlayer
+                    videoRef={videoRef}
+                    src={`/uploads/${currentVideo.filename}`}
+                    key={`/uploads/${currentVideo.filename}`}
+                    onTimeUpdate={handleTimeUpdate}
+                    onLoadedMetadata={handleLoadedMetadata}
+                    isPlaying={isPlaying}
+                    currentTime={currentTime}
+                    duration={duration}
+                  />
+                ) : (
+                  <div className="text-center text-slate-400">
+                    <div className="mb-4 flex justify-center">
+                      <div className="p-4 bg-slate-700/30 rounded-full">
+                        <Video size={64} className="opacity-60" />
+                      </div>
+                    </div>
+                    <p className="text-lg font-medium">请在左侧上传视频文件</p>
+                    <p className="text-sm text-slate-500 mt-1">支持 MP4、MOV、AVI 等常见格式</p>
+                  </div>
                 )}
               </div>
             </div>
-
-            {/* 视频播放器区域 */}
-            <div className="flex-1 flex items-center justify-center bg-black/40 min-h-[400px]">
-              {currentVideo ? (
-                <VideoPlayer
-                  videoRef={videoRef}
-                  src={`/uploads/${currentVideo.filename}`}
-                  key={`/uploads/${currentVideo.filename}`}
-                  onTimeUpdate={handleTimeUpdate}
-                  onLoadedMetadata={handleLoadedMetadata}
-                  isPlaying={isPlaying}
-                  currentTime={currentTime}
-                  duration={duration}
-                />
-              ) : (
-                <div className="text-center text-slate-400">
-                  <div className="mb-4 flex justify-center">
-                    <div className="p-4 bg-slate-700/30 rounded-full">
-                      <Video size={64} className="opacity-60" />
-                    </div>
-                  </div>
-                  <p className="text-lg font-medium">请在左侧上传视频文件</p>
-                  <p className="text-sm text-slate-500 mt-1">支持 MP4、MOV、AVI 等常见格式</p>
-                </div>
-              )}
-            </div>
           </div>
 
-          {/* 字幕时间轴 */}
+          {/* 下层：时间轴 */}
           {subtitles.length > 0 && (
             <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl shadow-xl border border-slate-700 p-5 flex-shrink-0">
               <div className="flex items-center space-x-2 mb-4">
@@ -342,14 +354,12 @@ const App: React.FC = () => {
                 currentTime={currentTime}
                 duration={duration}
                 onSeek={handleSeek}
-                onEditSubtitle={handleEditSubtitle}
-                onDeleteSubtitle={handleDeleteSubtitle}
               />
             </div>
           )}
-        </main>
+        </div>
 
-        {/* 右侧属性面板 */}
+        {/* 右侧属性面板 - 不变 */}
         <PropertiesPanel
           exportSettings={exportSettings}
           onExportSettingsChange={setExportSettings}
