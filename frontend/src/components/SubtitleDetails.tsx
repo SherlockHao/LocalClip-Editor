@@ -37,7 +37,6 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingText, setEditingText] = useState<string>('');
-  const [editingSpeakerId, setEditingSpeakerId] = useState<number | undefined>(undefined);
 
   const uniqueSpeakers = getUniqueSpeakers(subtitles);
 
@@ -90,7 +89,6 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
   const handleStartEdit = (index: number) => {
     setEditingIndex(index);
     setEditingText(subtitles[index].text);
-    setEditingSpeakerId(subtitles[index].speaker_id);
   };
 
   const handleSaveEdit = (index: number) => {
@@ -98,20 +96,28 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
       const currentSubtitle = subtitles[index];
       const updatedSubtitle = {
         ...currentSubtitle,
-        text: editingText,
-        speaker_id: editingSpeakerId
+        text: editingText
       };
       onEditSubtitle(index, updatedSubtitle);
     }
     setEditingIndex(null);
     setEditingText('');
-    setEditingSpeakerId(undefined);
   };
 
   const handleCancelEdit = () => {
     setEditingIndex(null);
     setEditingText('');
-    setEditingSpeakerId(undefined);
+  };
+
+  const handleSpeakerChange = (index: number, speakerId: number | undefined) => {
+    if (onEditSubtitle) {
+      const currentSubtitle = subtitles[index];
+      const updatedSubtitle = {
+        ...currentSubtitle,
+        speaker_id: speakerId
+      };
+      onEditSubtitle(index, updatedSubtitle);
+    }
   };
 
   const handleSubtitleClick = (index: number) => {
@@ -172,54 +178,39 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
                 </span>
               </div>
 
-              {/* 说话人标记 */}
-              {subtitle.speaker_id !== undefined && (
-                <div className="mb-2">
-                  <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded ${colors.badge}`}>
-                    <Users size={12} />
-                    说话人 {subtitle.speaker_id}
-                  </span>
+              {/* 说话人选择 */}
+              {uniqueSpeakers.length > 0 && (
+                <div className="mb-2" onClick={(e) => e.stopPropagation()}>
+                  <select
+                    value={subtitle.speaker_id ?? ''}
+                    onChange={(e) => handleSpeakerChange(index, e.target.value ? Number(e.target.value) : undefined)}
+                    className={`text-xs font-semibold px-2 py-1 rounded border-2 transition-colors ${
+                      subtitle.speaker_id !== undefined
+                        ? `${colors.badge} border-transparent`
+                        : 'bg-slate-700/50 text-slate-400 border-slate-600'
+                    } hover:border-blue-400/50 focus:outline-none focus:ring-2 focus:ring-blue-500/50 cursor-pointer`}
+                  >
+                    <option value="">选择说话人</option>
+                    {uniqueSpeakers.map(speakerId => (
+                      <option key={speakerId} value={speakerId}>
+                        说话人 {speakerId}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               )}
 
               {/* 字幕文本 */}
               {editingIndex === index ? (
                 // 编辑模式
-                <div className="mb-3 space-y-2" onClick={(e) => e.stopPropagation()}>
-                  {/* 说话人选择 */}
-                  {uniqueSpeakers.length > 0 && (
-                    <div>
-                      <label className="text-xs font-semibold text-slate-400 mb-1 block">
-                        说话人
-                      </label>
-                      <select
-                        value={editingSpeakerId ?? ''}
-                        onChange={(e) => setEditingSpeakerId(e.target.value ? Number(e.target.value) : undefined)}
-                        className="w-full text-xs bg-slate-700/50 text-slate-100 border border-blue-500/50 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                      >
-                        <option value="">未指定说话人</option>
-                        {uniqueSpeakers.map(speakerId => (
-                          <option key={speakerId} value={speakerId}>
-                            说话人 {speakerId}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-
-                  {/* 字幕文本 */}
-                  <div>
-                    <label className="text-xs font-semibold text-slate-400 mb-1 block">
-                      字幕文本
-                    </label>
-                    <textarea
-                      value={editingText}
-                      onChange={(e) => setEditingText(e.target.value)}
-                      className="w-full text-xs leading-relaxed bg-slate-700/50 text-slate-100 border border-blue-500/50 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/50 resize-none"
-                      rows={3}
-                      autoFocus
-                    />
-                  </div>
+                <div className="mb-3" onClick={(e) => e.stopPropagation()}>
+                  <textarea
+                    value={editingText}
+                    onChange={(e) => setEditingText(e.target.value)}
+                    className="w-full text-xs leading-relaxed bg-slate-700/50 text-slate-100 border border-blue-500/50 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/50 resize-none"
+                    rows={3}
+                    autoFocus
+                  />
                 </div>
               ) : (
                 // 显示模式
