@@ -5,6 +5,7 @@ import SubtitleTimeline from './components/SubtitleTimeline';
 import SubtitleDetails from './components/SubtitleDetails';
 import Sidebar from './components/Sidebar';
 import PropertiesPanel from './components/PropertiesPanel';
+import NotificationModal from './components/NotificationModal';
 
 interface VideoFile {
   filename: string;
@@ -44,6 +45,12 @@ const App: React.FC = () => {
   });
   const [isProcessingSpeakerDiarization, setIsProcessingSpeakerDiarization] = useState(false);
   const [speakerDiarizationTaskId, setSpeakerDiarizationTaskId] = useState<string | null>(null);
+  const [showNotification, setShowNotification] = useState(false);
+  const [notificationData, setNotificationData] = useState({
+    title: '',
+    message: '',
+    uniqueSpeakers: undefined as number | undefined
+  });
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const isSeekingRef = useRef<boolean>(false);
@@ -313,13 +320,28 @@ const App: React.FC = () => {
           });
           setSubtitles(updatedSubtitles);
         }
-        
+
         setIsProcessingSpeakerDiarization(false);
         setSpeakerDiarizationTaskId(null);
-        alert(`说话人识别完成！识别出 ${status.unique_speakers} 个不同说话人`);
+
+        // 显示成功通知
+        setNotificationData({
+          title: '说话人识别完成',
+          message: '已成功完成说话人识别并标记到字幕中，你现在可以在字幕详情中查看和编辑说话人信息。',
+          uniqueSpeakers: status.unique_speakers
+        });
+        setShowNotification(true);
       } else if (status.status === 'failed') {
         console.error('说话人识别失败:', status.message);
-        alert('说话人识别失败: ' + status.message);
+
+        // 显示失败通知
+        setNotificationData({
+          title: '说话人识别失败',
+          message: status.message || '处理过程中发生错误，请重试。',
+          uniqueSpeakers: undefined
+        });
+        setShowNotification(true);
+
         setIsProcessingSpeakerDiarization(false);
         setSpeakerDiarizationTaskId(null);
       } else {
@@ -335,6 +357,15 @@ const App: React.FC = () => {
 
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      {/* 通知模态框 */}
+      <NotificationModal
+        isOpen={showNotification}
+        onClose={() => setShowNotification(false)}
+        title={notificationData.title}
+        message={notificationData.message}
+        uniqueSpeakers={notificationData.uniqueSpeakers}
+      />
+
       {/* 顶部工具栏 */}
       <header className="bg-gradient-to-r from-slate-900 to-slate-800 border-b border-slate-700 px-6 py-4 flex items-center justify-between shadow-lg backdrop-blur-sm bg-opacity-95">
         <div className="flex items-center space-x-3">

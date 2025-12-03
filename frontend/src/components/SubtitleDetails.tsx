@@ -1,5 +1,5 @@
-import React, { useEffect, useRef } from 'react';
-import { Trash2, Edit2, Users, FileText } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Trash2, Edit2, Users, FileText, Save, X } from 'lucide-react';
 
 interface Subtitle {
   start_time: number;
@@ -18,6 +18,14 @@ interface SubtitleDetailsProps {
   onSeek?: (time: number) => void;
 }
 
+// 获取所有唯一的说话人ID
+const getUniqueSpeakers = (subtitles: Subtitle[]): number[] => {
+  const speakerIds = subtitles
+    .map(sub => sub.speaker_id)
+    .filter((id): id is number => id !== undefined);
+  return Array.from(new Set(speakerIds)).sort((a, b) => a - b);
+};
+
 const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
   subtitles,
   currentTime,
@@ -27,6 +35,11 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
 }) => {
   const activeSubtitleRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editingText, setEditingText] = useState<string>('');
+  const [editingSpeakerId, setEditingSpeakerId] = useState<number | undefined>(undefined);
+
+  const uniqueSpeakers = getUniqueSpeakers(subtitles);
 
   const speakerColors = [
     { bg: 'bg-blue-500/30', border: 'border-blue-400/50', text: 'text-blue-300', badge: 'bg-blue-500/50 text-blue-200' },
@@ -74,18 +87,31 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
     }
   };
 
-  const handleEditSubtitle = (index: number) => {
+  const handleStartEdit = (index: number) => {
+    setEditingIndex(index);
+    setEditingText(subtitles[index].text);
+    setEditingSpeakerId(subtitles[index].speaker_id);
+  };
+
+  const handleSaveEdit = (index: number) => {
     if (onEditSubtitle) {
       const currentSubtitle = subtitles[index];
-      const newText = prompt('编辑字幕文本:', currentSubtitle.text);
-      if (newText !== null) {
-        const updatedSubtitle = {
-          ...currentSubtitle,
-          text: newText
-        };
-        onEditSubtitle(index, updatedSubtitle);
-      }
+      const updatedSubtitle = {
+        ...currentSubtitle,
+        text: editingText,
+        speaker_id: editingSpeakerId
+      };
+      onEditSubtitle(index, updatedSubtitle);
     }
+    setEditingIndex(null);
+    setEditingText('');
+    setEditingSpeakerId(undefined);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingIndex(null);
+    setEditingText('');
+    setEditingSpeakerId(undefined);
   };
 
   const handleSubtitleClick = (index: number) => {
@@ -142,7 +168,7 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
                   #{index + 1}
                 </span>
                 <span className={`text-xs font-mono font-semibold ${isPlaying ? 'text-blue-300' : 'text-slate-500'}`}>
-                  {subtitle.start_time_formatted}
+                  {subtitle.start_time_formatted} - {subtitle.end_time_formatted}
                 </span>
               </div>
 
@@ -157,33 +183,95 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
               )}
 
               {/* 字幕文本 */}
-              <p className={`text-xs leading-relaxed mb-3 line-clamp-2 ${isPlaying ? 'text-slate-100 font-semibold' : 'text-slate-300'}`}>
-                {subtitle.text}
-              </p>
+              {editingIndex === index ? (
+                // 编辑模式
+                <div className="mb-3 space-y-2" onClick={(e) => e.stopPropagation()}>
+                  {/* 说话人选择 */}
+                  {uniqueSpeakers.length > 0 && (
+                    <div>
+                      <label className="text-xs font-semibold text-slate-400 mb-1 block">
+                        说话人
+                      </label>
+                      <select
+                        value={editingSpeakerId ?? ''}
+                        onChange={(e) => setEditingSpeakerId(e.target.value ? Number(e.target.value) : undefined)}
+                        className="w-full text-xs bg-slate-700/50 text-slate-100 border border-blue-500/50 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                      >
+                        <option value="">未指定说话人</option>
+                        {uniqueSpeakers.map(speakerId => (
+                          <option key={speakerId} value={speakerId}>
+                            说话人 {speakerId}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {/* 字幕文本 */}
+                  <div>
+                    <label className="text-xs font-semibold text-slate-400 mb-1 block">
+                      字幕文本
+                    </label>
+                    <textarea
+                      value={editingText}
+                      onChange={(e) => setEditingText(e.target.value)}
+                      className="w-full text-xs leading-relaxed bg-slate-700/50 text-slate-100 border border-blue-500/50 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/50 resize-none"
+                      rows={3}
+                      autoFocus
+                    />
+                  </div>
+                </div>
+              ) : (
+                // 显示模式
+                <p className={`text-xs leading-relaxed mb-3 ${isPlaying ? 'text-slate-100 font-semibold' : 'text-slate-300'}`}>
+                  {subtitle.text}
+                </p>
+              )}
 
               {/* 操作按钮 */}
-              <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button 
-                  className="flex-1 flex items-center justify-center gap-1 text-xs font-semibold bg-blue-600/30 border border-blue-500/40 text-blue-300 px-2 py-1.5 rounded hover:bg-blue-600/50 hover:border-blue-400/60 transition-colors"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleEditSubtitle(index);
-                  }}
-                >
-                  <Edit2 size={12} />
-                  编辑
-                </button>
-                <button 
-                  className="flex-1 flex items-center justify-center gap-1 text-xs font-semibold bg-red-600/30 border border-red-500/40 text-red-300 px-2 py-1.5 rounded hover:bg-red-600/50 hover:border-red-400/60 transition-colors"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeleteSubtitle(index);
-                  }}
-                >
-                  <Trash2 size={12} />
-                  删除
-                </button>
-              </div>
+              {editingIndex === index ? (
+                // 编辑模式的按钮
+                <div className="flex gap-1.5" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    className="flex-1 flex items-center justify-center gap-1 text-xs font-semibold bg-green-600/30 border border-green-500/40 text-green-300 px-2 py-1.5 rounded hover:bg-green-600/50 hover:border-green-400/60 transition-colors"
+                    onClick={() => handleSaveEdit(index)}
+                  >
+                    <Save size={12} />
+                    保存
+                  </button>
+                  <button
+                    className="flex-1 flex items-center justify-center gap-1 text-xs font-semibold bg-gray-600/30 border border-gray-500/40 text-gray-300 px-2 py-1.5 rounded hover:bg-gray-600/50 hover:border-gray-400/60 transition-colors"
+                    onClick={handleCancelEdit}
+                  >
+                    <X size={12} />
+                    取消
+                  </button>
+                </div>
+              ) : (
+                // 普通模式的按钮
+                <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    className="flex-1 flex items-center justify-center gap-1 text-xs font-semibold bg-blue-600/30 border border-blue-500/40 text-blue-300 px-2 py-1.5 rounded hover:bg-blue-600/50 hover:border-blue-400/60 transition-colors"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleStartEdit(index);
+                    }}
+                  >
+                    <Edit2 size={12} />
+                    编辑
+                  </button>
+                  <button
+                    className="flex-1 flex items-center justify-center gap-1 text-xs font-semibold bg-red-600/30 border border-red-500/40 text-red-300 px-2 py-1.5 rounded hover:bg-red-600/50 hover:border-red-400/60 transition-colors"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteSubtitle(index);
+                    }}
+                  >
+                    <Trash2 size={12} />
+                    删除
+                  </button>
+                </div>
+              )}
             </div>
           );
         })}
