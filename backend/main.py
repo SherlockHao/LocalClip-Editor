@@ -1,11 +1,13 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import StreamingResponse, FileResponse
 import os
 import uuid
 from pathlib import Path
 from typing import Optional
 import json
+import re
 
 from video_processor import VideoProcessor
 from srt_parser import SRTParser
@@ -37,8 +39,69 @@ EXPORTS_DIR = Path("exports")
 UPLOADS_DIR.mkdir(exist_ok=True)
 EXPORTS_DIR.mkdir(exist_ok=True)
 
-# 挂载静态文件目录
-app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
+# 自定义视频路由，支持 Range 请求
+@app.get("/uploads/{filename}")
+async def serve_video(filename: str, request: Request):
+    """提供支持 HTTP Range 请求的视频流式传输"""
+    file_path = UPLOADS_DIR / filename
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="文件未找到")
+
+    file_size = file_path.stat().st_size
+    range_header = request.headers.get("range")
+
+    # 如果没有 Range 请求头，返回整个文件
+    if not range_header:
+        return FileResponse(
+            file_path,
+            media_type="video/mp4",
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(file_size),
+            }
+        )
+
+    # 解析 Range 请求头
+    range_match = re.match(r"bytes=(\d+)-(\d*)", range_header)
+    if not range_match:
+        raise HTTPException(status_code=416, detail="Invalid range")
+
+    start = int(range_match.group(1))
+    end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+
+    # 确保范围有效
+    if start >= file_size or end >= file_size or start > end:
+        raise HTTPException(status_code=416, detail="Range not satisfiable")
+
+    chunk_size = end - start + 1
+
+    # 读取文件的指定范围
+    def iterfile():
+        with open(file_path, "rb") as f:
+            f.seek(start)
+            remaining = chunk_size
+            while remaining > 0:
+                chunk = f.read(min(8192, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    # 返回 206 Partial Content
+    return StreamingResponse(
+        iterfile(),
+        status_code=206,
+        media_type="video/mp4",
+        headers={
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(chunk_size),
+        }
+    )
+
+# 挂载静态文件目录（用于其他非视频文件）
+# 注意：视频文件会被上面的路由优先处理
 app.mount("/exports", StaticFiles(directory=EXPORTS_DIR), name="exports")
 
 # 初始化处理器

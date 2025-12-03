@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Trash2, Edit2, Users, FileText } from 'lucide-react';
 
 interface Subtitle {
@@ -25,6 +25,9 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
   onDeleteSubtitle,
   onSeek
 }) => {
+  const activeSubtitleRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
   const speakerColors = [
     { bg: 'bg-blue-500/30', border: 'border-blue-400/50', text: 'text-blue-300', badge: 'bg-blue-500/50 text-blue-200' },
     { bg: 'bg-green-500/30', border: 'border-green-400/50', text: 'text-green-300', badge: 'bg-green-500/50 text-green-200' },
@@ -38,6 +41,32 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
     if (speakerId === undefined) return speakerColors[0];
     return speakerColors[speakerId % speakerColors.length];
   };
+
+  // 自动滚动到当前播放的字幕
+  useEffect(() => {
+    if (activeSubtitleRef.current && containerRef.current) {
+      const container = containerRef.current;
+      const activeElement = activeSubtitleRef.current;
+
+      // 计算元素相对于容器的位置
+      const containerRect = container.getBoundingClientRect();
+      const elementRect = activeElement.getBoundingClientRect();
+
+      // 检查元素是否在可视区域内
+      const isVisible =
+        elementRect.top >= containerRect.top &&
+        elementRect.bottom <= containerRect.bottom;
+
+      // 如果不在可视区域，滚动到元素位置
+      if (!isVisible) {
+        activeElement.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+          inline: 'nearest'
+        });
+      }
+    }
+  }, [currentTime, subtitles]);
 
   const handleDeleteSubtitle = (index: number) => {
     if (onDeleteSubtitle) {
@@ -91,14 +120,15 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
       </div>
 
       {/* 字幕列表 */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
+      <div ref={containerRef} className="flex-1 overflow-y-auto p-4 space-y-2.5">
         {subtitles.map((subtitle, index) => {
           const isPlaying = currentTime >= subtitle.start_time && currentTime <= subtitle.end_time;
           const colors = getColorBySpacker(subtitle.speaker_id);
-          
+
           return (
-            <div 
+            <div
               key={index}
+              ref={isPlaying ? activeSubtitleRef : null}
               onClick={() => handleSubtitleClick(index)}
               className={`p-3 rounded-lg border-2 transition-all duration-200 group cursor-pointer
                 ${isPlaying

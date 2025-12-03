@@ -33,19 +33,29 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const handleError = (e) => {
       console.error("视频加载错误:", e);
     };
+    const handleSeeking = () => {
+      console.log('[VideoPlayer] seeking 事件，当前时间:', video.currentTime);
+    };
+    const handleSeeked = () => {
+      console.log('[VideoPlayer] seeked 事件，最终时间:', video.currentTime);
+    };
 
     video.addEventListener('timeupdate', handleTimeUpdateEvent);
     video.addEventListener('loadedmetadata', handleLoadedMetadataEvent);
     video.addEventListener('error', handleError);
+    video.addEventListener('seeking', handleSeeking);
+    video.addEventListener('seeked', handleSeeked);
 
     return () => {
       video.removeEventListener('timeupdate', handleTimeUpdateEvent);
       video.removeEventListener('loadedmetadata', handleLoadedMetadataEvent);
       video.removeEventListener('error', handleError);
+      video.removeEventListener('seeking', handleSeeking);
+      video.removeEventListener('seeked', handleSeeked);
     };
   }, [videoRef, onTimeUpdate, onLoadedMetadata]);
 
-  // 当播放状态变化时控制视频 - 使用useCallback优化
+  // 当播放状态变化时控制视频
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -61,18 +71,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       video.pause();
     }
   }, [isPlaying]);
-
-  // 仅在视频加载完成且视频时间与状态时间差异较大时更新视频时间
-  // 避免频繁更新导致性能问题或跳转冲突
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || !hasLoaded) return;
-
-    // 只有当时间差异较大时才更新（>1秒），避免频繁同步导致跳转问题
-    if (Math.abs(video.currentTime - currentTime) > 1.0) {
-      video.currentTime = currentTime;
-    }
-  }, [currentTime, hasLoaded]);
 
   return (
     <div className="w-full h-full flex items-center justify-center relative bg-black">

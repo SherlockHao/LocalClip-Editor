@@ -41,6 +41,7 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
     const clickPosition = e.clientX - rect.left;
     const timelineWidth = rect.width;
     const time = (clickPosition / timelineWidth) * duration;
+    console.log('=== [SubtitleTimeline] 点击进度条，计算时间:', time, '秒 ===');
     onSeek(time);
   };
 
@@ -91,6 +92,7 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
                 }}
                 onClick={(e) => {
                   e.stopPropagation();
+                  console.log('=== [SubtitleTimeline] 点击字幕块，跳转到:', subtitle.start_time, '秒 ===');
                   onSeek(subtitle.start_time);
                 }}
                 title={subtitle.text}
