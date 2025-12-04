@@ -114,6 +114,10 @@ speaker_processing_status = {}
 # 全局变量用于存储语音克隆处理状态
 voice_cloning_status = {}
 
+# 全局缓存：存储已提取的音频片段信息，避免重复提取
+# key: (video_filename, subtitle_filename), value: {"audio_paths": [...], "speaker_labels": [...], "audio_dir": "..."}
+audio_extraction_cache = {}
+
 @app.get("/")
 async def root():
     return {"message": "LocalClip Editor API"}
@@ -246,33 +250,46 @@ async def run_speaker_diarization_process(task_id: str, video_path: str, subtitl
             "message": "正在提取音频片段...",
             "progress": 10
         }
-        
+
         # 提取音频片段
-        extractor = AudioExtractor(cache_dir=os.path.join("..", "audio_segments", task_id))
+        audio_dir = os.path.join("..", "audio_segments", task_id)
+        extractor = AudioExtractor(cache_dir=audio_dir)
         audio_paths = extractor.extract_audio_segments(video_path, subtitle_path)
-        
+
         # 更新状态
         speaker_processing_status[task_id] = {
             "status": "processing",
             "message": "正在提取说话人嵌入...",
             "progress": 40
         }
-        
+
         # 提取嵌入
         embedding_extractor = SpeakerEmbeddingExtractor(offline_mode=True)
         embeddings = embedding_extractor.extract_embeddings(audio_paths)
-        
+
         # 更新状态
         speaker_processing_status[task_id] = {
             "status": "processing",
             "message": "正在聚类识别说话人...",
             "progress": 70
         }
-        
+
         # 聚类识别说话人
         clusterer = SpeakerClusterer()
         speaker_labels = clusterer.cluster_embeddings(embeddings)
-        
+
+        # 保存到全局缓存，供语音克隆复用
+        video_filename = os.path.basename(video_path)
+        subtitle_filename = os.path.basename(subtitle_path)
+        cache_key = (video_filename, subtitle_filename)
+        audio_extraction_cache[cache_key] = {
+            "audio_paths": audio_paths,
+            "speaker_labels": speaker_labels,
+            "audio_dir": audio_dir,
+            "task_id": task_id
+        }
+        print(f"已缓存音频提取结果: {cache_key}")
+
         # 更新状态为完成
         speaker_processing_status[task_id] = {
             "status": "completed",
@@ -281,7 +298,7 @@ async def run_speaker_diarization_process(task_id: str, video_path: str, subtitl
             "speaker_labels": speaker_labels,
             "unique_speakers": clusterer.get_unique_speakers_count(speaker_labels)
         }
-        
+
     except Exception as e:
         # 更新状态为失败
         speaker_processing_status[task_id] = {
@@ -358,56 +375,157 @@ async def run_voice_cloning_process(
     target_language: str,
     target_subtitle_path: str
 ):
-    """后台执行语音克隆处理（当前为空实现，仅模拟处理流程）"""
+    """后台执行语音克隆处理"""
     try:
-        # 更新状态：准备中
-        voice_cloning_status[task_id] = {
-            "status": "processing",
-            "message": "正在提取音频...",
-            "progress": 20
-        }
-
-        # 模拟处理延时
         import asyncio
-        await asyncio.sleep(2)
+        from mos_scorer import MOSScorer
+        from speaker_audio_processor import SpeakerAudioProcessor
+        from subtitle_text_extractor import SubtitleTextExtractor
 
-        # 更新状态：提取说话人特征
+        # 检查是否可以复用已提取的音频
+        video_filename = os.path.basename(video_path)
+        subtitle_filename = os.path.basename(source_subtitle_path)
+        cache_key = (video_filename, subtitle_filename)
+
+        if cache_key in audio_extraction_cache:
+            # 复用已提取的音频
+            print(f"复用已缓存的音频提取结果: {cache_key}")
+            cached_data = audio_extraction_cache[cache_key]
+            audio_paths = cached_data["audio_paths"]
+            speaker_labels = cached_data["speaker_labels"]
+            audio_dir = cached_data["audio_dir"]
+
+            # 更新状态：复用已提取的音频
+            voice_cloning_status[task_id] = {
+                "status": "processing",
+                "message": "正在复用已提取的音频和说话人识别结果...",
+                "progress": 25
+            }
+        else:
+            # 需要重新提取音频
+            print(f"未找到缓存，重新提取音频: {cache_key}")
+
+            # 更新状态：提取音频片段
+            voice_cloning_status[task_id] = {
+                "status": "processing",
+                "message": "正在提取音频片段...",
+                "progress": 5
+            }
+
+            # 1. 提取音频片段
+            audio_dir = os.path.join("audio_segments", task_id)
+            extractor = AudioExtractor(cache_dir=audio_dir)
+            audio_paths = extractor.extract_audio_segments(video_path, source_subtitle_path)
+
+            # 更新状态：提取说话人嵌入
+            voice_cloning_status[task_id] = {
+                "status": "processing",
+                "message": "正在提取说话人嵌入...",
+                "progress": 15
+            }
+
+            # 2. 提取嵌入
+            embedding_extractor = SpeakerEmbeddingExtractor(offline_mode=True)
+            embeddings = embedding_extractor.extract_embeddings(audio_paths)
+
+            # 更新状态：识别说话人
+            voice_cloning_status[task_id] = {
+                "status": "processing",
+                "message": "正在识别说话人...",
+                "progress": 25
+            }
+
+            # 3. 聚类识别说话人
+            clusterer = SpeakerClusterer()
+            speaker_labels = clusterer.cluster_embeddings(embeddings)
+
+        # 4. 按说话人分组音频
+        speaker_segments = {}
+        for audio_path, speaker_id in zip(audio_paths, speaker_labels):
+            if speaker_id is not None:
+                if speaker_id not in speaker_segments:
+                    speaker_segments[speaker_id] = []
+                speaker_segments[speaker_id].append(audio_path)
+
+        # 更新状态：MOS评分
         voice_cloning_status[task_id] = {
             "status": "processing",
-            "message": "正在提取说话人特征...",
-            "progress": 40
+            "message": "正在对音频片段进行质量评分...",
+            "progress": 35
         }
 
-        await asyncio.sleep(2)
+        # 5. MOS打分
+        mos_scorer = MOSScorer()
+        scored_segments = mos_scorer.score_speaker_audios(audio_dir, speaker_segments)
 
-        # 更新状态：生成目标语言语音
+        # 更新状态：筛选和拼接音频
         voice_cloning_status[task_id] = {
             "status": "processing",
-            "message": f"正在生成{target_language}语音...",
-            "progress": 60
+            "message": "正在筛选和拼接说话人音频...",
+            "progress": 50
         }
 
-        await asyncio.sleep(2)
+        # 6. 筛选、排序、拼接音频
+        audio_processor = SpeakerAudioProcessor(target_duration=10.0, silence_duration=1.0)
+        # 使用audio_dir对应的references目录
+        reference_output_dir = os.path.join(audio_dir, "references")
+        speaker_audio_results = audio_processor.process_all_speakers(
+            scored_segments, reference_output_dir
+        )
 
-        # 更新状态：合成视频
+        # 更新状态：提取字幕文本
         voice_cloning_status[task_id] = {
             "status": "processing",
-            "message": "正在合成视频...",
-            "progress": 80
+            "message": "正在提取参考字幕文本...",
+            "progress": 65
         }
 
-        await asyncio.sleep(2)
+        # 7. 提取字幕文本
+        text_extractor = SubtitleTextExtractor()
+        speaker_segments_for_text = {
+            speaker_id: selected_segments
+            for speaker_id, (_, selected_segments) in speaker_audio_results.items()
+        }
+        speaker_texts = text_extractor.process_all_speakers(
+            speaker_segments_for_text, source_subtitle_path
+        )
 
-        # 更新状态为完成
+        # 8. 保存说话人参考数据
+        speaker_references = {}
+        for speaker_id in speaker_audio_results.keys():
+            audio_path, _ = speaker_audio_results[speaker_id]
+            reference_text = speaker_texts.get(speaker_id, "")
+
+            speaker_references[speaker_id] = {
+                "reference_audio": audio_path,
+                "reference_text": reference_text,
+                "target_language": target_language
+            }
+
+        # 保存到状态中
+        voice_cloning_status[task_id]["speaker_references"] = speaker_references
+
+        # 更新状态：准备语音克隆（这里暂时完成准备阶段）
         voice_cloning_status[task_id] = {
             "status": "completed",
-            "message": "语音克隆完成",
+            "message": "已完成说话人参考数据准备，待实现语音克隆算法",
             "progress": 100,
-            "output_video": "TODO: 返回生成的视频文件路径"
+            "speaker_references": speaker_references,
+            "unique_speakers": len(speaker_references)
         }
+
+        print(f"\n语音克隆准备完成！")
+        print(f"识别到 {len(speaker_references)} 个说话人")
+        for speaker_id, ref_data in speaker_references.items():
+            print(f"\n说话人 {speaker_id}:")
+            print(f"  参考音频: {ref_data['reference_audio']}")
+            print(f"  参考文本: {ref_data['reference_text'][:100]}...")
 
     except Exception as e:
         # 更新状态为失败
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"语音克隆处理失败: {error_detail}")
         voice_cloning_status[task_id] = {
             "status": "failed",
             "message": f"处理失败: {str(e)}",
