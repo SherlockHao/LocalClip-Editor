@@ -19,7 +19,6 @@ const apiClient = axios.create({
 // 请求拦截器
 apiClient.interceptors.request.use(
   (config) => {
-    console.log(`API Request: ${config.method?.toUpperCase()} ${config.url}`);
     return config;
   },
   (error) => {
@@ -34,7 +33,6 @@ apiClient.interceptors.response.use(
   },
   (error) => {
     const errorMessage = error.response?.data?.detail || error.message || '请求失败';
-    console.error('API Error:', errorMessage);
     return Promise.reject(new Error(errorMessage));
   }
 );

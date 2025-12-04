@@ -30,28 +30,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       onLoadedMetadata();
       setHasLoaded(true);
     };
-    const handleError = (e) => {
-      console.error("视频加载错误:", e);
-    };
-    const handleSeeking = () => {
-      console.log('[VideoPlayer] seeking 事件，当前时间:', video.currentTime);
-    };
-    const handleSeeked = () => {
-      console.log('[VideoPlayer] seeked 事件，最终时间:', video.currentTime);
-    };
 
     video.addEventListener('timeupdate', handleTimeUpdateEvent);
     video.addEventListener('loadedmetadata', handleLoadedMetadataEvent);
-    video.addEventListener('error', handleError);
-    video.addEventListener('seeking', handleSeeking);
-    video.addEventListener('seeked', handleSeeked);
 
     return () => {
       video.removeEventListener('timeupdate', handleTimeUpdateEvent);
       video.removeEventListener('loadedmetadata', handleLoadedMetadataEvent);
-      video.removeEventListener('error', handleError);
-      video.removeEventListener('seeking', handleSeeking);
-      video.removeEventListener('seeked', handleSeeked);
     };
   }, [videoRef, onTimeUpdate, onLoadedMetadata]);
 
@@ -63,8 +48,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     if (isPlaying) {
       const playPromise = video.play();
       if (playPromise !== undefined) {
-        playPromise.catch(error => {
-          console.error("播放视频时出错:", error);
+        playPromise.catch(() => {
+          // 播放失败，静默处理
         });
       }
     } else {

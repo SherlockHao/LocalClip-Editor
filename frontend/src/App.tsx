@@ -64,7 +64,7 @@ const App: React.FC = () => {
       const result = await response.json();
       setVideos(result.videos);
     } catch (error) {
-      console.error('获取视频列表时出错:', error);
+      // 获取视频列表失败
     }
   };
 
@@ -93,7 +93,6 @@ const App: React.FC = () => {
       await refreshVideos();
       setCurrentVideo(newVideo);
     } catch (error) {
-      console.error('上传视频时出错:', error);
       alert('上传视频失败: ' + (error as Error).message);
     }
   };
@@ -116,7 +115,6 @@ const App: React.FC = () => {
       setSubtitles(result.subtitles);
       setSubtitleFilename(result.filename);
     } catch (error) {
-      console.error('上传字幕时出错:', error);
       alert('上传字幕失败: ' + (error as Error).message);
     }
   };
@@ -145,10 +143,7 @@ const App: React.FC = () => {
 
   const handleTimeUpdate = () => {
     if (videoRef.current && !isSeekingRef.current) {
-      console.log('[handleTimeUpdate] 视频时间:', videoRef.current.currentTime);
       setCurrentTime(videoRef.current.currentTime);
-    } else if (isSeekingRef.current) {
-      console.log('[handleTimeUpdate] 跳过（正在 seeking）');
     }
   };
 
@@ -161,94 +156,22 @@ const App: React.FC = () => {
   const handleSeek = (time: number) => {
     if (videoRef.current) {
       const video = videoRef.current;
-      console.log('[handleSeek] 开始 seek 到:', time);
-      console.log('[handleSeek] 视频状态 - readyState:', video.readyState, 'duration:', video.duration, 'currentTime:', video.currentTime);
 
       // 检查视频是否已经加载足够的数据
       if (video.readyState < 2) {
-        console.error('[handleSeek] 错误：视频还没有加载足够的元数据！readyState =', video.readyState);
         return;
       }
 
       // 设置 seeking 标志
       isSeekingRef.current = true;
-      console.log('[handleSeek] 设置 isSeekingRef = true');
 
-      // 诊断 video 元素
-      console.log('[handleSeek] video 元素信息:');
-      console.log('  - tagName:', video.tagName);
-      console.log('  - src:', video.src);
-      console.log('  - paused:', video.paused);
-      console.log('  - ended:', video.ended);
-      console.log('  - seeking:', video.seeking);
-      console.log('  - networkState:', video.networkState);
-
-      // 检查 currentTime 属性描述符
-      const descriptor = Object.getOwnPropertyDescriptor(HTMLVideoElement.prototype, 'currentTime');
-      console.log('[handleSeek] currentTime 属性描述符:', descriptor);
-      console.log('  - 可写:', descriptor?.writable);
-      console.log('  - 有 setter:', !!descriptor?.set);
-
-      // 检查是否是真实的 video 元素
-      console.log('[handleSeek] 元素类型检查:');
-      console.log('  - instanceof HTMLVideoElement:', video instanceof HTMLVideoElement);
-      console.log('  - constructor.name:', video.constructor.name);
-
-      // 尝试多种方法设置视频时间
-      console.log('[handleSeek] 正在设置 video.currentTime =', time);
-      try {
-        const oldTime = video.currentTime;
-
-        // 方法1：直接赋值
-        video.currentTime = time;
-        console.log('[handleSeek] 方法1（直接赋值）结果:', video.currentTime);
-
-        // 方法2：使用 setter
-        if (descriptor?.set) {
-          descriptor.set.call(video, time);
-          console.log('[handleSeek] 方法2（调用 setter）结果:', video.currentTime);
-        }
-
-        // 方法3：使用 setAttribute
-        video.setAttribute('currentTime', String(time));
-        console.log('[handleSeek] 方法3（setAttribute）结果:', video.currentTime);
-
-        const newTime = video.currentTime;
-        console.log('[handleSeek] 最终设置结果: 旧值=', oldTime, ', 新值=', newTime, ', 目标=', time);
-
-        // 如果还是失败，延迟重试
-        if (newTime === oldTime) {
-          console.warn('[handleSeek] 所有方法都失败，延迟重试...');
-          setTimeout(() => {
-            console.log('[handleSeek] 延迟重试前 currentTime =', video.currentTime);
-            video.currentTime = time;
-            console.log('[handleSeek] 延迟重试后 currentTime =', video.currentTime);
-          }, 100);
-        }
-      } catch (error) {
-        console.error('[handleSeek] 设置 currentTime 时出错:', error);
-      }
+      // 设置视频时间
+      video.currentTime = time;
 
       // 监听 seeked 事件来更新状态
       const handleSeeked = () => {
-        const finalTime = video.currentTime;
-        console.log('[handleSeek] seeked 事件触发，最终时间:', finalTime);
-
-        // 更新状态到最终时间
-        console.log('[handleSeek] 更新状态到:', finalTime);
-        setCurrentTime(finalTime);
-
-        // 检查是否成功
-        if (Math.abs(finalTime - time) > 0.1) {
-          console.warn('[handleSeek] 警告：最终时间与目标不符！目标:', time, '实际:', finalTime);
-        } else {
-          console.log('[handleSeek] ✓ seek 成功！');
-        }
-
-        // 清除 seeking 标志
+        setCurrentTime(video.currentTime);
         isSeekingRef.current = false;
-        console.log('[handleSeek] 设置 isSeekingRef = false，seek 完成');
-
         video.removeEventListener('seeked', handleSeeked);
       };
       video.addEventListener('seeked', handleSeeked, { once: true });
@@ -256,7 +179,7 @@ const App: React.FC = () => {
   };
 
   const handleExport = () => {
-    console.log('Exporting video with settings:', exportSettings);
+    // TODO: 实现视频导出功能
   };
 
   const handleRunSpeakerDiarization = async () => {
@@ -290,10 +213,10 @@ const App: React.FC = () => {
       
       const result = await response.json();
       setSpeakerDiarizationTaskId(result.task_id);
-      
+
+
       pollSpeakerDiarizationStatus(result.task_id);
     } catch (error) {
-      console.error('启动说话人识别失败:', error);
       alert('启动说话人识别失败: ' + (error as Error).message);
       setIsProcessingSpeakerDiarization(false);
     }
@@ -332,8 +255,6 @@ const App: React.FC = () => {
         });
         setShowNotification(true);
       } else if (status.status === 'failed') {
-        console.error('说话人识别失败:', status.message);
-
         // 显示失败通知
         setNotificationData({
           title: '说话人识别失败',
@@ -348,7 +269,6 @@ const App: React.FC = () => {
         setTimeout(() => pollSpeakerDiarizationStatus(taskId), 2000);
       }
     } catch (error) {
-      console.error('轮询说话人识别状态失败:', error);
       alert('获取说话人识别状态失败: ' + (error as Error).message);
       setIsProcessingSpeakerDiarization(false);
       setSpeakerDiarizationTaskId(null);
