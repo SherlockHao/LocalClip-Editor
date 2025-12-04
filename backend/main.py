@@ -111,6 +111,9 @@ srt_parser = SRTParser()
 # 全局变量用于存储说话人识别处理状态
 speaker_processing_status = {}
 
+# 全局变量用于存储语音克隆处理状态
+voice_cloning_status = {}
+
 @app.get("/")
 async def root():
     return {"message": "LocalClip Editor API"}
@@ -293,8 +296,132 @@ async def get_speaker_diarization_status(task_id: str):
     """获取说话人识别处理状态"""
     if task_id not in speaker_processing_status:
         raise HTTPException(status_code=404, detail="任务不存在")
-    
+
     return speaker_processing_status[task_id]
+
+
+class VoiceCloningRequest(BaseModel):
+    video_filename: str
+    source_subtitle_filename: str
+    target_language: str
+    target_subtitle_filename: str
+
+
+@app.post("/voice-cloning/process")
+async def process_voice_cloning(request: VoiceCloningRequest):
+    """启动语音克隆处理流程（当前为空实现）"""
+    try:
+        video_path = UPLOADS_DIR / request.video_filename
+        source_subtitle_path = UPLOADS_DIR / request.source_subtitle_filename
+        target_subtitle_path = UPLOADS_DIR / request.target_subtitle_filename
+
+        if not video_path.exists():
+            raise HTTPException(status_code=404, detail="视频文件不存在")
+        if not source_subtitle_path.exists():
+            raise HTTPException(status_code=404, detail="源字幕文件不存在")
+        if not target_subtitle_path.exists():
+            raise HTTPException(status_code=404, detail="目标字幕文件不存在")
+
+        # 生成唯一的处理任务ID
+        task_id = str(uuid.uuid4())
+
+        # 设置处理状态
+        voice_cloning_status[task_id] = {
+            "status": "processing",
+            "message": "正在准备语音克隆...",
+            "progress": 0
+        }
+
+        # 在后台执行处理
+        import asyncio
+        asyncio.create_task(run_voice_cloning_process(
+            task_id,
+            str(video_path),
+            str(source_subtitle_path),
+            request.target_language,
+            str(target_subtitle_path)
+        ))
+
+        return {
+            "task_id": task_id,
+            "message": "语音克隆任务已启动",
+            "status": "processing"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def run_voice_cloning_process(
+    task_id: str,
+    video_path: str,
+    source_subtitle_path: str,
+    target_language: str,
+    target_subtitle_path: str
+):
+    """后台执行语音克隆处理（当前为空实现，仅模拟处理流程）"""
+    try:
+        # 更新状态：准备中
+        voice_cloning_status[task_id] = {
+            "status": "processing",
+            "message": "正在提取音频...",
+            "progress": 20
+        }
+
+        # 模拟处理延时
+        import asyncio
+        await asyncio.sleep(2)
+
+        # 更新状态：提取说话人特征
+        voice_cloning_status[task_id] = {
+            "status": "processing",
+            "message": "正在提取说话人特征...",
+            "progress": 40
+        }
+
+        await asyncio.sleep(2)
+
+        # 更新状态：生成目标语言语音
+        voice_cloning_status[task_id] = {
+            "status": "processing",
+            "message": f"正在生成{target_language}语音...",
+            "progress": 60
+        }
+
+        await asyncio.sleep(2)
+
+        # 更新状态：合成视频
+        voice_cloning_status[task_id] = {
+            "status": "processing",
+            "message": "正在合成视频...",
+            "progress": 80
+        }
+
+        await asyncio.sleep(2)
+
+        # 更新状态为完成
+        voice_cloning_status[task_id] = {
+            "status": "completed",
+            "message": "语音克隆完成",
+            "progress": 100,
+            "output_video": "TODO: 返回生成的视频文件路径"
+        }
+
+    except Exception as e:
+        # 更新状态为失败
+        voice_cloning_status[task_id] = {
+            "status": "failed",
+            "message": f"处理失败: {str(e)}",
+            "progress": 0
+        }
+
+
+@app.get("/voice-cloning/status/{task_id}")
+async def get_voice_cloning_status(task_id: str):
+    """获取语音克隆处理状态"""
+    if task_id not in voice_cloning_status:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    return voice_cloning_status[task_id]
 
 
 @app.post("/export")

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Settings, Download, Users, Zap, Info, Gauge } from 'lucide-react';
+import { Settings, Download, Users, Zap, Info, Gauge, FileText, Mic } from 'lucide-react';
 
 interface VideoFile {
   filename: string;
@@ -28,6 +28,13 @@ interface PropertiesPanelProps {
   onRunSpeakerDiarization: () => void;
   isProcessingSpeakerDiarization: boolean;
   currentVideo: VideoFile | null;
+  targetLanguage: string;
+  onTargetLanguageChange: (language: string) => void;
+  targetSrtFilename: string | null;
+  onTargetSrtUpload: (file: File) => void;
+  onRunVoiceCloning: () => void;
+  isProcessingVoiceCloning: boolean;
+  speakerDiarizationCompleted: boolean;
 }
 
 const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
@@ -36,8 +43,26 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   onExport,
   onRunSpeakerDiarization,
   isProcessingSpeakerDiarization,
-  currentVideo
+  currentVideo,
+  targetLanguage,
+  onTargetLanguageChange,
+  targetSrtFilename,
+  onTargetSrtUpload,
+  onRunVoiceCloning,
+  isProcessingVoiceCloning,
+  speakerDiarizationCompleted
 }) => {
+  const handleTargetSrtFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      onTargetSrtUpload(e.target.files[0]);
+      e.target.value = '';
+    }
+  };
+
+  // 判断语音克隆按钮是否可用
+  const isVoiceCloningEnabled = speakerDiarizationCompleted &&
+                                 targetLanguage !== '' &&
+                                 targetSrtFilename !== null;
   return (
     <div className="w-72 bg-gradient-to-b from-slate-800 to-slate-900 border-l border-slate-700 flex flex-col shadow-2xl overflow-hidden">
       {/* 头部 */}
@@ -154,13 +179,13 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             <Users size={16} className="text-purple-400" />
             <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">AI 功能</h3>
           </div>
-          
+
           <button
             onClick={onRunSpeakerDiarization}
             disabled={isProcessingSpeakerDiarization}
             className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-medium transition-all duration-200 ${
-              isProcessingSpeakerDiarization 
-                ? 'bg-slate-600 text-slate-400 cursor-not-allowed opacity-75' 
+              isProcessingSpeakerDiarization
+                ? 'bg-slate-600 text-slate-400 cursor-not-allowed opacity-75'
                 : 'bg-gradient-to-r from-purple-600 to-purple-500 text-white hover:shadow-lg hover:shadow-purple-500/50'
             }`}
           >
@@ -176,7 +201,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               </>
             )}
           </button>
-          
+
           {isProcessingSpeakerDiarization && (
             <div className="mt-2.5 p-2.5 bg-purple-500/10 border border-purple-500/30 rounded-lg">
               <p className="text-xs text-purple-300 text-center font-medium">
@@ -184,6 +209,131 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               </p>
             </div>
           )}
+        </div>
+
+        {/* 语音克隆区域 */}
+        <div className="mb-6">
+          <div className="flex items-center gap-2 mb-3">
+            <Mic size={16} className="text-blue-400" />
+            <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">语音克隆</h3>
+          </div>
+
+          <div className="space-y-3">
+            {/* 克隆语言选择 */}
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">
+                克隆语言
+              </label>
+              <select
+                value={targetLanguage}
+                onChange={(e) => onTargetLanguageChange(e.target.value)}
+                disabled={!speakerDiarizationCompleted}
+                className={`w-full px-3 py-2.5 border rounded-lg text-sm font-medium transition-colors appearance-none ${
+                  speakerDiarizationCompleted
+                    ? 'bg-slate-700 border-slate-600 text-slate-100 focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 cursor-pointer'
+                    : 'bg-slate-800 border-slate-700 text-slate-500 cursor-not-allowed opacity-60'
+                }`}
+                style={{
+                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23cbd5e1' d='M6 9L1 4h10z'/%3E%3C/svg%3E")`,
+                  backgroundRepeat: 'no-repeat',
+                  backgroundPosition: 'right 8px center',
+                  paddingRight: '28px'
+                }}
+              >
+                <option value="">请选择目标语言</option>
+                <option value="en">英语</option>
+                <option value="ko">韩语</option>
+                <option value="ja">日语</option>
+              </select>
+              {!speakerDiarizationCompleted && (
+                <p className="text-xs text-slate-500 mt-1.5">
+                  请先完成说话人识别
+                </p>
+              )}
+            </div>
+
+            {/* 上传目标语言SRT */}
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">
+                目标语言字幕
+              </label>
+              <label
+                className={`flex items-center justify-center w-full px-4 py-2.5 rounded-lg font-medium transition-all duration-200 cursor-pointer ${
+                  speakerDiarizationCompleted && targetLanguage
+                    ? 'bg-gradient-to-r from-slate-700 to-slate-600 text-slate-100 hover:bg-slate-600 hover:shadow-lg hover:shadow-slate-600/50'
+                    : 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-60'
+                }`}
+              >
+                <FileText size={16} className="mr-2" />
+                <span>{targetSrtFilename ? '已上传 SRT' : '上传目标语言 SRT'}</span>
+                <input
+                  type="file"
+                  accept=".srt"
+                  onChange={handleTargetSrtFileSelect}
+                  disabled={!speakerDiarizationCompleted || !targetLanguage}
+                  className="hidden"
+                />
+              </label>
+              {targetSrtFilename && (
+                <p className="text-xs text-green-400 mt-1.5 flex items-center gap-1">
+                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                  目标字幕文件已上传
+                </p>
+              )}
+            </div>
+
+            {/* 语音克隆按钮 */}
+            <button
+              onClick={onRunVoiceCloning}
+              disabled={!isVoiceCloningEnabled || isProcessingVoiceCloning}
+              className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-medium transition-all duration-200 ${
+                isVoiceCloningEnabled && !isProcessingVoiceCloning
+                  ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:shadow-lg hover:shadow-blue-500/50'
+                  : 'bg-slate-600 text-slate-400 cursor-not-allowed opacity-75'
+              }`}
+            >
+              {isProcessingVoiceCloning ? (
+                <>
+                  <div className="spinner"></div>
+                  <span>克隆中...</span>
+                </>
+              ) : (
+                <>
+                  <Mic size={18} />
+                  <span>语音克隆</span>
+                </>
+              )}
+            </button>
+
+            {isProcessingVoiceCloning && (
+              <div className="mt-2.5 p-2.5 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                <p className="text-xs text-blue-300 text-center font-medium">
+                  正在进行语音克隆，请稍候...
+                </p>
+              </div>
+            )}
+
+            {!isVoiceCloningEnabled && !isProcessingVoiceCloning && (
+              <div className="p-2.5 bg-slate-700/30 border border-slate-600 rounded-lg">
+                <p className="text-xs text-slate-400 text-center">
+                  完成以下步骤后可启用：
+                </p>
+                <ul className="text-xs text-slate-400 mt-1.5 space-y-1">
+                  <li className={speakerDiarizationCompleted ? 'text-green-400' : ''}>
+                    {speakerDiarizationCompleted ? '✓' : '○'} 完成说话人识别
+                  </li>
+                  <li className={targetLanguage ? 'text-green-400' : ''}>
+                    {targetLanguage ? '✓' : '○'} 选择克隆语言
+                  </li>
+                  <li className={targetSrtFilename ? 'text-green-400' : ''}>
+                    {targetSrtFilename ? '✓' : '○'} 上传目标语言字幕
+                  </li>
+                </ul>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

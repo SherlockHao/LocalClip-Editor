@@ -52,6 +52,12 @@ const App: React.FC = () => {
     uniqueSpeakers: undefined as number | undefined
   });
 
+  // 语音克隆相关状态
+  const [targetLanguage, setTargetLanguage] = useState<string>('');
+  const [targetSrtFilename, setTargetSrtFilename] = useState<string | null>(null);
+  const [isProcessingVoiceCloning, setIsProcessingVoiceCloning] = useState(false);
+  const [voiceCloningTaskId, setVoiceCloningTaskId] = useState<string | null>(null);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const isSeekingRef = useRef<boolean>(false);
 
@@ -225,13 +231,13 @@ const App: React.FC = () => {
   const pollSpeakerDiarizationStatus = async (taskId: string) => {
     try {
       const response = await fetch(`/api/speaker-diarization/status/${taskId}`);
-      
+
       if (!response.ok) {
         throw new Error(`获取状态失败: ${response.statusText}`);
       }
-      
+
       const status = await response.json();
-      
+
       if (status.status === 'completed') {
         if (status.speaker_labels) {
           const updatedSubtitles = subtitles.map((subtitle, index) => {
@@ -272,6 +278,123 @@ const App: React.FC = () => {
       alert('获取说话人识别状态失败: ' + (error as Error).message);
       setIsProcessingSpeakerDiarization(false);
       setSpeakerDiarizationTaskId(null);
+    }
+  };
+
+  // 处理目标语言srt文件上传
+  const handleTargetSrtUpload = async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch('/api/upload/subtitle', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`上传失败: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      setTargetSrtFilename(result.filename);
+    } catch (error) {
+      alert('上传目标语言字幕失败: ' + (error as Error).message);
+    }
+  };
+
+  // 执行语音克隆
+  const handleRunVoiceCloning = async () => {
+    if (!currentVideo) {
+      alert('请先上传并选择视频文件');
+      return;
+    }
+
+    if (!subtitleFilename) {
+      alert('请先上传原始SRT字幕文件');
+      return;
+    }
+
+    if (!targetLanguage) {
+      alert('请选择目标语言');
+      return;
+    }
+
+    if (!targetSrtFilename) {
+      alert('请上传目标语言的SRT字幕文件');
+      return;
+    }
+
+    try {
+      setIsProcessingVoiceCloning(true);
+
+      const response = await fetch('/api/voice-cloning/process', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          video_filename: currentVideo.filename,
+          source_subtitle_filename: subtitleFilename,
+          target_language: targetLanguage,
+          target_subtitle_filename: targetSrtFilename
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`请求失败: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      setVoiceCloningTaskId(result.task_id);
+
+      pollVoiceCloningStatus(result.task_id);
+    } catch (error) {
+      alert('启动语音克隆失败: ' + (error as Error).message);
+      setIsProcessingVoiceCloning(false);
+    }
+  };
+
+  // 轮询语音克隆状态
+  const pollVoiceCloningStatus = async (taskId: string) => {
+    try {
+      const response = await fetch(`/api/voice-cloning/status/${taskId}`);
+
+      if (!response.ok) {
+        throw new Error(`获取状态失败: ${response.statusText}`);
+      }
+
+      const status = await response.json();
+
+      if (status.status === 'completed') {
+        setIsProcessingVoiceCloning(false);
+        setVoiceCloningTaskId(null);
+
+        // 显示成功通知
+        setNotificationData({
+          title: '语音克隆完成',
+          message: '已成功完成语音克隆，请在导出目录查看克隆后的视频。',
+          uniqueSpeakers: undefined
+        });
+        setShowNotification(true);
+      } else if (status.status === 'failed') {
+        // 显示失败通知
+        setNotificationData({
+          title: '语音克隆失败',
+          message: status.message || '处理过程中发生错误，请重试。',
+          uniqueSpeakers: undefined
+        });
+        setShowNotification(true);
+
+        setIsProcessingVoiceCloning(false);
+        setVoiceCloningTaskId(null);
+      } else {
+        setTimeout(() => pollVoiceCloningStatus(taskId), 2000);
+      }
+    } catch (error) {
+      alert('获取语音克隆状态失败: ' + (error as Error).message);
+      setIsProcessingVoiceCloning(false);
+      setVoiceCloningTaskId(null);
     }
   };
 
@@ -412,6 +535,13 @@ const App: React.FC = () => {
           onRunSpeakerDiarization={handleRunSpeakerDiarization}
           isProcessingSpeakerDiarization={isProcessingSpeakerDiarization}
           currentVideo={currentVideo}
+          targetLanguage={targetLanguage}
+          onTargetLanguageChange={setTargetLanguage}
+          targetSrtFilename={targetSrtFilename}
+          onTargetSrtUpload={handleTargetSrtUpload}
+          onRunVoiceCloning={handleRunVoiceCloning}
+          isProcessingVoiceCloning={isProcessingVoiceCloning}
+          speakerDiarizationCompleted={subtitles.some(s => s.speaker_id !== undefined)}
         />
       </div>
     </div>
