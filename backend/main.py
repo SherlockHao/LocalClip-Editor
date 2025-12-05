@@ -300,6 +300,24 @@ async def run_speaker_diarization_process(task_id: str, video_path: str, subtitl
 
         print(f"已完成MOS评分，共 {len(scored_segments)} 个说话人")
 
+        # 更新状态：性别识别
+        speaker_processing_status[task_id] = {
+            "status": "processing",
+            "message": "正在进行性别识别...",
+            "progress": 90
+        }
+
+        # 性别识别
+        from gender_classifier import GenderClassifier, rename_speakers_by_gender
+        gender_classifier = GenderClassifier()
+        gender_dict = gender_classifier.classify_speakers(scored_segments, min_duration=2.0)
+
+        # 根据性别和出现次数重新命名说话人
+        print(f"\n根据性别和出现次数重新命名说话人...")
+        speaker_name_mapping, gender_stats = rename_speakers_by_gender(speaker_labels, gender_dict)
+
+        print(f"\n性别统计: 男性 {gender_stats['male']} 人, 女性 {gender_stats['female']} 人")
+
         # 保存到全局缓存，供语音克隆复用
         video_filename = os.path.basename(video_path)
         subtitle_filename = os.path.basename(subtitle_path)
@@ -309,17 +327,22 @@ async def run_speaker_diarization_process(task_id: str, video_path: str, subtitl
             "speaker_labels": speaker_labels,
             "audio_dir": audio_dir,
             "task_id": task_id,
-            "scored_segments": scored_segments  # 保存MOS评分结果
+            "scored_segments": scored_segments,  # 保存MOS评分结果
+            "gender_dict": gender_dict,  # 保存性别识别结果
+            "speaker_name_mapping": speaker_name_mapping,  # 保存说话人名称映射
+            "gender_stats": gender_stats  # 保存性别统计
         }
-        print(f"已缓存音频提取结果和MOS评分: {cache_key}")
+        print(f"已缓存音频提取结果、MOS评分和性别识别: {cache_key}")
 
         # 更新状态为完成
         speaker_processing_status[task_id] = {
             "status": "completed",
-            "message": "说话人识别和音频质量评分完成",
+            "message": "说话人识别、音频质量评分和性别识别完成",
             "progress": 100,
             "speaker_labels": speaker_labels,
-            "unique_speakers": clusterer.get_unique_speakers_count(speaker_labels)
+            "unique_speakers": clusterer.get_unique_speakers_count(speaker_labels),
+            "speaker_name_mapping": speaker_name_mapping,
+            "gender_stats": gender_stats
         }
 
     except Exception as e:
@@ -413,21 +436,25 @@ async def run_voice_cloning_process(
         # 默认值
         scored_segments = None
         has_cached_mos = False
+        gender_dict = {}
+        speaker_name_mapping = {}
 
         if cache_key in audio_extraction_cache:
-            # 复用已提取的音频和MOS评分
-            print(f"复用已缓存的音频提取结果和MOS评分: {cache_key}")
+            # 复用已提取的音频、MOS评分和性别识别
+            print(f"复用已缓存的音频提取结果、MOS评分和性别识别: {cache_key}")
             cached_data = audio_extraction_cache[cache_key]
             audio_paths = cached_data["audio_paths"]
             speaker_labels = cached_data["speaker_labels"]
             audio_dir = cached_data["audio_dir"]
             scored_segments = cached_data.get("scored_segments")  # 获取缓存的MOS评分
+            gender_dict = cached_data.get("gender_dict", {})  # 获取性别识别结果
+            speaker_name_mapping = cached_data.get("speaker_name_mapping", {})  # 获取说话人名称映射
             has_cached_mos = scored_segments is not None
 
             # 更新状态：复用已提取的音频
             voice_cloning_status[task_id] = {
                 "status": "processing",
-                "message": "正在复用已提取的音频、说话人识别和MOS评分结果...",
+                "message": "正在复用已提取的音频、说话人识别、MOS评分和性别识别结果...",
                 "progress": 35
             }
         else:
@@ -529,11 +556,15 @@ async def run_voice_cloning_process(
         for speaker_id in speaker_audio_results.keys():
             audio_path, _ = speaker_audio_results[speaker_id]
             reference_text = speaker_texts.get(speaker_id, "")
+            speaker_name = speaker_name_mapping.get(speaker_id, f"说话人{speaker_id}")
+            gender = gender_dict.get(speaker_id, "unknown")
 
             speaker_references[speaker_id] = {
                 "reference_audio": audio_path,
                 "reference_text": reference_text,
-                "target_language": target_language
+                "target_language": target_language,
+                "speaker_name": speaker_name,
+                "gender": gender
             }
 
         # 保存到状态中
@@ -545,13 +576,15 @@ async def run_voice_cloning_process(
             "message": "已完成说话人参考数据准备，待实现语音克隆算法",
             "progress": 100,
             "speaker_references": speaker_references,
-            "unique_speakers": len(speaker_references)
+            "unique_speakers": len(speaker_references),
+            "speaker_name_mapping": speaker_name_mapping,
+            "gender_dict": gender_dict
         }
 
         print(f"\n语音克隆准备完成！")
         print(f"识别到 {len(speaker_references)} 个说话人")
         for speaker_id, ref_data in speaker_references.items():
-            print(f"\n说话人 {speaker_id}:")
+            print(f"\n{ref_data['speaker_name']} (ID: {speaker_id}, 性别: {ref_data['gender']}):")
             print(f"  参考音频: {ref_data['reference_audio']}")
             print(f"  参考文本: {ref_data['reference_text'][:100]}...")
 

@@ -51,6 +51,7 @@ const App: React.FC = () => {
     message: '',
     uniqueSpeakers: undefined as number | undefined
   });
+  const [speakerNameMapping, setSpeakerNameMapping] = useState<{[key: number]: string}>({});
 
   // 语音克隆相关状态
   const [targetLanguage, setTargetLanguage] = useState<string>('');
@@ -248,6 +249,11 @@ const App: React.FC = () => {
             };
           });
           setSubtitles(updatedSubtitles);
+        }
+
+        // 提取说话人名称映射
+        if (status.speaker_name_mapping) {
+          setSpeakerNameMapping(status.speaker_name_mapping);
         }
 
         setIsProcessingSpeakerDiarization(false);
@@ -457,6 +463,7 @@ const App: React.FC = () => {
               onEditSubtitle={handleEditSubtitle}
               onDeleteSubtitle={handleDeleteSubtitle}
               onSeek={handleSeek}
+              speakerNameMapping={speakerNameMapping}
             />
 
             {/* 右侧：播放器 + 视频信息 */}

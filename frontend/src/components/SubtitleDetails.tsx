@@ -16,6 +16,7 @@ interface SubtitleDetailsProps {
   onEditSubtitle?: (index: number, newSubtitle: Subtitle) => void;
   onDeleteSubtitle?: (index: number) => void;
   onSeek?: (time: number) => void;
+  speakerNameMapping?: {[key: number]: string};
 }
 
 // 获取所有唯一的说话人ID
@@ -31,7 +32,8 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
   currentTime,
   onEditSubtitle,
   onDeleteSubtitle,
-  onSeek
+  onSeek,
+  speakerNameMapping = {}
 }) => {
   const activeSubtitleRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -193,7 +195,7 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
                     <option value="">选择说话人</option>
                     {uniqueSpeakers.map(speakerId => (
                       <option key={speakerId} value={speakerId}>
-                        说话人 {speakerId}
+                        {speakerNameMapping[speakerId] || `说话人${speakerId}`}
                       </option>
                     ))}
                   </select>
