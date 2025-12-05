@@ -45,6 +45,24 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
 
   const uniqueSpeakers = getUniqueSpeakers(subtitles);
 
+  // 按照男1、男2...女1、女2的顺序排序说话人
+  const sortedSpeakers = [...uniqueSpeakers].sort((a, b) => {
+    const nameA = speakerNameMapping[a] || `说话人${a}`;
+    const nameB = speakerNameMapping[b] || `说话人${b}`;
+
+    const isMaleA = nameA.startsWith('男');
+    const isMaleB = nameB.startsWith('男');
+
+    // 男声在前，女声在后
+    if (isMaleA && !isMaleB) return -1;
+    if (!isMaleA && isMaleB) return 1;
+
+    // 同性别按数字排序
+    const numA = parseInt(nameA.match(/\d+/)?.[0] || '0');
+    const numB = parseInt(nameB.match(/\d+/)?.[0] || '0');
+    return numA - numB;
+  });
+
   const speakerColors = [
     { bg: 'bg-blue-500/30', border: 'border-blue-400/50', text: 'text-blue-300', badge: 'bg-blue-500/50 text-blue-200' },
     { bg: 'bg-green-500/30', border: 'border-green-400/50', text: 'text-green-300', badge: 'bg-green-500/50 text-green-200' },
@@ -256,7 +274,7 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
                 <div className="flex gap-1.5 items-center" onClick={(e) => e.stopPropagation()}>
                   <select value={subtitle.speaker_id ?? ''} onChange={(e) => handleSpeakerChange(index, e.target.value ? Number(e.target.value) : undefined)} className={`flex-1 text-xs font-semibold px-2 py-1 rounded border-2 ${subtitle.speaker_id !== undefined ? `${colors.badge} border-transparent` : 'bg-slate-700/50 text-slate-400 border-slate-600'} hover:border-blue-400/50 focus:outline-none cursor-pointer`}>
                     <option value="">选择说话人</option>
-                    {uniqueSpeakers.map(speakerId => (
+                    {sortedSpeakers.map(speakerId => (
                       <option key={speakerId} value={speakerId}>{speakerNameMapping[speakerId] || `说话人${speakerId}`}</option>
                     ))}
                   </select>

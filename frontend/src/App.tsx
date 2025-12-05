@@ -45,6 +45,7 @@ const App: React.FC = () => {
   });
   const [isProcessingSpeakerDiarization, setIsProcessingSpeakerDiarization] = useState(false);
   const [speakerDiarizationTaskId, setSpeakerDiarizationTaskId] = useState<string | null>(null);
+  const [speakerDiarizationProgress, setSpeakerDiarizationProgress] = useState({ message: '', progress: 0 });
   const [showNotification, setShowNotification] = useState(false);
   const [notificationData, setNotificationData] = useState({
     title: '',
@@ -61,6 +62,25 @@ const App: React.FC = () => {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const isSeekingRef = useRef<boolean>(false);
+
+  // 空格键播放/暂停
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      // 只在没有焦点在输入框时触发
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') {
+        return;
+      }
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        handlePlayPause();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [isPlaying]);
 
   const refreshVideos = async () => {
     try {
@@ -236,15 +256,16 @@ const App: React.FC = () => {
       alert('请先上传并选择视频文件');
       return;
     }
-    
+
     if (!subtitleFilename) {
       alert('请先上传SRT字幕文件');
       return;
     }
-    
+
     try {
       setIsProcessingSpeakerDiarization(true);
-      
+      setSpeakerDiarizationProgress({ message: '初始化中...', progress: 0 });
+
       const response = await fetch('/api/speaker-diarization/process', {
         method: 'POST',
         headers: {
@@ -255,24 +276,25 @@ const App: React.FC = () => {
           subtitle_filename: subtitleFilename
         }),
       });
-      
+
       if (!response.ok) {
         throw new Error(`请求失败: ${response.statusText}`);
       }
-      
+
       const result = await response.json();
       setSpeakerDiarizationTaskId(result.task_id);
-
 
       pollSpeakerDiarizationStatus(result.task_id);
     } catch (error) {
       alert('启动说话人识别失败: ' + (error as Error).message);
       setIsProcessingSpeakerDiarization(false);
+      setSpeakerDiarizationProgress({ message: '', progress: 0 });
     }
   };
 
   const pollSpeakerDiarizationStatus = async (taskId: string) => {
     try {
+      console.log('轮询状态, taskId:', taskId);
       const response = await fetch(`/api/speaker-diarization/status/${taskId}`);
 
       if (!response.ok) {
@@ -280,6 +302,13 @@ const App: React.FC = () => {
       }
 
       const status = await response.json();
+      console.log('收到状态:', status);
+
+      // 更新进度信息
+      setSpeakerDiarizationProgress({
+        message: status.message || '处理中...',
+        progress: status.progress || 0
+      });
 
       if (status.status === 'completed') {
         if (status.speaker_labels) {
@@ -585,6 +614,7 @@ const App: React.FC = () => {
           onExport={handleExport}
           onRunSpeakerDiarization={handleRunSpeakerDiarization}
           isProcessingSpeakerDiarization={isProcessingSpeakerDiarization}
+          speakerDiarizationProgress={speakerDiarizationProgress}
           currentVideo={currentVideo}
           targetLanguage={targetLanguage}
           onTargetLanguageChange={setTargetLanguage}

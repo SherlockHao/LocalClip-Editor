@@ -27,6 +27,7 @@ interface PropertiesPanelProps {
   onExport: () => void;
   onRunSpeakerDiarization: () => void;
   isProcessingSpeakerDiarization: boolean;
+  speakerDiarizationProgress: { message: string; progress: number };
   currentVideo: VideoFile | null;
   targetLanguage: string;
   onTargetLanguageChange: (language: string) => void;
@@ -43,6 +44,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   onExport,
   onRunSpeakerDiarization,
   isProcessingSpeakerDiarization,
+  speakerDiarizationProgress,
   currentVideo,
   targetLanguage,
   onTargetLanguageChange,
@@ -203,9 +205,18 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
           </button>
 
           {isProcessingSpeakerDiarization && (
-            <div className="mt-2.5 p-2.5 bg-purple-500/10 border border-purple-500/30 rounded-lg">
-              <p className="text-xs text-purple-300 text-center font-medium">
-                正在分析音频并识别说话人...
+            <div className="mt-2.5 p-3 bg-purple-500/10 border border-purple-500/30 rounded-lg">
+              <p className="text-xs text-purple-300 font-medium mb-2 transition-opacity duration-300">
+                {speakerDiarizationProgress.message || '正在处理...'}
+              </p>
+              <div className="w-full bg-slate-700/50 rounded-full h-2 overflow-hidden">
+                <div
+                  className="bg-gradient-to-r from-purple-500 to-blue-500 h-full transition-all duration-1000 ease-out"
+                  style={{ width: `${speakerDiarizationProgress.progress}%` }}
+                />
+              </div>
+              <p className="text-xs text-purple-400 text-right mt-1 font-mono transition-all duration-500">
+                {speakerDiarizationProgress.progress}%
               </p>
             </div>
           )}
