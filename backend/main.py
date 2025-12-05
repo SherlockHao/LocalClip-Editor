@@ -278,6 +278,28 @@ async def run_speaker_diarization_process(task_id: str, video_path: str, subtitl
         clusterer = SpeakerClusterer()
         speaker_labels = clusterer.cluster_embeddings(embeddings)
 
+        # 更新状态：计算音频质量评分
+        speaker_processing_status[task_id] = {
+            "status": "processing",
+            "message": "正在计算音频质量评分...",
+            "progress": 85
+        }
+
+        # 按说话人分组音频
+        speaker_segments = {}
+        for audio_path, speaker_id in zip(audio_paths, speaker_labels):
+            if speaker_id is not None:
+                if speaker_id not in speaker_segments:
+                    speaker_segments[speaker_id] = []
+                speaker_segments[speaker_id].append(audio_path)
+
+        # 计算MOS分数
+        from mos_scorer import MOSScorer
+        mos_scorer = MOSScorer()
+        scored_segments = mos_scorer.score_speaker_audios(audio_dir, speaker_segments)
+
+        print(f"已完成MOS评分，共 {len(scored_segments)} 个说话人")
+
         # 保存到全局缓存，供语音克隆复用
         video_filename = os.path.basename(video_path)
         subtitle_filename = os.path.basename(subtitle_path)
@@ -286,14 +308,15 @@ async def run_speaker_diarization_process(task_id: str, video_path: str, subtitl
             "audio_paths": audio_paths,
             "speaker_labels": speaker_labels,
             "audio_dir": audio_dir,
-            "task_id": task_id
+            "task_id": task_id,
+            "scored_segments": scored_segments  # 保存MOS评分结果
         }
-        print(f"已缓存音频提取结果: {cache_key}")
+        print(f"已缓存音频提取结果和MOS评分: {cache_key}")
 
         # 更新状态为完成
         speaker_processing_status[task_id] = {
             "status": "completed",
-            "message": "说话人识别完成",
+            "message": "说话人识别和音频质量评分完成",
             "progress": 100,
             "speaker_labels": speaker_labels,
             "unique_speakers": clusterer.get_unique_speakers_count(speaker_labels)
@@ -387,19 +410,25 @@ async def run_voice_cloning_process(
         subtitle_filename = os.path.basename(source_subtitle_path)
         cache_key = (video_filename, subtitle_filename)
 
+        # 默认值
+        scored_segments = None
+        has_cached_mos = False
+
         if cache_key in audio_extraction_cache:
-            # 复用已提取的音频
-            print(f"复用已缓存的音频提取结果: {cache_key}")
+            # 复用已提取的音频和MOS评分
+            print(f"复用已缓存的音频提取结果和MOS评分: {cache_key}")
             cached_data = audio_extraction_cache[cache_key]
             audio_paths = cached_data["audio_paths"]
             speaker_labels = cached_data["speaker_labels"]
             audio_dir = cached_data["audio_dir"]
+            scored_segments = cached_data.get("scored_segments")  # 获取缓存的MOS评分
+            has_cached_mos = scored_segments is not None
 
             # 更新状态：复用已提取的音频
             voice_cloning_status[task_id] = {
                 "status": "processing",
-                "message": "正在复用已提取的音频和说话人识别结果...",
-                "progress": 25
+                "message": "正在复用已提取的音频、说话人识别和MOS评分结果...",
+                "progress": 35
             }
         else:
             # 需要重新提取音频
@@ -439,24 +468,29 @@ async def run_voice_cloning_process(
             clusterer = SpeakerClusterer()
             speaker_labels = clusterer.cluster_embeddings(embeddings)
 
-        # 4. 按说话人分组音频
-        speaker_segments = {}
-        for audio_path, speaker_id in zip(audio_paths, speaker_labels):
-            if speaker_id is not None:
-                if speaker_id not in speaker_segments:
-                    speaker_segments[speaker_id] = []
-                speaker_segments[speaker_id].append(audio_path)
+        # 4. 如果没有缓存的MOS评分，则需要计算
+        if not has_cached_mos:
+            # 按说话人分组音频
+            speaker_segments = {}
+            for audio_path, speaker_id in zip(audio_paths, speaker_labels):
+                if speaker_id is not None:
+                    if speaker_id not in speaker_segments:
+                        speaker_segments[speaker_id] = []
+                    speaker_segments[speaker_id].append(audio_path)
 
-        # 更新状态：MOS评分
-        voice_cloning_status[task_id] = {
-            "status": "processing",
-            "message": "正在对音频片段进行质量评分...",
-            "progress": 35
-        }
+            # 更新状态：MOS评分
+            voice_cloning_status[task_id] = {
+                "status": "processing",
+                "message": "正在对音频片段进行质量评分...",
+                "progress": 35
+            }
 
-        # 5. MOS打分
-        mos_scorer = MOSScorer()
-        scored_segments = mos_scorer.score_speaker_audios(audio_dir, speaker_segments)
+            # 5. MOS打分
+            mos_scorer = MOSScorer()
+            scored_segments = mos_scorer.score_speaker_audios(audio_dir, speaker_segments)
+            print(f"已完成MOS评分")
+        else:
+            print(f"使用缓存的MOS评分结果")
 
         # 更新状态：筛选和拼接音频
         voice_cloning_status[task_id] = {
