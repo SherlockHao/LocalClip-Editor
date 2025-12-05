@@ -185,6 +185,48 @@ const App: React.FC = () => {
     }
   };
 
+  const handleAddSpeaker = (gender: 'male' | 'female') => {
+    // 获取当前最大的说话人ID
+    const existingIds = Object.keys(speakerNameMapping).map(id => parseInt(id));
+    const maxId = existingIds.length > 0 ? Math.max(...existingIds) : -1;
+    const newId = maxId + 1;
+
+    // 计算该性别的当前数量
+    let count = 0;
+    Object.values(speakerNameMapping).forEach(name => {
+      if (gender === 'male' && name.startsWith('男')) count++;
+      if (gender === 'female' && name.startsWith('女')) count++;
+    });
+
+    // 生成新的说话人名称
+    const newName = gender === 'male' ? `男${count + 1}` : `女${count + 1}`;
+
+    // 更新映射
+    setSpeakerNameMapping({
+      ...speakerNameMapping,
+      [newId]: newName
+    });
+  };
+
+  const handleRemoveSpeaker = (speakerId: number) => {
+    // 从映射中删除该说话人
+    const newMapping = { ...speakerNameMapping };
+    delete newMapping[speakerId];
+    setSpeakerNameMapping(newMapping);
+
+    // 检查字幕中是否有使用该说话人，如果有则重置为undefined
+    const updatedSubtitles = subtitles.map(subtitle => {
+      if (subtitle.speaker_id === speakerId) {
+        return {
+          ...subtitle,
+          speaker_id: undefined
+        };
+      }
+      return subtitle;
+    });
+    setSubtitles(updatedSubtitles);
+  };
+
   const handleExport = () => {
     // TODO: 实现视频导出功能
   };
@@ -464,6 +506,8 @@ const App: React.FC = () => {
               onDeleteSubtitle={handleDeleteSubtitle}
               onSeek={handleSeek}
               speakerNameMapping={speakerNameMapping}
+              onAddSpeaker={handleAddSpeaker}
+              onRemoveSpeaker={handleRemoveSpeaker}
             />
 
             {/* 右侧：播放器 + 视频信息 */}

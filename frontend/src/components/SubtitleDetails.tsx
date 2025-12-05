@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Trash2, Edit2, Users, FileText, Save, X } from 'lucide-react';
+import { Trash2, Edit2, Users, FileText, Save, X, Plus, Minus } from 'lucide-react';
 
 interface Subtitle {
   start_time: number;
@@ -17,9 +17,10 @@ interface SubtitleDetailsProps {
   onDeleteSubtitle?: (index: number) => void;
   onSeek?: (time: number) => void;
   speakerNameMapping?: {[key: number]: string};
+  onAddSpeaker?: (gender: 'male' | 'female') => void;
+  onRemoveSpeaker?: (speakerId: number) => void;
 }
 
-// 获取所有唯一的说话人ID
 const getUniqueSpeakers = (subtitles: Subtitle[]): number[] => {
   const speakerIds = subtitles
     .map(sub => sub.speaker_id)
@@ -33,7 +34,9 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
   onEditSubtitle,
   onDeleteSubtitle,
   onSeek,
-  speakerNameMapping = {}
+  speakerNameMapping = {},
+  onAddSpeaker,
+  onRemoveSpeaker
 }) => {
   const activeSubtitleRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -56,36 +59,43 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
     return speakerColors[speakerId % speakerColors.length];
   };
 
-  // 自动滚动到当前播放的字幕
+  // 获取男女说话人列表
+  const maleSpeakers: Array<{id: number, name: string}> = [];
+  const femaleSpeakers: Array<{id: number, name: string}> = [];
+
+  Object.entries(speakerNameMapping).forEach(([id, name]) => {
+    const speakerId = parseInt(id);
+    if (name.startsWith('男')) {
+      maleSpeakers.push({ id: speakerId, name });
+    } else if (name.startsWith('女')) {
+      femaleSpeakers.push({ id: speakerId, name });
+    }
+  });
+
+  // 排序
+  const sortByNumber = (a: {name: string}, b: {name: string}) => {
+    const numA = parseInt(a.name.match(/\d+/)?.[0] || '0');
+    const numB = parseInt(b.name.match(/\d+/)?.[0] || '0');
+    return numA - numB;
+  };
+  maleSpeakers.sort(sortByNumber);
+  femaleSpeakers.sort(sortByNumber);
+
   useEffect(() => {
     if (activeSubtitleRef.current && containerRef.current) {
       const container = containerRef.current;
       const activeElement = activeSubtitleRef.current;
-
-      // 计算元素相对于容器的位置
       const containerRect = container.getBoundingClientRect();
       const elementRect = activeElement.getBoundingClientRect();
-
-      // 检查元素是否在可视区域内
-      const isVisible =
-        elementRect.top >= containerRect.top &&
-        elementRect.bottom <= containerRect.bottom;
-
-      // 如果不在可视区域，滚动到元素位置
+      const isVisible = elementRect.top >= containerRect.top && elementRect.bottom <= containerRect.bottom;
       if (!isVisible) {
-        activeElement.scrollIntoView({
-          behavior: 'smooth',
-          block: 'center',
-          inline: 'nearest'
-        });
+        activeElement.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
       }
     }
   }, [currentTime, subtitles]);
 
   const handleDeleteSubtitle = (index: number) => {
-    if (onDeleteSubtitle) {
-      onDeleteSubtitle(index);
-    }
+    if (onDeleteSubtitle) onDeleteSubtitle(index);
   };
 
   const handleStartEdit = (index: number) => {
@@ -95,12 +105,7 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
 
   const handleSaveEdit = (index: number) => {
     if (onEditSubtitle) {
-      const currentSubtitle = subtitles[index];
-      const updatedSubtitle = {
-        ...currentSubtitle,
-        text: editingText
-      };
-      onEditSubtitle(index, updatedSubtitle);
+      onEditSubtitle(index, { ...subtitles[index], text: editingText });
     }
     setEditingIndex(null);
     setEditingText('');
@@ -113,18 +118,18 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
 
   const handleSpeakerChange = (index: number, speakerId: number | undefined) => {
     if (onEditSubtitle) {
-      const currentSubtitle = subtitles[index];
-      const updatedSubtitle = {
-        ...currentSubtitle,
-        speaker_id: speakerId
-      };
-      onEditSubtitle(index, updatedSubtitle);
+      onEditSubtitle(index, { ...subtitles[index], speaker_id: speakerId });
     }
   };
 
   const handleSubtitleClick = (index: number) => {
-    if (onSeek) {
-      onSeek(subtitles[index].start_time);
+    if (onSeek) onSeek(subtitles[index].start_time);
+  };
+
+  const handleRemoveSpeaker = (gender: 'male' | 'female') => {
+    const speakers = gender === 'male' ? maleSpeakers : femaleSpeakers;
+    if (speakers.length > 0 && onRemoveSpeaker) {
+      onRemoveSpeaker(speakers[speakers.length - 1].id);
     }
   };
 
@@ -153,6 +158,58 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
         </h3>
       </div>
 
+      {/* 说话人列表区域 - 两行布局 */}
+      {Object.keys(speakerNameMapping).length > 0 && (
+        <div className="px-4 py-3 border-b border-slate-700 bg-slate-800/50 flex-shrink-0">
+          <div className="flex items-center space-x-2 mb-2">
+            <Users size={14} className="text-purple-400" />
+            <span className="text-xs font-semibold text-slate-300">说话人</span>
+          </div>
+          <div className="space-y-2">
+            {/* 男声行 */}
+            <div className="flex items-center space-x-2 overflow-x-auto pb-1">
+              <span className="flex-shrink-0 text-xs font-semibold text-blue-400">男:</span>
+              {maleSpeakers.map(speaker => {
+                const colors = getColorBySpacker(speaker.id);
+                return (
+                  <div key={speaker.id} className={`flex-shrink-0 px-3 py-1.5 rounded-lg border-2 ${colors.badge} ${colors.border} text-xs font-semibold`}>
+                    {speaker.name}
+                  </div>
+                );
+              })}
+              <button onClick={() => onAddSpeaker?.('male')} className="flex-shrink-0 w-7 h-7 rounded-lg border-2 border-dashed border-blue-600/50 bg-blue-700/20 hover:bg-blue-700/40 text-blue-400 flex items-center justify-center" title="添加男声">
+                <Plus size={14} />
+              </button>
+              {maleSpeakers.length > 0 && (
+                <button onClick={() => handleRemoveSpeaker('male')} className="flex-shrink-0 w-7 h-7 rounded-lg border-2 border-dashed border-red-600/50 bg-red-700/20 hover:bg-red-700/40 text-red-400 flex items-center justify-center" title="删除最后一个男声">
+                  <Minus size={14} />
+                </button>
+              )}
+            </div>
+            {/* 女声行 */}
+            <div className="flex items-center space-x-2 overflow-x-auto pb-1">
+              <span className="flex-shrink-0 text-xs font-semibold text-pink-400">女:</span>
+              {femaleSpeakers.map(speaker => {
+                const colors = getColorBySpacker(speaker.id);
+                return (
+                  <div key={speaker.id} className={`flex-shrink-0 px-3 py-1.5 rounded-lg border-2 ${colors.badge} ${colors.border} text-xs font-semibold`}>
+                    {speaker.name}
+                  </div>
+                );
+              })}
+              <button onClick={() => onAddSpeaker?.('female')} className="flex-shrink-0 w-7 h-7 rounded-lg border-2 border-dashed border-pink-600/50 bg-pink-700/20 hover:bg-pink-700/40 text-pink-400 flex items-center justify-center" title="添加女声">
+                <Plus size={14} />
+              </button>
+              {femaleSpeakers.length > 0 && (
+                <button onClick={() => handleRemoveSpeaker('female')} className="flex-shrink-0 w-7 h-7 rounded-lg border-2 border-dashed border-red-600/50 bg-red-700/20 hover:bg-red-700/40 text-red-400 flex items-center justify-center" title="删除最后一个女声">
+                  <Minus size={14} />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 字幕列表 */}
       <div ref={containerRef} className="flex-1 overflow-y-auto p-4 space-y-2.5">
         {subtitles.map((subtitle, index) => {
@@ -164,104 +221,61 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
               key={index}
               ref={isPlaying ? activeSubtitleRef : null}
               onClick={() => handleSubtitleClick(index)}
-              className={`p-3 rounded-lg border-2 transition-all duration-200 group cursor-pointer
-                ${isPlaying
-                  ? 'bg-blue-500/25 border-blue-400 shadow-lg shadow-blue-500/30 scale-105'
-                  : `${colors.bg} border-slate-600 hover:border-slate-500 hover:shadow-md`
-                }`}
+              className={`p-3 rounded-lg border-2 transition-all duration-200 group cursor-pointer ${
+                isPlaying ? 'bg-blue-500/25 border-blue-400 shadow-lg shadow-blue-500/30 scale-105' : `${colors.bg} border-slate-600 hover:border-slate-500 hover:shadow-md`
+              }`}
             >
               {/* 索引和时间 */}
               <div className="flex items-center justify-between mb-2">
-                <span className={`text-xs font-mono font-bold ${isPlaying ? 'text-blue-300' : 'text-slate-400'}`}>
-                  #{index + 1}
-                </span>
+                <span className={`text-xs font-mono font-bold ${isPlaying ? 'text-blue-300' : 'text-slate-400'}`}>#{index + 1}</span>
                 <span className={`text-xs font-mono font-semibold ${isPlaying ? 'text-blue-300' : 'text-slate-500'}`}>
                   {subtitle.start_time_formatted} - {subtitle.end_time_formatted}
                 </span>
               </div>
 
-              {/* 说话人选择 */}
-              {uniqueSpeakers.length > 0 && (
-                <div className="mb-2" onClick={(e) => e.stopPropagation()}>
-                  <select
-                    value={subtitle.speaker_id ?? ''}
-                    onChange={(e) => handleSpeakerChange(index, e.target.value ? Number(e.target.value) : undefined)}
-                    className={`text-xs font-semibold px-2 py-1 rounded border-2 transition-colors ${
-                      subtitle.speaker_id !== undefined
-                        ? `${colors.badge} border-transparent`
-                        : 'bg-slate-700/50 text-slate-400 border-slate-600'
-                    } hover:border-blue-400/50 focus:outline-none focus:ring-2 focus:ring-blue-500/50 cursor-pointer`}
-                  >
-                    <option value="">选择说话人</option>
-                    {uniqueSpeakers.map(speakerId => (
-                      <option key={speakerId} value={speakerId}>
-                        {speakerNameMapping[speakerId] || `说话人${speakerId}`}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
               {/* 字幕文本 */}
               {editingIndex === index ? (
-                // 编辑模式
-                <div className="mb-3" onClick={(e) => e.stopPropagation()}>
-                  <textarea
-                    value={editingText}
-                    onChange={(e) => setEditingText(e.target.value)}
-                    className="w-full text-xs leading-relaxed bg-slate-700/50 text-slate-100 border border-blue-500/50 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/50 resize-none"
-                    rows={3}
-                    autoFocus
-                  />
+                <div className="mb-2" onClick={(e) => e.stopPropagation()}>
+                  <textarea value={editingText} onChange={(e) => setEditingText(e.target.value)} className="w-full text-xs leading-relaxed bg-slate-700/50 text-slate-100 border border-blue-500/50 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/50 resize-none" rows={3} autoFocus />
                 </div>
               ) : (
-                // 显示模式
-                <p className={`text-xs leading-relaxed mb-3 ${isPlaying ? 'text-slate-100 font-semibold' : 'text-slate-300'}`}>
-                  {subtitle.text}
-                </p>
+                <p className={`text-xs leading-relaxed mb-2 ${isPlaying ? 'text-slate-100 font-semibold' : 'text-slate-300'}`}>{subtitle.text}</p>
               )}
 
-              {/* 操作按钮 */}
+              {/* 操作区域 */}
               {editingIndex === index ? (
-                // 编辑模式的按钮
                 <div className="flex gap-1.5" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    className="flex-1 flex items-center justify-center gap-1 text-xs font-semibold bg-green-600/30 border border-green-500/40 text-green-300 px-2 py-1.5 rounded hover:bg-green-600/50 hover:border-green-400/60 transition-colors"
-                    onClick={() => handleSaveEdit(index)}
-                  >
-                    <Save size={12} />
-                    保存
+                  <button onClick={() => handleSaveEdit(index)} className="flex-1 flex items-center justify-center gap-1 text-xs font-semibold bg-green-600/30 border border-green-500/40 text-green-300 px-2 py-1.5 rounded hover:bg-green-600/50 transition-colors">
+                    <Save size={12} />保存
                   </button>
-                  <button
-                    className="flex-1 flex items-center justify-center gap-1 text-xs font-semibold bg-gray-600/30 border border-gray-500/40 text-gray-300 px-2 py-1.5 rounded hover:bg-gray-600/50 hover:border-gray-400/60 transition-colors"
-                    onClick={handleCancelEdit}
-                  >
-                    <X size={12} />
-                    取消
+                  <button onClick={handleCancelEdit} className="flex-1 flex items-center justify-center gap-1 text-xs font-semibold bg-gray-600/30 border border-gray-500/40 text-gray-300 px-2 py-1.5 rounded hover:bg-gray-600/50 transition-colors">
+                    <X size={12} />取消
                   </button>
                 </div>
+              ) : uniqueSpeakers.length > 0 ? (
+                <div className="flex gap-1.5 items-center" onClick={(e) => e.stopPropagation()}>
+                  <select value={subtitle.speaker_id ?? ''} onChange={(e) => handleSpeakerChange(index, e.target.value ? Number(e.target.value) : undefined)} className={`flex-1 text-xs font-semibold px-2 py-1 rounded border-2 ${subtitle.speaker_id !== undefined ? `${colors.badge} border-transparent` : 'bg-slate-700/50 text-slate-400 border-slate-600'} hover:border-blue-400/50 focus:outline-none cursor-pointer`}>
+                    <option value="">选择说话人</option>
+                    {uniqueSpeakers.map(speakerId => (
+                      <option key={speakerId} value={speakerId}>{speakerNameMapping[speakerId] || `说话人${speakerId}`}</option>
+                    ))}
+                  </select>
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onClick={(e) => { e.stopPropagation(); handleStartEdit(index); }} className="flex items-center justify-center text-xs bg-blue-600/30 border border-blue-500/40 text-blue-300 px-2 py-1 rounded hover:bg-blue-600/50 transition-colors" title="编辑">
+                      <Edit2 size={11} />
+                    </button>
+                    <button onClick={(e) => { e.stopPropagation(); handleDeleteSubtitle(index); }} className="flex items-center justify-center text-xs bg-red-600/30 border border-red-500/40 text-red-300 px-2 py-1 rounded hover:bg-red-600/50 transition-colors" title="删除">
+                      <Trash2 size={11} />
+                    </button>
+                  </div>
+                </div>
               ) : (
-                // 普通模式的按钮
-                <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    className="flex-1 flex items-center justify-center gap-1 text-xs font-semibold bg-blue-600/30 border border-blue-500/40 text-blue-300 px-2 py-1.5 rounded hover:bg-blue-600/50 hover:border-blue-400/60 transition-colors"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleStartEdit(index);
-                    }}
-                  >
-                    <Edit2 size={12} />
-                    编辑
+                <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                  <button onClick={(e) => { e.stopPropagation(); handleStartEdit(index); }} className="flex-1 flex items-center justify-center gap-1 text-xs font-semibold bg-blue-600/30 border border-blue-500/40 text-blue-300 px-2 py-1.5 rounded hover:bg-blue-600/50 transition-colors">
+                    <Edit2 size={12} />编辑
                   </button>
-                  <button
-                    className="flex-1 flex items-center justify-center gap-1 text-xs font-semibold bg-red-600/30 border border-red-500/40 text-red-300 px-2 py-1.5 rounded hover:bg-red-600/50 hover:border-red-400/60 transition-colors"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteSubtitle(index);
-                    }}
-                  >
-                    <Trash2 size={12} />
-                    删除
+                  <button onClick={(e) => { e.stopPropagation(); handleDeleteSubtitle(index); }} className="flex-1 flex items-center justify-center gap-1 text-xs font-semibold bg-red-600/30 border border-red-500/40 text-red-300 px-2 py-1.5 rounded hover:bg-red-600/50 transition-colors">
+                    <Trash2 size={12} />删除
                   </button>
                 </div>
               )}
