@@ -30,6 +30,9 @@ export interface SubtitleEntry {
   left_percent?: number;
   width_percent?: number;
   speaker_id?: number;  // 新增：说话人ID
+  target_text?: string;  // 新增：目标语言文本
+  cloned_audio_path?: string;  // 新增：克隆音频路径
+  cloned_speaker_id?: number;  // 新增：克隆时使用的说话人ID
 }
 
 export interface ExportRequest {

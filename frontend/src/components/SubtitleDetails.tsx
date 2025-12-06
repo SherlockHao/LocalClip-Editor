@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Trash2, Edit2, Users, FileText, Save, X, Plus, Minus } from 'lucide-react';
+import { Trash2, Edit2, Users, FileText, Save, X, Plus, Minus, Play, RotateCw } from 'lucide-react';
 
 interface Subtitle {
   start_time: number;
@@ -8,6 +8,9 @@ interface Subtitle {
   end_time_formatted: string;
   text: string;
   speaker_id?: number;
+  target_text?: string;
+  cloned_audio_path?: string;
+  cloned_speaker_id?: number;
 }
 
 interface SubtitleDetailsProps {
@@ -19,6 +22,9 @@ interface SubtitleDetailsProps {
   speakerNameMapping?: {[key: number]: string};
   onAddSpeaker?: (gender: 'male' | 'female') => void;
   onRemoveSpeaker?: (speakerId: number) => void;
+  onPlayClonedAudio?: (audioPath: string) => void;
+  onRegenerateSegment?: (index: number, newSpeakerId: number) => void;
+  voiceCloningTaskId?: string;
 }
 
 const getUniqueSpeakers = (subtitles: Subtitle[]): number[] => {
@@ -36,17 +42,24 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
   onSeek,
   speakerNameMapping = {},
   onAddSpeaker,
-  onRemoveSpeaker
+  onRemoveSpeaker,
+  onPlayClonedAudio,
+  onRegenerateSegment,
+  voiceCloningTaskId
 }) => {
   const activeSubtitleRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingText, setEditingText] = useState<string>('');
+  const [selectedClonedSpeaker, setSelectedClonedSpeaker] = useState<{[index: number]: number}>({});
 
   const uniqueSpeakers = getUniqueSpeakers(subtitles);
 
+  // 获取所有说话人ID（包括手动添加但未分配的）
+  const allSpeakerIds = Object.keys(speakerNameMapping).map(id => parseInt(id));
+
   // 按照男1、男2...女1、女2的顺序排序说话人
-  const sortedSpeakers = [...uniqueSpeakers].sort((a, b) => {
+  const sortedSpeakers = [...allSpeakerIds].sort((a, b) => {
     const nameA = speakerNameMapping[a] || `说话人${a}`;
     const nameB = speakerNameMapping[b] || `说话人${b}`;
 
@@ -148,6 +161,23 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
     const speakers = gender === 'male' ? maleSpeakers : femaleSpeakers;
     if (speakers.length > 0 && onRemoveSpeaker) {
       onRemoveSpeaker(speakers[speakers.length - 1].id);
+    }
+  };
+
+  const handleClonedSpeakerChange = (index: number, newSpeakerId: number) => {
+    setSelectedClonedSpeaker(prev => ({ ...prev, [index]: newSpeakerId }));
+  };
+
+  const handlePlayClonedAudio = (audioPath: string) => {
+    if (onPlayClonedAudio) {
+      onPlayClonedAudio(audioPath);
+    }
+  };
+
+  const handleRegenerateSegment = (index: number) => {
+    const newSpeakerId = selectedClonedSpeaker[index];
+    if (newSpeakerId !== undefined && onRegenerateSegment) {
+      onRegenerateSegment(index, newSpeakerId);
     }
   };
 
@@ -257,7 +287,14 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
                   <textarea value={editingText} onChange={(e) => setEditingText(e.target.value)} className="w-full text-xs leading-relaxed bg-slate-700/50 text-slate-100 border border-blue-500/50 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/50 resize-none" rows={3} autoFocus />
                 </div>
               ) : (
-                <p className={`text-xs leading-relaxed mb-2 ${isPlaying ? 'text-slate-100 font-semibold' : 'text-slate-300'}`}>{subtitle.text}</p>
+                <>
+                  <p className={`text-xs leading-relaxed mb-1 ${isPlaying ? 'text-slate-100 font-semibold' : 'text-slate-300'}`}>{subtitle.text}</p>
+                  {subtitle.target_text && (
+                    <p className="text-xs leading-relaxed mb-2 text-cyan-300 italic border-l-2 border-cyan-500/50 pl-2 bg-cyan-900/10 py-1">
+                      {subtitle.target_text}
+                    </p>
+                  )}
+                </>
               )}
 
               {/* 操作区域 */}
@@ -270,22 +307,57 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
                     <X size={12} />取消
                   </button>
                 </div>
-              ) : uniqueSpeakers.length > 0 ? (
-                <div className="flex gap-1.5 items-center" onClick={(e) => e.stopPropagation()}>
-                  <select value={subtitle.speaker_id ?? ''} onChange={(e) => handleSpeakerChange(index, e.target.value ? Number(e.target.value) : undefined)} className={`flex-1 text-xs font-semibold px-2 py-1 rounded border-2 ${subtitle.speaker_id !== undefined ? `${colors.badge} border-transparent` : 'bg-slate-700/50 text-slate-400 border-slate-600'} hover:border-blue-400/50 focus:outline-none cursor-pointer`}>
-                    <option value="">选择说话人</option>
-                    {sortedSpeakers.map(speakerId => (
-                      <option key={speakerId} value={speakerId}>{speakerNameMapping[speakerId] || `说话人${speakerId}`}</option>
-                    ))}
-                  </select>
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={(e) => { e.stopPropagation(); handleStartEdit(index); }} className="flex items-center justify-center text-xs bg-blue-600/30 border border-blue-500/40 text-blue-300 px-2 py-1 rounded hover:bg-blue-600/50 transition-colors" title="编辑">
-                      <Edit2 size={11} />
-                    </button>
-                    <button onClick={(e) => { e.stopPropagation(); handleDeleteSubtitle(index); }} className="flex items-center justify-center text-xs bg-red-600/30 border border-red-500/40 text-red-300 px-2 py-1 rounded hover:bg-red-600/50 transition-colors" title="删除">
-                      <Trash2 size={11} />
-                    </button>
+              ) : sortedSpeakers.length > 0 ? (
+                <div className="space-y-1.5" onClick={(e) => e.stopPropagation()}>
+                  {/* 原始说话人选择 */}
+                  <div className="flex gap-1.5 items-center">
+                    <select value={subtitle.speaker_id ?? ''} onChange={(e) => handleSpeakerChange(index, e.target.value ? Number(e.target.value) : undefined)} className={`flex-1 text-xs font-semibold px-2 py-1 rounded border-2 ${subtitle.speaker_id !== undefined ? `${colors.badge} border-transparent` : 'bg-slate-700/50 text-slate-400 border-slate-600'} hover:border-blue-400/50 focus:outline-none cursor-pointer`}>
+                      <option value="">选择说话人</option>
+                      {sortedSpeakers.map(speakerId => (
+                        <option key={speakerId} value={speakerId}>{speakerNameMapping[speakerId] || `说话人${speakerId}`}</option>
+                      ))}
+                    </select>
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button onClick={(e) => { e.stopPropagation(); handleStartEdit(index); }} className="flex items-center justify-center text-xs bg-blue-600/30 border border-blue-500/40 text-blue-300 px-2 py-1 rounded hover:bg-blue-600/50 transition-colors" title="编辑">
+                        <Edit2 size={11} />
+                      </button>
+                      <button onClick={(e) => { e.stopPropagation(); handleDeleteSubtitle(index); }} className="flex items-center justify-center text-xs bg-red-600/30 border border-red-500/40 text-red-300 px-2 py-1 rounded hover:bg-red-600/50 transition-colors" title="删除">
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
                   </div>
+
+                  {/* 克隆音色选择和播放 */}
+                  {subtitle.cloned_audio_path && (
+                    <div className="flex gap-1.5 items-center">
+                      <select
+                        value={selectedClonedSpeaker[index] ?? subtitle.cloned_speaker_id ?? ''}
+                        onChange={(e) => handleClonedSpeakerChange(index, Number(e.target.value))}
+                        className="flex-1 text-xs font-semibold px-2 py-1 rounded border-2 bg-emerald-500/20 border-emerald-500/40 text-emerald-300 hover:border-emerald-400/60 focus:outline-none cursor-pointer"
+                      >
+                        <option value="">克隆音色</option>
+                        {sortedSpeakers.map(speakerId => (
+                          <option key={speakerId} value={speakerId}>{speakerNameMapping[speakerId] || `说话人${speakerId}`}</option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handlePlayClonedAudio(subtitle.cloned_audio_path!); }}
+                        className="flex items-center justify-center text-xs bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 px-2 py-1 rounded hover:bg-emerald-600/50 transition-colors"
+                        title="播放克隆音频"
+                      >
+                        <Play size={11} />
+                      </button>
+                      {selectedClonedSpeaker[index] && selectedClonedSpeaker[index] !== subtitle.cloned_speaker_id && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleRegenerateSegment(index); }}
+                          className="flex items-center justify-center text-xs bg-orange-600/30 border border-orange-500/40 text-orange-300 px-2 py-1 rounded hover:bg-orange-600/50 transition-colors"
+                          title="重新生成"
+                        >
+                          <RotateCw size={11} />
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>

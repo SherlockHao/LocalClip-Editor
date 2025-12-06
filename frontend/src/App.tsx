@@ -432,6 +432,66 @@ const App: React.FC = () => {
     }
   };
 
+  // 播放克隆音频
+  const handlePlayClonedAudio = (audioPath: string) => {
+    // 构建完整的音频URL
+    const audioUrl = `/api/cloned-audio/${voiceCloningTaskId}/${audioPath.split('/').pop()}`;
+    const audio = new Audio(audioUrl);
+    audio.play().catch(error => {
+      console.error('播放克隆音频失败:', error);
+      alert('播放克隆音频失败');
+    });
+  };
+
+  // 重新生成单个片段
+  const handleRegenerateSegment = async (index: number, newSpeakerId: number) => {
+    if (!voiceCloningTaskId) {
+      alert('语音克隆任务ID不存在');
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/voice-cloning/regenerate-segment', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          task_id: voiceCloningTaskId,
+          segment_index: index,
+          new_speaker_id: newSpeakerId
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`重新生成失败: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        // 更新该片段的克隆音频信息
+        setSubtitles(prevSubtitles => {
+          return prevSubtitles.map((subtitle, i) => {
+            if (i === index) {
+              return {
+                ...subtitle,
+                cloned_audio_path: result.cloned_audio_path,
+                cloned_speaker_id: result.new_speaker_id
+              };
+            }
+            return subtitle;
+          });
+        });
+
+        alert('重新生成成功！');
+      }
+    } catch (error) {
+      console.error('重新生成失败:', error);
+      alert('重新生成失败: ' + (error as Error).message);
+    }
+  };
+
   // 轮询语音克隆状态
   const pollVoiceCloningStatus = async (taskId: string) => {
     try {
@@ -445,12 +505,29 @@ const App: React.FC = () => {
 
       if (status.status === 'completed') {
         setIsProcessingVoiceCloning(false);
-        setVoiceCloningTaskId(null);
+
+        // 更新字幕数据，添加目标语言文本和克隆音频路径
+        if (status.cloned_results && Array.isArray(status.cloned_results)) {
+          setSubtitles(prevSubtitles => {
+            return prevSubtitles.map((subtitle, index) => {
+              const clonedResult = status.cloned_results.find((r: any) => r.index === index);
+              if (clonedResult) {
+                return {
+                  ...subtitle,
+                  target_text: clonedResult.target_text,
+                  cloned_audio_path: clonedResult.cloned_audio_path,
+                  cloned_speaker_id: clonedResult.speaker_id
+                };
+              }
+              return subtitle;
+            });
+          });
+        }
 
         // 显示成功通知
         setNotificationData({
           title: '语音克隆完成',
-          message: '已成功完成语音克隆，请在导出目录查看克隆后的视频。',
+          message: '已成功完成语音克隆，可在字幕详情中播放克隆音频。',
           uniqueSpeakers: undefined
         });
         setShowNotification(true);
@@ -537,6 +614,9 @@ const App: React.FC = () => {
               speakerNameMapping={speakerNameMapping}
               onAddSpeaker={handleAddSpeaker}
               onRemoveSpeaker={handleRemoveSpeaker}
+              onPlayClonedAudio={handlePlayClonedAudio}
+              onRegenerateSegment={handleRegenerateSegment}
+              voiceCloningTaskId={voiceCloningTaskId || undefined}
             />
 
             {/* 右侧：播放器 + 视频信息 */}

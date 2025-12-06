@@ -605,15 +605,140 @@ async def run_voice_cloning_process(
         # 保存到状态中
         voice_cloning_status[task_id]["speaker_references"] = speaker_references
 
-        # 更新状态：准备语音克隆（这里暂时完成准备阶段）
+        # ========== 开始语音克隆流程 ==========
+        await asyncio.sleep(1)  # 给前端时间轮询
+
+        # 9. 为每个说话人编码参考音频
+        voice_cloning_status[task_id] = {
+            "status": "processing",
+            "message": "正在编码说话人参考音频...",
+            "progress": 70
+        }
+        await asyncio.sleep(0.5)
+
+        from fish_voice_cloner import FishVoiceCloner
+        cloner = FishVoiceCloner()
+
+        # 编码每个说话人的参考音频
+        speaker_encoded = {}
+        for speaker_id, ref_data in speaker_references.items():
+            work_dir = os.path.join(audio_dir, f"speaker_{speaker_id}_encoded")
+            os.makedirs(work_dir, exist_ok=True)
+
+            print(f"编码说话人 {speaker_id} 的参考音频...")
+            fake_npy_path = cloner.encode_reference_audio(
+                ref_data["reference_audio"],
+                work_dir
+            )
+            speaker_encoded[speaker_id] = {
+                "fake_npy": fake_npy_path,
+                "ref_text": ref_data["reference_text"]
+            }
+
+        # 10. 读取目标语言字幕
+        voice_cloning_status[task_id] = {
+            "status": "processing",
+            "message": "正在读取目标语言字幕...",
+            "progress": 75
+        }
+        await asyncio.sleep(0.5)
+
+        from srt_parser import SRTParser
+        srt_parser = SRTParser()
+        target_subtitles = srt_parser.parse_srt(target_subtitle_path)
+
+        # 11. 为每个字幕片段生成克隆语音
+        voice_cloning_status[task_id] = {
+            "status": "processing",
+            "message": "正在生成克隆语音...",
+            "progress": 80
+        }
+        await asyncio.sleep(0.5)
+
+        cloned_results = []
+        cloned_audio_dir = os.path.join("exports", f"cloned_{task_id}")
+        os.makedirs(cloned_audio_dir, exist_ok=True)
+
+        total_segments = len(speaker_labels)
+        for idx, (speaker_id, target_sub) in enumerate(zip(speaker_labels, target_subtitles)):
+            if speaker_id is None:
+                # 没有分配说话人的片段跳过
+                cloned_results.append({
+                    "index": idx,
+                    "speaker_id": None,
+                    "target_text": target_sub["text"],
+                    "cloned_audio_path": None
+                })
+                continue
+
+            # 获取该说话人的编码信息
+            if speaker_id not in speaker_encoded:
+                print(f"警告: 说话人 {speaker_id} 没有参考音频编码，跳过片段 {idx}")
+                cloned_results.append({
+                    "index": idx,
+                    "speaker_id": speaker_id,
+                    "target_text": target_sub["text"],
+                    "cloned_audio_path": None
+                })
+                continue
+
+            ref_info = speaker_encoded[speaker_id]
+            target_text = target_sub["text"]
+
+            # 生成输出路径
+            output_audio = os.path.join(cloned_audio_dir, f"segment_{idx:04d}.wav")
+            work_dir = os.path.join(audio_dir, f"cloning_{idx}")
+
+            try:
+                print(f"克隆片段 {idx}/{total_segments}: 说话人{speaker_id}, 文本: {target_text[:30]}...")
+
+                # 步骤2: 生成语义token
+                codes_path = cloner.generate_semantic_tokens(
+                    target_text=target_text,
+                    ref_text=ref_info["ref_text"],
+                    fake_npy_path=ref_info["fake_npy"],
+                    output_dir=work_dir
+                )
+
+                # 步骤3: 解码为音频
+                cloner.decode_to_audio(codes_path, output_audio)
+
+                # 生成API路径
+                audio_filename = f"segment_{idx:04d}.wav"
+                api_path = f"/api/cloned-audio/{task_id}/{audio_filename}"
+
+                cloned_results.append({
+                    "index": idx,
+                    "speaker_id": speaker_id,
+                    "target_text": target_text,
+                    "cloned_audio_path": api_path
+                })
+
+            except Exception as e:
+                print(f"片段 {idx} 克隆失败: {str(e)}")
+                cloned_results.append({
+                    "index": idx,
+                    "speaker_id": speaker_id,
+                    "target_text": target_text,
+                    "cloned_audio_path": None,
+                    "error": str(e)
+                })
+
+            # 更新进度
+            progress = 80 + int((idx + 1) / total_segments * 15)
+            voice_cloning_status[task_id]["progress"] = progress
+
+        # 更新状态：完成
         voice_cloning_status[task_id] = {
             "status": "completed",
-            "message": "已完成说话人参考数据准备，待实现语音克隆算法",
+            "message": "语音克隆完成",
             "progress": 100,
             "speaker_references": speaker_references,
             "unique_speakers": len(speaker_references),
             "speaker_name_mapping": speaker_name_mapping,
-            "gender_dict": gender_dict
+            "gender_dict": gender_dict,
+            "cloned_results": cloned_results,
+            "cloned_audio_dir": cloned_audio_dir
         }
 
         print(f"\n语音克隆准备完成！")
@@ -642,6 +767,177 @@ async def get_voice_cloning_status(task_id: str):
         raise HTTPException(status_code=404, detail="任务不存在")
 
     return voice_cloning_status[task_id]
+
+
+@app.get("/cloned-audio/{task_id}/{filename}")
+async def serve_cloned_audio(task_id: str, filename: str, request: Request):
+    """提供克隆音频文件的流式传输，支持 HTTP Range 请求"""
+    file_path = EXPORTS_DIR / f"cloned_{task_id}" / filename
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="音频文件未找到")
+
+    file_size = file_path.stat().st_size
+    range_header = request.headers.get("range")
+
+    # 如果没有 Range 请求头，返回整个文件
+    if not range_header:
+        return FileResponse(
+            file_path,
+            media_type="audio/wav",
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(file_size),
+            }
+        )
+
+    # 解析 Range 请求头
+    range_match = re.match(r"bytes=(\d+)-(\d*)", range_header)
+    if not range_match:
+        raise HTTPException(status_code=416, detail="Invalid range")
+
+    start = int(range_match.group(1))
+    end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+
+    # 确保范围有效
+    if start >= file_size or end >= file_size or start > end:
+        raise HTTPException(status_code=416, detail="Range not satisfiable")
+
+    chunk_size = end - start + 1
+
+    # 读取文件的指定范围
+    def iterfile():
+        with open(file_path, "rb") as f:
+            f.seek(start)
+            remaining = chunk_size
+            while remaining > 0:
+                chunk = f.read(min(8192, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    # 返回 206 Partial Content
+    return StreamingResponse(
+        iterfile(),
+        status_code=206,
+        media_type="audio/wav",
+        headers={
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(chunk_size),
+        }
+    )
+
+
+class RegenerateSegmentRequest(BaseModel):
+    task_id: str
+    segment_index: int
+    new_speaker_id: int
+
+
+@app.post("/voice-cloning/regenerate-segment")
+async def regenerate_segment(request: RegenerateSegmentRequest):
+    """重新生成单个字幕片段的克隆语音（使用不同的说话人音色）"""
+    try:
+        task_id = request.task_id
+        segment_index = request.segment_index
+        new_speaker_id = request.new_speaker_id
+
+        # 检查任务是否存在
+        if task_id not in voice_cloning_status:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        status = voice_cloning_status[task_id]
+        if status["status"] != "completed":
+            raise HTTPException(status_code=400, detail="语音克隆任务尚未完成")
+
+        # 获取克隆结果
+        cloned_results = status.get("cloned_results", [])
+        if segment_index < 0 or segment_index >= len(cloned_results):
+            raise HTTPException(status_code=400, detail="片段索引无效")
+
+        # 获取说话人参考数据
+        speaker_references = status.get("speaker_references", {})
+        if new_speaker_id not in speaker_references:
+            raise HTTPException(status_code=400, detail=f"说话人 {new_speaker_id} 不存在")
+
+        # 获取目标文本
+        segment_data = cloned_results[segment_index]
+        target_text = segment_data["target_text"]
+
+        # 查找音频提取缓存以获取audio_dir
+        audio_dir = None
+        for cache_key, cache_data in audio_extraction_cache.items():
+            if cache_data.get("task_id") == task_id or task_id in cache_data.get("audio_dir", ""):
+                audio_dir = cache_data["audio_dir"]
+                break
+
+        if not audio_dir:
+            # 如果找不到缓存，尝试使用默认路径
+            audio_dir = f"audio_segments/{task_id}"
+
+        # 检查说话人是否已编码
+        speaker_encoded_dir = os.path.join(audio_dir, f"speaker_{new_speaker_id}_encoded")
+        fake_npy_path = os.path.join(speaker_encoded_dir, "fake.npy")
+
+        from fish_voice_cloner import FishVoiceCloner
+        cloner = FishVoiceCloner()
+
+        # 如果该说话人尚未编码，先编码
+        if not os.path.exists(fake_npy_path):
+            print(f"说话人 {new_speaker_id} 尚未编码，开始编码...")
+            ref_data = speaker_references[new_speaker_id]
+            os.makedirs(speaker_encoded_dir, exist_ok=True)
+            fake_npy_path = cloner.encode_reference_audio(
+                ref_data["reference_audio"],
+                speaker_encoded_dir
+            )
+
+        # 获取参考文本
+        ref_text = speaker_references[new_speaker_id]["reference_text"]
+
+        # 生成输出路径
+        cloned_audio_dir = status.get("cloned_audio_dir", os.path.join("exports", f"cloned_{task_id}"))
+        output_audio = os.path.join(cloned_audio_dir, f"segment_{segment_index:04d}.wav")
+        work_dir = os.path.join(audio_dir, f"regen_{segment_index}_{new_speaker_id}")
+        os.makedirs(work_dir, exist_ok=True)
+
+        print(f"重新生成片段 {segment_index}: 新说话人 {new_speaker_id}, 文本: {target_text[:30]}...")
+
+        # 步骤2: 生成语义token
+        codes_path = cloner.generate_semantic_tokens(
+            target_text=target_text,
+            ref_text=ref_text,
+            fake_npy_path=fake_npy_path,
+            output_dir=work_dir
+        )
+
+        # 步骤3: 解码为音频
+        cloner.decode_to_audio(codes_path, output_audio)
+
+        # 生成API路径
+        audio_filename = f"segment_{segment_index:04d}.wav"
+        api_path = f"/api/cloned-audio/{task_id}/{audio_filename}"
+
+        # 更新克隆结果
+        cloned_results[segment_index]["speaker_id"] = new_speaker_id
+        cloned_results[segment_index]["cloned_audio_path"] = api_path
+        voice_cloning_status[task_id]["cloned_results"] = cloned_results
+
+        return {
+            "success": True,
+            "segment_index": segment_index,
+            "new_speaker_id": new_speaker_id,
+            "cloned_audio_path": api_path,
+            "target_text": target_text
+        }
+
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"重新生成片段失败: {error_detail}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/export")
