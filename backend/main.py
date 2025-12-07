@@ -477,6 +477,9 @@ async def run_voice_cloning_process(
     target_subtitle_path: str
 ):
     """后台执行语音克隆处理"""
+    import time
+    start_time = time.time()  # 记录开始时间
+
     try:
         import asyncio
         from mos_scorer import MOSScorer
@@ -734,17 +737,39 @@ async def run_voice_cloning_process(
         # 按索引排序结果
         cloned_results.sort(key=lambda x: x["index"])
 
+        # 计算总耗时
+        end_time = time.time()
+        total_duration = end_time - start_time
+
+        # 格式化时间显示
+        def format_duration(seconds):
+            """将秒数格式化为易读的时间字符串"""
+            if seconds < 60:
+                return f"{seconds:.1f}秒"
+            elif seconds < 3600:
+                minutes = int(seconds // 60)
+                secs = int(seconds % 60)
+                return f"{minutes}分{secs}秒"
+            else:
+                hours = int(seconds // 3600)
+                minutes = int((seconds % 3600) // 60)
+                return f"{hours}小时{minutes}分钟"
+
+        duration_str = format_duration(total_duration)
+
         # 更新状态：完成
         voice_cloning_status[task_id] = {
             "status": "completed",
-            "message": "语音克隆完成",
+            "message": f"语音克隆完成 (耗时: {duration_str})",
             "progress": 100,
             "speaker_references": speaker_references,
             "unique_speakers": len(speaker_references),
             "speaker_name_mapping": speaker_name_mapping,
             "gender_dict": gender_dict,
             "cloned_results": cloned_results,
-            "cloned_audio_dir": cloned_audio_dir
+            "cloned_audio_dir": cloned_audio_dir,
+            "total_duration": total_duration,  # 原始秒数
+            "duration_str": duration_str  # 格式化的时间字符串
         }
 
         print(f"\n语音克隆准备完成！")
@@ -755,17 +780,26 @@ async def run_voice_cloning_process(
             print(f"  参考文本: {ref_data['reference_text'][:100]}...")
 
         print(f"\n✅ 语音克隆任务 {task_id} 成功完成！")
+        print(f"⏱️  总耗时: {duration_str}")
         return  # 显式返回，确保函数正常结束
 
     except Exception as e:
+        # 计算失败时的耗时
+        end_time = time.time()
+        total_duration = end_time - start_time
+
         # 更新状态为失败
         import traceback
         error_detail = traceback.format_exc()
         print(f"语音克隆处理失败: {error_detail}")
+        print(f"⏱️  失败前耗时: {total_duration:.1f}秒")
+
         voice_cloning_status[task_id] = {
             "status": "failed",
             "message": f"处理失败: {str(e)}",
-            "progress": 0
+            "progress": 0,
+            "total_duration": total_duration,
+            "duration_str": f"{total_duration:.1f}秒"
         }
 
 
