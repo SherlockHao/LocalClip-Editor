@@ -241,7 +241,17 @@ async def process_speaker_diarization(request: SpeakerDiarizationRequest):
         # 在后台执行处理
         import asyncio
         print(f"创建后台任务...")
-        asyncio.create_task(run_speaker_diarization_process(task_id, str(video_path), str(subtitle_path)))
+        task = asyncio.create_task(run_speaker_diarization_process(task_id, str(video_path), str(subtitle_path)))
+
+        # 添加异常处理回调
+        def handle_task_exception(t):
+            try:
+                t.result()
+            except Exception as e:
+                import traceback
+                print(f"❌ 后台任务异常: {traceback.format_exc()}")
+
+        task.add_done_callback(handle_task_exception)
         print(f"后台任务已创建")
 
         return {
@@ -432,13 +442,23 @@ async def process_voice_cloning(request: VoiceCloningRequest):
 
         # 在后台执行处理
         import asyncio
-        asyncio.create_task(run_voice_cloning_process(
+        task = asyncio.create_task(run_voice_cloning_process(
             task_id,
             str(video_path),
             str(source_subtitle_path),
             request.target_language,
             str(target_subtitle_path)
         ))
+
+        # 添加异常处理回调
+        def handle_task_exception(t):
+            try:
+                t.result()
+            except Exception as e:
+                import traceback
+                print(f"❌ 后台任务异常: {traceback.format_exc()}")
+
+        task.add_done_callback(handle_task_exception)
 
         return {
             "task_id": task_id,
@@ -504,7 +524,7 @@ async def run_voice_cloning_process(
             }
 
             # 1. 提取音频片段
-            audio_dir = os.path.join("audio_segments", task_id)
+            audio_dir = os.path.join("..", "audio_segments", task_id)
             extractor = AudioExtractor(cache_dir=audio_dir)
             audio_paths = extractor.extract_audio_segments(video_path, source_subtitle_path)
 
@@ -590,6 +610,8 @@ async def run_voice_cloning_process(
         speaker_references = {}
         for speaker_id in speaker_audio_results.keys():
             audio_path, _ = speaker_audio_results[speaker_id]
+            # 转换为绝对路径
+            audio_path = os.path.abspath(audio_path)
             reference_text = speaker_texts.get(speaker_id, "")
             speaker_name = speaker_name_mapping.get(speaker_id, f"说话人{speaker_id}")
             gender = gender_dict.get(speaker_id, "unknown")
@@ -605,35 +627,28 @@ async def run_voice_cloning_process(
         # 保存到状态中
         voice_cloning_status[task_id]["speaker_references"] = speaker_references
 
-        # ========== 开始语音克隆流程 ==========
+        # ========== 开始语音克隆流程（批量处理） ==========
         await asyncio.sleep(1)  # 给前端时间轮询
 
-        # 9. 为每个说话人编码参考音频
+        from fish_batch_cloner import FishBatchCloner
+        batch_cloner = FishBatchCloner()
+
+        # 9. 批量编码所有说话人的参考音频
         voice_cloning_status[task_id] = {
             "status": "processing",
-            "message": "正在编码说话人参考音频...",
+            "message": "正在批量编码说话人参考音频...",
             "progress": 70
         }
         await asyncio.sleep(0.5)
 
-        from fish_voice_cloner import FishVoiceCloner
-        cloner = FishVoiceCloner()
+        encode_output_dir = os.path.join(audio_dir, "encoded")
+        os.makedirs(encode_output_dir, exist_ok=True)
 
-        # 编码每个说话人的参考音频
-        speaker_encoded = {}
-        for speaker_id, ref_data in speaker_references.items():
-            work_dir = os.path.join(audio_dir, f"speaker_{speaker_id}_encoded")
-            os.makedirs(work_dir, exist_ok=True)
-
-            print(f"编码说话人 {speaker_id} 的参考音频...")
-            fake_npy_path = cloner.encode_reference_audio(
-                ref_data["reference_audio"],
-                work_dir
-            )
-            speaker_encoded[speaker_id] = {
-                "fake_npy": fake_npy_path,
-                "ref_text": ref_data["reference_text"]
-            }
+        print(f"\n🚀 批量编码 {len(speaker_references)} 个说话人的参考音频...")
+        speaker_npy_files = batch_cloner.batch_encode_speakers(
+            speaker_references,
+            encode_output_dir
+        )
 
         # 10. 读取目标语言字幕
         voice_cloning_status[task_id] = {
@@ -647,86 +662,77 @@ async def run_voice_cloning_process(
         srt_parser = SRTParser()
         target_subtitles = srt_parser.parse_srt(target_subtitle_path)
 
-        # 11. 为每个字幕片段生成克隆语音
+        # 11. 准备批量生成任务
         voice_cloning_status[task_id] = {
             "status": "processing",
-            "message": "正在生成克隆语音...",
+            "message": "正在批量生成克隆语音...",
             "progress": 80
         }
         await asyncio.sleep(0.5)
 
-        cloned_results = []
         cloned_audio_dir = os.path.join("exports", f"cloned_{task_id}")
         os.makedirs(cloned_audio_dir, exist_ok=True)
 
-        total_segments = len(speaker_labels)
-        for idx, (speaker_id, target_sub) in enumerate(zip(speaker_labels, target_subtitles)):
-            if speaker_id is None:
-                # 没有分配说话人的片段跳过
-                cloned_results.append({
-                    "index": idx,
-                    "speaker_id": None,
-                    "target_text": target_sub["text"],
-                    "cloned_audio_path": None
-                })
-                continue
+        # 准备任务列表
+        tasks = []
+        cloned_results = []
 
-            # 获取该说话人的编码信息
-            if speaker_id not in speaker_encoded:
-                print(f"警告: 说话人 {speaker_id} 没有参考音频编码，跳过片段 {idx}")
+        for idx, (speaker_id, target_sub) in enumerate(zip(speaker_labels, target_subtitles)):
+            target_text = target_sub["text"]
+
+            if speaker_id is None or speaker_id not in speaker_npy_files:
+                # 没有分配说话人或说话人编码失败的片段，记录但不生成
                 cloned_results.append({
                     "index": idx,
                     "speaker_id": speaker_id,
-                    "target_text": target_sub["text"],
+                    "target_text": target_text,
                     "cloned_audio_path": None
                 })
-                continue
+            else:
+                # 添加到批量生成任务
+                tasks.append({
+                    "speaker_id": speaker_id,
+                    "target_text": target_text,
+                    "segment_index": idx
+                })
 
-            ref_info = speaker_encoded[speaker_id]
-            target_text = target_sub["text"]
+        # 批量生成所有语音
+        print(f"\n🚀 批量生成 {len(tasks)} 个语音片段...")
+        # 将生成脚本保存到audio_dir下的scripts目录，避免触发uvicorn reload
+        script_dir = os.path.join(audio_dir, "scripts")
+        generated_audio_files = batch_cloner.batch_generate_audio(
+            tasks,
+            speaker_npy_files,
+            speaker_references,
+            cloned_audio_dir,
+            script_dir=script_dir
+        )
 
-            # 生成输出路径
-            output_audio = os.path.join(cloned_audio_dir, f"segment_{idx:04d}.wav")
-            work_dir = os.path.join(audio_dir, f"cloning_{idx}")
-
-            try:
-                print(f"克隆片段 {idx}/{total_segments}: 说话人{speaker_id}, 文本: {target_text[:30]}...")
-
-                # 步骤2: 生成语义token
-                codes_path = cloner.generate_semantic_tokens(
-                    target_text=target_text,
-                    ref_text=ref_info["ref_text"],
-                    fake_npy_path=ref_info["fake_npy"],
-                    output_dir=work_dir
-                )
-
-                # 步骤3: 解码为音频
-                cloner.decode_to_audio(codes_path, output_audio)
-
+        # 更新结果，添加生成成功的音频路径
+        for task in tasks:
+            segment_index = task["segment_index"]
+            if segment_index in generated_audio_files:
                 # 生成API路径
-                audio_filename = f"segment_{idx:04d}.wav"
+                audio_filename = f"segment_{segment_index:04d}.wav"
                 api_path = f"/api/cloned-audio/{task_id}/{audio_filename}"
 
                 cloned_results.append({
-                    "index": idx,
-                    "speaker_id": speaker_id,
-                    "target_text": target_text,
+                    "index": segment_index,
+                    "speaker_id": task["speaker_id"],
+                    "target_text": task["target_text"],
                     "cloned_audio_path": api_path
                 })
-
-            except Exception as e:
-                print(f"片段 {idx} 克隆失败: {str(e)}")
+            else:
                 cloned_results.append({
-                    "index": idx,
-                    "speaker_id": speaker_id,
-                    "target_text": target_text,
+                    "index": segment_index,
+                    "speaker_id": task["speaker_id"],
+                    "target_text": task["target_text"],
                     "cloned_audio_path": None,
-                    "error": str(e)
+                    "error": "生成失败"
                 })
 
-            # 更新进度
-            progress = 80 + int((idx + 1) / total_segments * 15)
-            voice_cloning_status[task_id]["progress"] = progress
+        # 按索引排序结果
+        cloned_results.sort(key=lambda x: x["index"])
 
         # 更新状态：完成
         voice_cloning_status[task_id] = {
@@ -747,6 +753,9 @@ async def run_voice_cloning_process(
             print(f"\n{ref_data['speaker_name']} (ID: {speaker_id}, 性别: {ref_data['gender']}):")
             print(f"  参考音频: {ref_data['reference_audio']}")
             print(f"  参考文本: {ref_data['reference_text'][:100]}...")
+
+        print(f"\n✅ 语音克隆任务 {task_id} 成功完成！")
+        return  # 显式返回，确保函数正常结束
 
     except Exception as e:
         # 更新状态为失败
