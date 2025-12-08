@@ -265,6 +265,9 @@ async def process_speaker_diarization(request: SpeakerDiarizationRequest):
 
 async def run_speaker_diarization_process(task_id: str, video_path: str, subtitle_path: str):
     """后台执行说话人识别和聚类处理"""
+    import time
+    start_time = time.time()
+
     try:
         import asyncio
 
@@ -370,28 +373,62 @@ async def run_speaker_diarization_process(task_id: str, video_path: str, subtitl
         }
         print(f"已缓存音频提取结果、MOS评分和性别识别: {cache_key}")
 
+        # 计算总耗时
+        end_time = time.time()
+        total_duration = end_time - start_time
+
+        # 格式化时间显示
+        def format_duration(seconds):
+            """将秒数格式化为易读的时间字符串"""
+            if seconds < 60:
+                return f"{seconds:.1f}秒"
+            elif seconds < 3600:
+                minutes = int(seconds // 60)
+                secs = int(seconds % 60)
+                return f"{minutes}分{secs}秒"
+            else:
+                hours = int(seconds // 3600)
+                minutes = int((seconds % 3600) // 60)
+                return f"{hours}小时{minutes}分钟"
+
+        duration_str = format_duration(total_duration)
+
         # 更新状态为完成
         speaker_processing_status[task_id] = {
             "status": "completed",
-            "message": "全部任务已完成",
+            "message": f"全部任务已完成 (耗时: {duration_str})",
             "progress": 100,
             "speaker_labels": speaker_labels,
             "unique_speakers": clusterer.get_unique_speakers_count(speaker_labels),
             "speaker_name_mapping": speaker_name_mapping,
-            "gender_stats": gender_stats
+            "gender_stats": gender_stats,
+            "total_duration": total_duration,
+            "duration_str": duration_str
         }
 
+        print(f"\n✅ 说话人识别任务 {task_id} 成功完成！")
+        print(f"⏱️  总耗时: {duration_str}")
+
     except Exception as e:
+        # 计算失败时的耗时
+        end_time = time.time()
+        total_duration = end_time - start_time
+        duration_str = f"{total_duration:.1f}秒"
+
         # 更新状态为失败
         import traceback
         error_detail = traceback.format_exc()
         print(f"\n========== 说话人识别任务失败: {task_id} ==========")
         print(f"错误信息: {str(e)}")
         print(f"详细堆栈:\n{error_detail}")
+        print(f"⏱️  失败前耗时: {duration_str}")
+
         speaker_processing_status[task_id] = {
             "status": "failed",
             "message": f"处理失败: {str(e)}",
-            "progress": 0
+            "progress": 0,
+            "total_duration": total_duration,
+            "duration_str": duration_str
         }
 
 

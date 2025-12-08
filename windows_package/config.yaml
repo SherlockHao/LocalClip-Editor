@@ -1,0 +1,131 @@
+# Windows 打包配置文件
+# LocalClip Editor Windows Package Configuration
+
+package:
+  name: "LocalClip-Editor"
+  version: "1.0.0"
+  output_dir: "dist"
+  icon: "assets/icon.ico"  # 可选：应用图标
+
+# Python 环境配置
+python:
+  version: "3.10"
+  architecture: "x64"  # x64 或 x86
+
+# 后端配置
+backend:
+  main_file: "backend/main.py"
+  # 需要打包的额外 Python 包
+  hidden_imports:
+    - "uvicorn.logging"
+    - "uvicorn.loops"
+    - "uvicorn.loops.auto"
+    - "uvicorn.protocols"
+    - "uvicorn.protocols.http"
+    - "uvicorn.protocols.http.auto"
+    - "uvicorn.protocols.websockets"
+    - "uvicorn.protocols.websockets.auto"
+    - "uvicorn.lifespan"
+    - "uvicorn.lifespan.on"
+    - "multipart"
+    - "moviepy.video.io.ffmpeg_tools"
+    - "moviepy.audio.fx.all"
+    - "moviepy.video.fx.all"
+    - "pyannote.audio"
+    - "transformers"
+    - "torch"
+    - "torchaudio"
+    - "librosa"
+    - "soundfile"
+    - "speechmos"
+    - "sklearn.cluster"
+    - "scipy.signal"
+    - "numpy"
+    - "PIL"
+    - "fish_speech"
+
+  # 需要打包的数据文件
+  datas:
+    - ["backend/uploads", "uploads"]
+    - ["backend/exports", "exports"]
+    - ["frontend/dist", "frontend/dist"]  # 构建后的前端文件
+
+# 前端配置
+frontend:
+  source_dir: "frontend"
+  build_command: "npm run build"
+  dist_dir: "frontend/dist"
+
+# AI 模型配置
+models:
+  # Fish-Speech 模型
+  fish_speech:
+    local_path: "/Users/yiya_workstation/Documents/ai_editing/fish-speech"
+    target_path: "fish_speech_models"
+    include:
+      - "checkpoints/openaudio-s1-mini"
+      - "fish_speech"
+      - "tools"
+      - "pyproject.toml"
+      - "batch_inference.py"
+
+  # HuggingFace 模型（需要下载）
+  huggingface_models:
+    - model_id: "pyannote/wespeaker-voxceleb-resnet34-LM"
+      cache_dir: "models/pyannote"
+    - model_id: "prithivMLmods/Common-Voice-Geneder-Detection"
+      cache_dir: "models/wav2vec2"
+    - model_id: "speechmos/dnsmos"
+      cache_dir: "models/dnsmos"
+
+# FFmpeg 配置
+ffmpeg:
+  download_url: "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip"
+  target_path: "ffmpeg"
+  binaries:
+    - "ffmpeg.exe"
+    - "ffprobe.exe"
+    - "ffplay.exe"
+
+# 打包选项
+pyinstaller:
+  # 单文件模式 (False) 或 单目录模式 (True)
+  onedir: true
+  # 是否显示控制台窗口
+  console: true
+  # 清理临时文件
+  clean: true
+  # 优化选项
+  optimize: 2
+  # 压缩等级 (0-9, 9 为最高压缩)
+  upx_compress_level: 0  # 建议禁用 UPX，避免杀毒软件误报
+
+# 打包后的目录结构
+# LocalClip-Editor/
+#   ├── LocalClip-Editor.exe  (启动器)
+#   ├── backend/
+#   │   ├── main.exe  (PyInstaller 打包的后端)
+#   │   └── _internal/  (依赖库)
+#   ├── frontend/
+#   │   └── dist/  (React 静态文件)
+#   ├── models/  (AI 模型)
+#   │   ├── fish_speech/
+#   │   ├── pyannote/
+#   │   ├── wav2vec2/
+#   │   └── dnsmos/
+#   ├── ffmpeg/
+#   │   ├── ffmpeg.exe
+#   │   ├── ffprobe.exe
+#   │   └── ffplay.exe
+#   ├── uploads/  (用户上传目录)
+#   ├── exports/  (导出目录)
+#   ├── logs/  (日志目录)
+#   └── README.txt  (使用说明)
+
+# 安装程序配置（可选）
+installer:
+  enabled: false  # 是否生成安装程序
+  tool: "inno_setup"  # inno_setup 或 nsis
+  install_dir: "C:\\Program Files\\LocalClip-Editor"
+  create_desktop_shortcut: true
+  create_start_menu_shortcut: true

@@ -330,18 +330,21 @@ const App: React.FC = () => {
         setIsProcessingSpeakerDiarization(false);
         setSpeakerDiarizationTaskId(null);
 
-        // 显示成功通知
+        // 显示成功通知，包含处理时间
+        const durationInfo = status.duration_str ? ` (耗时: ${status.duration_str})` : '';
         setNotificationData({
           title: '说话人识别完成',
-          message: '已成功完成说话人识别并标记到字幕中，你现在可以在字幕详情中查看和编辑说话人信息。',
+          message: `已成功完成说话人识别并标记到字幕中，你现在可以在字幕详情中查看和编辑说话人信息。${durationInfo}`,
           uniqueSpeakers: status.unique_speakers
         });
         setShowNotification(true);
       } else if (status.status === 'failed') {
-        // 显示失败通知
+        // 显示失败通知，包含失败前的耗时
+        const durationInfo = status.duration_str ? ` (失败前耗时: ${status.duration_str})` : '';
+        const errorMessage = status.message || '处理过程中发生错误，请重试。';
         setNotificationData({
           title: '说话人识别失败',
-          message: status.message || '处理过程中发生错误，请重试。',
+          message: `${errorMessage}${durationInfo}`,
           uniqueSpeakers: undefined
         });
         setShowNotification(true);
@@ -524,18 +527,21 @@ const App: React.FC = () => {
           });
         }
 
-        // 显示成功通知
+        // 显示成功通知，包含处理时间
+        const durationInfo = status.duration_str ? ` (耗时: ${status.duration_str})` : '';
         setNotificationData({
           title: '语音克隆完成',
-          message: '已成功完成语音克隆，可在字幕详情中播放克隆音频。',
+          message: `已成功完成语音克隆，可在字幕详情中播放克隆音频。${durationInfo}`,
           uniqueSpeakers: undefined
         });
         setShowNotification(true);
       } else if (status.status === 'failed') {
-        // 显示失败通知
+        // 显示失败通知，包含失败前的耗时
+        const durationInfo = status.duration_str ? ` (失败前耗时: ${status.duration_str})` : '';
+        const errorMessage = status.message || '处理过程中发生错误，请重试。';
         setNotificationData({
           title: '语音克隆失败',
-          message: status.message || '处理过程中发生错误，请重试。',
+          message: `${errorMessage}${durationInfo}`,
           uniqueSpeakers: undefined
         });
         setShowNotification(true);
