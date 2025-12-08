@@ -31,8 +31,9 @@ for dir_name in ["uploads", "exports"]:
     if dir_path.exists():
         datas.append((str(dir_path), dir_name))
 
-# 3. package_utils.py
+# 3. package_utils.py 和 platform_utils.py
 datas.append((str(backend_dir / "package_utils.py"), "."))
+datas.append((str(backend_dir / "platform_utils.py"), "."))
 
 # 收集隐藏导入
 hiddenimports = [

@@ -24,13 +24,18 @@ class FishVoiceCloner:
         self.python_executable = "/Users/yiya_workstation/miniconda3/envs/fish-speech/bin/python"
 
     def _detect_device(self):
-        """检测可用设备"""
-        if torch.backends.mps.is_available():
-            return "mps"
-        elif torch.cuda.is_available():
-            return "cuda"
-        else:
-            return "cpu"
+        """检测可用设备（支持 CUDA/MPS/CPU）"""
+        try:
+            from platform_utils import detect_gpu_device
+            return detect_gpu_device()
+        except ImportError:
+            # Fallback: 传统方式
+            if torch.cuda.is_available():
+                return "cuda"
+            elif torch.backends.mps.is_available():
+                return "mps"
+            else:
+                return "cpu"
 
     def encode_reference_audio(self, ref_audio_path, output_dir):
         """

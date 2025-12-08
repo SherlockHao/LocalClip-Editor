@@ -115,25 +115,30 @@ class PackageBuilder:
         return True
 
     def download_models(self) -> bool:
-        """下载 AI 模型"""
-        self.print_step(2, "下载 AI 模型和依赖")
+        """复制本地 AI 模型（不从网络下载）"""
+        self.print_step(2, "复制本地 AI 模型")
 
-        download_script = self.package_dir / "download_models.py"
+        # 使用新的本地模型复制脚本
+        copy_script = self.package_dir / "copy_local_models.py"
 
-        if not download_script.exists():
-            self.print_error(f"未找到下载脚本: {download_script}")
+        if not copy_script.exists():
+            self.print_error(f"未找到模型复制脚本: {copy_script}")
             return False
 
         try:
-            # 运行模型下载脚本
+            # 运行本地模型复制脚本
             cmd = [
                 sys.executable,
-                str(download_script),
+                str(copy_script),
                 "--models-dir", str(self.dist_dir / "models"),
             ]
 
             if self.fish_speech_path:
                 cmd.extend(["--fish-speech-path", str(self.fish_speech_path)])
+
+            print("📦 从本地缓存复制模型，无需下载...")
+            print(f"   HuggingFace 缓存: ~/.cache/huggingface/hub/")
+            print(f"   Fish-Speech: {self.fish_speech_path}")
 
             result = subprocess.run(
                 cmd,
@@ -142,11 +147,11 @@ class PackageBuilder:
                 text=True
             )
 
-            self.print_success("模型下载完成")
+            self.print_success("本地模型复制完成")
             return True
 
         except subprocess.CalledProcessError as e:
-            self.print_error(f"模型下载失败: {e}")
+            self.print_error(f"模型复制失败: {e}")
             return False
 
     def build_frontend(self) -> bool:

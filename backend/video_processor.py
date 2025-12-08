@@ -127,21 +127,28 @@ class VideoProcessor:
                 export_path
             ]
             
-            # 尝试使用硬件加速
-            if self._has_hardware_encoder():
-                cmd = [
-                    "ffmpeg",
-                    "-hwaccel", "auto",
-                    "-i", video_path,
-                    "-vf", f"subtitles={subtitle_path}",
-                    "-c:a", "copy",
-                    "-c:v", "h264_videotoolbox",  # 使用苹果的硬件编码器
-                    "-y",
-                    export_path
-                ]
-            
+            # 使用跨平台的编码器检测（支持 NVIDIA GPU, Apple Silicon, CPU）
+            from platform_utils import get_ffmpeg_encoder_args
+
+            # 获取最优编码器参数
+            encoder_args = get_ffmpeg_encoder_args()
+
+            # 构建命令
+            cmd = [
+                "ffmpeg",
+                "-hwaccel", "auto",
+                "-i", video_path,
+                "-vf", f"subtitles={subtitle_path}",
+                "-c:a", "copy",
+            ] + encoder_args + [
+                "-y",
+                export_path
+            ]
+
+            print(f"🎬 使用编码器: {encoder_args[1]}")
+
             result = subprocess.run(cmd, capture_output=True, text=True)
-            
+
             if result.returncode == 0:
                 file_size = os.path.getsize(export_path)
                 return {
@@ -151,17 +158,21 @@ class VideoProcessor:
                 }
             else:
                 # 如果硬件加速失败，回退到软件编码
+                print(f"⚠️  硬件编码失败，回退到软件编码")
                 cmd = [
                     "ffmpeg",
                     "-i", video_path,
                     "-vf", f"subtitles={subtitle_path}",
                     "-c:a", "copy",
+                    "-c:v", "libx264",
+                    "-preset", "medium",
+                    "-crf", "23",
                     "-y",
                     export_path
                 ]
-                
+
                 result = subprocess.run(cmd, capture_output=True, text=True)
-                
+
                 if result.returncode == 0:
                     file_size = os.path.getsize(export_path)
                     return {
