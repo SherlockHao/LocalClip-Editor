@@ -633,8 +633,21 @@ async def run_voice_cloning_process(
         # ========== 开始语音克隆流程（批量处理） ==========
         await asyncio.sleep(1)  # 给前端时间轮询
 
-        from fish_batch_cloner import FishBatchCloner
-        batch_cloner = FishBatchCloner()
+        # 环境变量开关：启用/禁用并行模式
+        use_parallel = os.getenv("FISH_PARALLEL_MODE", "true").lower() == "true"
+
+        if use_parallel:
+            print("🚀 启用并行模式（第二阶段优化）")
+            from fish_parallel_cloner import ParallelFishCloner
+            batch_cloner = ParallelFishCloner(
+                num_workers=None,  # 自动检测
+                batch_size=5,
+                io_threads=2
+            )
+        else:
+            print("🔄 使用顺序模式（Fallback）")
+            from fish_batch_cloner import FishBatchCloner
+            batch_cloner = FishBatchCloner()
 
         # 9. 批量编码所有说话人的参考音频
         voice_cloning_status[task_id] = {
