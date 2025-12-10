@@ -11,9 +11,17 @@ from transformers import Wav2Vec2ForSequenceClassification, Wav2Vec2FeatureExtra
 class GenderClassifier:
     """音频性别分类器"""
 
-    def __init__(self):
-        """初始化性别分类器"""
-        self.model_name = "prithivMLmods/Common-Voice-Geneder-Detection"
+    def __init__(self, model_path=None):
+        """初始化性别分类器
+
+        Args:
+            model_path: 本地模型路径，如果为 None 则尝试自动检测
+        """
+        # 自动检测本地模型路径
+        if model_path is None:
+            model_path = self._get_local_model_path()
+
+        self.model_name = model_path
         self.model = None
         self.processor = None
         self.id2label = {
@@ -21,12 +29,47 @@ class GenderClassifier:
             "1": "male"
         }
 
+    def _get_local_model_path(self):
+        """获取本地模型路径"""
+        import os
+        # 尝试几个可能的路径
+        possible_paths = [
+            # Windows: 相对于 backend 目录的路径
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "models", "models--prithivMLmods--Common-Voice-Geneder-Detection")),
+            # HuggingFace 缓存路径
+            os.path.expanduser("~/.cache/huggingface/hub/models--prithivMLmods--Common-Voice-Geneder-Detection"),
+            # Fallback: 使用 HuggingFace hub 名称
+            "prithivMLmods/Common-Voice-Geneder-Detection"
+        ]
+
+        for path in possible_paths:
+            if os.path.exists(path):
+                # 检查是否是 HuggingFace 格式的目录
+                snapshots_dir = os.path.join(path, "snapshots")
+                if os.path.exists(snapshots_dir):
+                    # 使用最新的 snapshot
+                    snapshot_dirs = [d for d in os.listdir(snapshots_dir) if os.path.isdir(os.path.join(snapshots_dir, d))]
+                    if snapshot_dirs:
+                        latest = sorted(snapshot_dirs, key=lambda x: os.path.getmtime(os.path.join(snapshots_dir, x)), reverse=True)[0]
+                        return os.path.join(snapshots_dir, latest)
+                # 直接使用这个路径
+                return path
+
+        # 如果都找不到，返回 HuggingFace hub 名称（会自动下载）
+        return "prithivMLmods/Common-Voice-Geneder-Detection"
+
     def load_model(self):
         """懒加载模型"""
         if self.model is None:
-            print("加载性别识别模型...")
-            self.model = Wav2Vec2ForSequenceClassification.from_pretrained(self.model_name)
-            self.processor = Wav2Vec2FeatureExtractor.from_pretrained(self.model_name)
+            print(f"加载性别识别模型: {self.model_name}")
+            self.model = Wav2Vec2ForSequenceClassification.from_pretrained(
+                self.model_name,
+                local_files_only=os.path.exists(self.model_name) and os.path.isdir(self.model_name)
+            )
+            self.processor = Wav2Vec2FeatureExtractor.from_pretrained(
+                self.model_name,
+                local_files_only=os.path.exists(self.model_name) and os.path.isdir(self.model_name)
+            )
             print("性别识别模型加载完成")
 
     def classify_audio(self, audio_path: str) -> Dict[str, float]:

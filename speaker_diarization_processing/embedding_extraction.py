@@ -6,8 +6,8 @@ import os
 import numpy as np
 from typing import List
 
-# 添加speaker_diarization目录到Python路径
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'speaker_diarization'))
+# 添加SpeakerDiarization目录到Python路径
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'SpeakerDiarization'))
 
 try:
     from emb_extractor import initialize_extractor

@@ -3,25 +3,92 @@ Fish-Speech 语音克隆模块
 基于 fish-speech/example.py 实现
 """
 import os
+import sys
 import subprocess
 import shutil
 from pathlib import Path
 import torch
+import platform
+
+# 自动检测平台并设置正确的路径
+def _get_default_fish_speech_dir():
+    """获取默认的 fish-speech 目录"""
+    # 尝试从环境变量获取
+    env_dir = os.getenv("FISH_SPEECH_DIR")
+    if env_dir and os.path.exists(env_dir):
+        return env_dir
+
+    # 根据平台设置默认路径
+    if platform.system() == "Windows":
+        # Windows: 使用项目根目录下的 fish-speech-win
+        return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "fish-speech-win"))
+    else:
+        # Mac/Linux: 尝试几个常见位置
+        possible_paths = [
+            "/Users/yiya_workstation/Documents/ai_editing/fish-speech",
+            os.path.expanduser("~/ai_editing/fish-speech"),
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "fish-speech"))
+        ]
+        for path in possible_paths:
+            if os.path.exists(path):
+                return path
+
+    raise FileNotFoundError("找不到 fish-speech 目录，请设置 FISH_SPEECH_DIR 环境变量")
+
+def _get_default_python_executable():
+    """获取 fish-speech 环境的 Python 解释器路径"""
+    # 尝试从环境变量获取
+    env_python = os.getenv("FISH_SPEECH_PYTHON")
+    if env_python and os.path.exists(env_python):
+        return env_python
+
+    if platform.system() == "Windows":
+        # Windows: 使用 conda 环境
+        conda_base = os.getenv("CONDA_PREFIX_1") or os.path.expanduser("~\\miniconda3")
+        python_path = os.path.join(conda_base, "envs", "fish-speech", "python.exe")
+        if os.path.exists(python_path):
+            return python_path
+        # 备选：使用相对路径
+        return "python"
+    else:
+        # Mac/Linux
+        possible_paths = [
+            "/Users/yiya_workstation/miniconda3/envs/fish-speech/bin/python",
+            os.path.expanduser("~/miniconda3/envs/fish-speech/bin/python"),
+            "python"
+        ]
+        for path in possible_paths:
+            if os.path.exists(path):
+                return path
+        return "python"
 
 # fish-speech 仓库路径
-FISH_SPEECH_DIR = "/Users/yiya_workstation/Documents/ai_editing/fish-speech"
-CHECKPOINT_DIR = os.path.join(FISH_SPEECH_DIR, "checkpoints/openaudio-s1-mini")
+FISH_SPEECH_DIR = _get_default_fish_speech_dir()
+CHECKPOINT_DIR = os.path.join(FISH_SPEECH_DIR, "checkpoints", "openaudio-s1-mini")
 
 
 class FishVoiceCloner:
     """Fish-Speech 语音克隆器"""
 
-    def __init__(self, fish_speech_dir=FISH_SPEECH_DIR, checkpoint_dir=CHECKPOINT_DIR):
-        self.fish_speech_dir = fish_speech_dir
-        self.checkpoint_dir = checkpoint_dir
+    def __init__(self, fish_speech_dir=None, checkpoint_dir=None):
+        self.fish_speech_dir = fish_speech_dir or FISH_SPEECH_DIR
+        self.checkpoint_dir = checkpoint_dir or CHECKPOINT_DIR
+
+        # 验证路径是否存在
+        if not os.path.exists(self.fish_speech_dir):
+            raise FileNotFoundError(f"fish-speech 目录不存在: {self.fish_speech_dir}")
+        if not os.path.exists(self.checkpoint_dir):
+            raise FileNotFoundError(f"checkpoint 目录不存在: {self.checkpoint_dir}")
+
         self.device = self._detect_device()
         # 使用fish-speech环境的Python解释器
-        self.python_executable = "/Users/yiya_workstation/miniconda3/envs/fish-speech/bin/python"
+        self.python_executable = _get_default_python_executable()
+
+        print(f"🐟 Fish-Speech 配置:")
+        print(f"  仓库路径: {self.fish_speech_dir}")
+        print(f"  Checkpoint: {self.checkpoint_dir}")
+        print(f"  Python: {self.python_executable}")
+        print(f"  设备: {self.device}")
 
     def _detect_device(self):
         """检测可用设备（支持 CUDA/MPS/CPU）"""
@@ -70,7 +137,9 @@ class FishVoiceCloner:
 
         # 设置 PYTHONPATH 以便能导入 fish_speech 模块
         env = os.environ.copy()
-        env["PYTHONPATH"] = self.fish_speech_dir + (f":{env.get('PYTHONPATH', '')}" if env.get('PYTHONPATH') else '')
+        path_sep = ";" if platform.system() == "Windows" else ":"
+        existing_path = env.get('PYTHONPATH', '')
+        env["PYTHONPATH"] = self.fish_speech_dir + (f"{path_sep}{existing_path}" if existing_path else '')
 
         try:
             result = subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=self.fish_speech_dir, env=env)
@@ -130,7 +199,9 @@ class FishVoiceCloner:
 
         # 设置 PYTHONPATH 以便能导入 fish_speech 模块
         env = os.environ.copy()
-        env["PYTHONPATH"] = self.fish_speech_dir + (f":{env.get('PYTHONPATH', '')}" if env.get('PYTHONPATH') else '')
+        path_sep = ";" if platform.system() == "Windows" else ":"
+        existing_path = env.get('PYTHONPATH', '')
+        env["PYTHONPATH"] = self.fish_speech_dir + (f"{path_sep}{existing_path}" if existing_path else '')
 
         try:
             result = subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=self.fish_speech_dir, env=env)
@@ -184,7 +255,9 @@ class FishVoiceCloner:
 
         # 设置 PYTHONPATH 以便能导入 fish_speech 模块
         env = os.environ.copy()
-        env["PYTHONPATH"] = self.fish_speech_dir + (f":{env.get('PYTHONPATH', '')}" if env.get('PYTHONPATH') else '')
+        path_sep = ";" if platform.system() == "Windows" else ":"
+        existing_path = env.get('PYTHONPATH', '')
+        env["PYTHONPATH"] = self.fish_speech_dir + (f"{path_sep}{existing_path}" if existing_path else '')
 
         try:
             result = subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=self.fish_speech_dir, env=env)
