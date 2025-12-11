@@ -227,6 +227,20 @@ $RECYCLE.BIN/
 *.msp
 *.lnk
 
+# Windows reserved device names
+nul
+NUL
+aux
+AUX
+con
+CON
+prn
+PRN
+com[1-9]
+COM[1-9]
+lpt[1-9]
+LPT[1-9]
+
 # macOS
 .DS_Store
 .AppleDouble

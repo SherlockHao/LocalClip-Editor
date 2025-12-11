@@ -1,8 +1,12 @@
+# -*- coding: utf-8 -*-
+# 设置环境变量禁用torch dynamo（在导入任何库之前）
+import os
+os.environ["TORCH_DYNAMO_DISABLE"] = "1"
+
 from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, FileResponse
-import os
 import uuid
 from pathlib import Path
 from typing import Optional

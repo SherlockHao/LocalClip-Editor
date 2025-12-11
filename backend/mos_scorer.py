@@ -7,6 +7,7 @@ from speechmos import dnsmos
 from pathlib import Path
 from typing import Dict, List, Tuple
 import numpy as np
+import os
 
 
 class MOSScorer:
@@ -86,8 +87,11 @@ class MOSScorer:
             print(f"正在为说话人 {speaker_id} 的音频进行MOS评分...")
 
             # 检查segment_files是否已经是完整路径
-            # 如果第一个路径是绝对路径或包含目录分隔符，则认为已经是完整路径
-            if segment_files and (Path(segment_files[0]).is_absolute() or '/' in segment_files[0]):
+            # 如果第一个路径是绝对路径或包含目录分隔符（支持Windows和Unix），则认为已经是完整路径
+            first_path = segment_files[0] if segment_files else ""
+            has_dir_separator = '/' in first_path or '\\' in first_path
+
+            if segment_files and (Path(first_path).is_absolute() or has_dir_separator):
                 # 已经是完整路径，直接使用
                 full_paths = segment_files
             else:
