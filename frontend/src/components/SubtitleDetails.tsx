@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Trash2, Edit2, Users, FileText, Save, X, Plus, Minus, Play, RotateCw } from 'lucide-react';
+import { Trash2, Edit2, Users, FileText, Save, X, Plus, Minus, Play, RotateCw, Loader2 } from 'lucide-react';
 
 interface Subtitle {
   start_time: number;
@@ -52,6 +52,7 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingText, setEditingText] = useState<string>('');
   const [selectedClonedSpeaker, setSelectedClonedSpeaker] = useState<{[index: number]: number}>({});
+  const [regeneratingIndex, setRegeneratingIndex] = useState<number | null>(null);
 
   const uniqueSpeakers = getUniqueSpeakers(subtitles);
 
@@ -149,7 +150,18 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
 
   const handleSpeakerChange = (index: number, speakerId: number | undefined) => {
     if (onEditSubtitle) {
-      onEditSubtitle(index, { ...subtitles[index], speaker_id: speakerId });
+      // 更新说话人，并自动链接克隆音色
+      const updatedSubtitle = {
+        ...subtitles[index],
+        speaker_id: speakerId,
+        cloned_speaker_id: speakerId  // 自动链接克隆音色
+      };
+      onEditSubtitle(index, updatedSubtitle);
+
+      // 同时更新本地选择状态
+      if (speakerId !== undefined) {
+        setSelectedClonedSpeaker(prev => ({ ...prev, [index]: speakerId }));
+      }
     }
   };
 
@@ -174,10 +186,16 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
     }
   };
 
-  const handleRegenerateSegment = (index: number) => {
-    const newSpeakerId = selectedClonedSpeaker[index];
+  const handleRegenerateSegment = async (index: number) => {
+    // 使用当前选择的克隆音色，如果没有选择则使用字幕中保存的克隆音色
+    const newSpeakerId = selectedClonedSpeaker[index] ?? subtitles[index].cloned_speaker_id;
     if (newSpeakerId !== undefined && onRegenerateSegment) {
-      onRegenerateSegment(index, newSpeakerId);
+      setRegeneratingIndex(index);
+      try {
+        await onRegenerateSegment(index, newSpeakerId);
+      } finally {
+        setRegeneratingIndex(null);
+      }
     }
   };
 
@@ -342,20 +360,28 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
                       </select>
                       <button
                         onClick={(e) => { e.stopPropagation(); handlePlayClonedAudio(subtitle.cloned_audio_path!); }}
-                        className="flex items-center justify-center text-xs bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 px-2 py-1 rounded hover:bg-emerald-600/50 transition-colors"
+                        disabled={regeneratingIndex === index}
+                        className={`flex items-center justify-center text-xs px-2 py-1 rounded transition-colors ${
+                          regeneratingIndex === index
+                            ? 'bg-emerald-600/20 border border-emerald-500/20 text-emerald-400/50 cursor-not-allowed'
+                            : 'bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-600/50'
+                        }`}
                         title="播放克隆音频"
                       >
-                        <Play size={11} />
+                        {regeneratingIndex === index ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}
                       </button>
-                      {selectedClonedSpeaker[index] && selectedClonedSpeaker[index] !== subtitle.cloned_speaker_id && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleRegenerateSegment(index); }}
-                          className="flex items-center justify-center text-xs bg-orange-600/30 border border-orange-500/40 text-orange-300 px-2 py-1 rounded hover:bg-orange-600/50 transition-colors"
-                          title="重新生成"
-                        >
-                          <RotateCw size={11} />
-                        </button>
-                      )}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleRegenerateSegment(index); }}
+                        disabled={regeneratingIndex === index}
+                        className={`flex items-center justify-center text-xs px-2 py-1 rounded transition-colors ${
+                          regeneratingIndex === index
+                            ? 'bg-orange-600/20 border border-orange-500/20 text-orange-400/50 cursor-not-allowed'
+                            : 'bg-orange-600/30 border border-orange-500/40 text-orange-300 hover:bg-orange-600/50'
+                        }`}
+                        title="重新生成"
+                      >
+                        {regeneratingIndex === index ? <Loader2 size={11} className="animate-spin" /> : <RotateCw size={11} />}
+                      </button>
                     </div>
                   )}
                 </div>

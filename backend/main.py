@@ -348,12 +348,12 @@ async def run_speaker_diarization_process(task_id: str, video_path: str, subtitl
                     speaker_segments[speaker_id] = []
                 speaker_segments[speaker_id].append(audio_path)
 
-        # 计算MOS分数
-        from mos_scorer import MOSScorer
-        mos_scorer = MOSScorer()
+        # 计算MOS分数（使用 NISQA）
+        from nisqa_scorer import NISQAScorer
+        mos_scorer = NISQAScorer()
         scored_segments = mos_scorer.score_speaker_audios(audio_dir, speaker_segments)
 
-        print(f"已完成MOS评分，共 {len(scored_segments)} 个说话人")
+        print(f"已完成MOS评分（NISQA），共 {len(scored_segments)} 个说话人")
 
         # 任务4：性别识别 (80-100%)
         speaker_processing_status[task_id] = {
@@ -536,7 +536,7 @@ async def run_voice_cloning_process(
 
     try:
         import asyncio
-        from mos_scorer import MOSScorer
+        from nisqa_scorer import NISQAScorer
         from speaker_audio_processor import SpeakerAudioProcessor
         from subtitle_text_extractor import SubtitleTextExtractor
 
@@ -624,10 +624,10 @@ async def run_voice_cloning_process(
                 "progress": 35
             }
 
-            # 5. MOS打分
-            mos_scorer = MOSScorer()
+            # 5. MOS打分（使用 NISQA）
+            mos_scorer = NISQAScorer()
             scored_segments = mos_scorer.score_speaker_audios(audio_dir, speaker_segments)
-            print(f"已完成MOS评分")
+            print(f"已完成MOS评分（NISQA）")
         else:
             print(f"使用缓存的MOS评分结果")
 
@@ -720,6 +720,221 @@ async def run_voice_cloning_process(
         from srt_parser import SRTParser
         srt_parser = SRTParser()
         target_subtitles = srt_parser.parse_srt(target_subtitle_path)
+        source_subtitles = srt_parser.parse_srt(source_subtitle_path)
+
+        # 10.5 验证译文长度并批量重新翻译超长文本
+        voice_cloning_status[task_id] = {
+            "status": "processing",
+            "message": "正在验证译文长度...",
+            "progress": 76
+        }
+        await asyncio.sleep(0.5)
+
+        from text_utils import check_translation_length
+
+        # 检查每句译文长度
+        too_long_items = []
+        for idx, (source_sub, target_sub) in enumerate(zip(source_subtitles, target_subtitles)):
+            source_text = source_sub["text"]
+            target_text = target_sub["text"]
+
+            is_too_long, source_len, target_len, ratio = check_translation_length(
+                source_text, target_text, target_language, max_ratio=1.2
+            )
+
+            if is_too_long:
+                too_long_items.append({
+                    "index": idx,
+                    "source": source_text,
+                    "target": target_text,
+                    "source_length": source_len,
+                    "target_length": target_len,
+                    "ratio": ratio
+                })
+
+        # 如果有超长译文，进行批量重新翻译
+        if too_long_items:
+            print(f"\n⚠️  发现 {len(too_long_items)} 条超长译文，准备批量重新翻译...")
+
+            voice_cloning_status[task_id] = {
+                "status": "processing",
+                "message": f"正在批量重新翻译 {len(too_long_items)} 条超长文本...",
+                "progress": 77
+            }
+            await asyncio.sleep(0.5)
+
+            # 准备重新翻译任务
+            import tempfile
+            import json
+            import subprocess
+
+            retranslate_tasks = []
+            for item in too_long_items:
+                retranslate_tasks.append({
+                    "task_id": f"retrans-{item['index']}",
+                    "source": item["source"],
+                    "target_language": target_language
+                })
+
+            # 写入配置文件
+            config_file = os.path.join(audio_dir, "retranslate_config.json")
+
+            # 获取模型路径
+            # 模型在 C:\workspace\ai_editing\models\Qwen3-1.7B
+            # 从 backend 目录向上 4 级到达 ai_editing 目录
+            backend_dir = os.path.dirname(os.path.abspath(__file__))  # backend
+            localclip_dir = os.path.dirname(backend_dir)  # LocalClip-Editor
+            workspace_dir = os.path.dirname(localclip_dir)  # workspace
+            ai_editing_dir = os.path.dirname(workspace_dir)  # ai_editing
+            model_path = os.path.join(ai_editing_dir, "models", "Qwen3-1.7B")
+
+            retranslate_config = {
+                "tasks": retranslate_tasks,
+                "model_path": model_path,
+                "num_processes": 1  # 使用单进程，避免显存冲突
+            }
+
+            with open(config_file, 'w', encoding='utf-8') as f:
+                json.dump(retranslate_config, f, ensure_ascii=False, indent=2)
+
+            # 调用批量重新翻译脚本
+            # 使用 qwen_inference conda 环境
+            qwen_env_python = os.environ.get("QWEN_INFERENCE_PYTHON")
+            if not qwen_env_python:
+                # 默认路径
+                import platform
+                if platform.system() == "Windows":
+                    qwen_env_python = r"C:\Users\7\miniconda3\envs\qwen_inference\python.exe"
+                else:
+                    qwen_env_python = os.path.expanduser("~/miniconda3/envs/qwen_inference/bin/python")
+
+            batch_retranslate_script = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "batch_retranslate.py"
+            )
+
+            print(f"[Retranslate] 使用 Python: {qwen_env_python}")
+            print(f"[Retranslate] 脚本: {batch_retranslate_script}")
+            print(f"[Retranslate] 配置: {config_file}")
+            print(f"[Retranslate] 模型路径: {model_path}")
+
+            # 检查 Python 环境和模型是否存在
+            if not os.path.exists(qwen_env_python):
+                print(f"⚠️  Qwen Python 环境不存在: {qwen_env_python}")
+                print(f"使用原译文继续...")
+            elif not os.path.exists(model_path):
+                print(f"⚠️  模型路径不存在: {model_path}")
+                print(f"使用原译文继续...")
+            else:
+                try:
+                    print(f"[Retranslate] 启动批量重新翻译进程...")
+
+                    # 使用 Popen，不指定编码以避免 UnicodeDecodeError
+                    process = subprocess.Popen(
+                        [qwen_env_python, batch_retranslate_script, config_file],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        # 使用 bytes 模式，手动解码
+                    )
+
+                    # 读取输出（带超时）
+                    try:
+                        stdout_bytes, stderr_bytes = process.communicate(timeout=600)
+                        returncode = process.returncode
+
+                        # 手动解码，使用 errors='replace' 避免解码错误
+                        stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ""
+                        stderr = stderr_bytes.decode('utf-8', errors='replace') if stderr_bytes else ""
+
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        print("⚠️  重新翻译超时，使用原译文继续...")
+                        stdout, stderr = "", ""
+                        returncode = -1
+
+                    # 打印 stderr（如果有，忽略空白）
+                    if stderr and stderr.strip():
+                        # 过滤掉 UnicodeDecodeError 相关的无关警告
+                        stderr_lines = stderr.strip().split('\n')
+                        filtered_stderr = '\n'.join([line for line in stderr_lines if 'UnicodeDecodeError' not in line and '_readerthread' not in line])
+                        if filtered_stderr:
+                            print(f"[Retranslate] stderr:\n{filtered_stderr}")
+
+                    if returncode == 0 and stdout:
+                        # 解析输出中的 JSON 结果
+                        output_lines = stdout.strip().split('\n')
+                        # 查找最后一个 JSON 块
+                        json_start = -1
+                        for i in range(len(output_lines) - 1, -1, -1):
+                            if output_lines[i].strip().startswith('['):
+                                json_start = i
+                                break
+
+                        if json_start >= 0:
+                            json_output = '\n'.join(output_lines[json_start:])
+                            retranslate_results = json.loads(json_output)
+
+                            print(f"\n[Retranslate] 解析到 {len(retranslate_results)} 条重新翻译结果:")
+                            print(json.dumps(retranslate_results, ensure_ascii=False, indent=2))
+
+                            # 更新目标字幕
+                            for result_item in retranslate_results:
+                                task_id_str = result_item["task_id"]
+                                # 提取索引: "retrans-123" -> 123
+                                idx = int(task_id_str.split('-')[1])
+                                new_translation = result_item["translation"]
+
+                                old_translation = target_subtitles[idx]["text"]
+
+                                # 如果新翻译为空，保留旧翻译
+                                if not new_translation or new_translation.strip() == "":
+                                    print(f"  [更新 {idx}] ⚠️  翻译结果为空，保留原译文")
+                                    print(f"    原译文: '{old_translation}'")
+                                    # 不更新，保持原文
+                                else:
+                                    target_subtitles[idx]["text"] = new_translation
+                                    print(f"  [更新 {idx}]")
+                                    print(f"    旧: '{old_translation}'")
+                                    print(f"    新: '{new_translation}'")
+
+                            print(f"\n✅ 成功重新翻译 {len(retranslate_results)} 条文本")
+
+                            # 保存更新后的字幕到文件
+                            print(f"\n[Retranslate] 保存更新后的字幕到: {target_subtitle_path}")
+                            srt_parser.save_srt(target_subtitles, target_subtitle_path)
+                            print(f"✅ 字幕文件已更新")
+
+                            # 验证保存：读取文件查看是否真的更新了
+                            print(f"\n[Retranslate] 验证保存结果...")
+                            print(f"[Retranslate] 读取文件: {target_subtitle_path}")
+                            saved_subtitles = srt_parser.parse_srt(target_subtitle_path)
+                            print(f"[Retranslate] 文件中共有 {len(saved_subtitles)} 条字幕")
+                            for result_item in retranslate_results:
+                                idx = int(result_item["task_id"].split('-')[1])
+                                if idx < len(saved_subtitles):
+                                    saved_text = saved_subtitles[idx]["text"]
+                                    expected_text = result_item["translation"]
+                                    match = "✅" if saved_text == expected_text else "❌"
+                                    print(f"  {match} [{idx}]")
+                                    print(f"      期待: '{expected_text}'")
+                                    print(f"      文件: '{saved_text}'")
+                                else:
+                                    print(f"  ❌ [{idx}] 索引超出范围（文件只有 {len(saved_subtitles)} 条）")
+                        else:
+                            print("⚠️  未找到重新翻译结果，使用原译文")
+                    elif returncode != 0:
+                        print(f"⚠️  重新翻译失败 (返回码: {returncode})")
+                        if stdout and stdout.strip():
+                            print(f"[Retranslate] stdout:\n{stdout[:500]}")  # 只打印前500字符
+                        print("使用原译文继续...")
+                    else:
+                        print("⚠️  重新翻译返回成功但没有输出，使用原译文继续...")
+
+                except Exception as e:
+                    print(f"⚠️  重新翻译出错: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    print("使用原译文继续...")
 
         # 11. 准备批量生成任务
         voice_cloning_status[task_id] = {
@@ -735,6 +950,10 @@ async def run_voice_cloning_process(
         # 准备任务列表
         tasks = []
         cloned_results = []
+
+        print(f"\n[DEBUG] 准备任务列表，target_subtitles 中前3条文本:")
+        for i in range(min(3, len(target_subtitles))):
+            print(f"  [{i}] {target_subtitles[i]['text']}")
 
         for idx, (speaker_id, target_sub) in enumerate(zip(speaker_labels, target_subtitles)):
             target_text = target_sub["text"]
@@ -800,10 +1019,12 @@ async def run_voice_cloning_process(
         # 按索引排序结果
         cloned_results.sort(key=lambda x: x["index"])
 
-        # 调试：打印前几个结果
+        # 调试：打印前几个结果（包含 target_text）
         print(f"\n[DEBUG] cloned_results 示例 (前3个):")
         for i, result in enumerate(cloned_results[:3]):
-            print(f"  [{i}] index={result['index']}, speaker_id={result['speaker_id']}, cloned_audio_path={result.get('cloned_audio_path', 'None')}")
+            print(f"  [{i}] index={result['index']}, speaker_id={result['speaker_id']}")
+            print(f"      target_text='{result['target_text']}'")
+            print(f"      cloned_audio_path={result.get('cloned_audio_path', 'None')}")
 
         # 计算总耗时
         end_time = time.time()
@@ -979,38 +1200,96 @@ async def regenerate_segment(request: RegenerateSegmentRequest):
 
         # 查找音频提取缓存以获取audio_dir
         audio_dir = None
+        print(f"[DEBUG] 查找 task_id={task_id} 的 audio_dir...")
+        print(f"[DEBUG] audio_extraction_cache 中的 keys: {list(audio_extraction_cache.keys())}")
+
         for cache_key, cache_data in audio_extraction_cache.items():
-            if cache_data.get("task_id") == task_id or task_id in cache_data.get("audio_dir", ""):
+            cache_task_id = cache_data.get("task_id")
+            cache_audio_dir = cache_data.get("audio_dir", "")
+            print(f"[DEBUG] 检查 cache_key={cache_key}, task_id={cache_task_id}, audio_dir={cache_audio_dir}")
+
+            if cache_task_id == task_id or task_id in cache_audio_dir:
                 audio_dir = cache_data["audio_dir"]
+                print(f"[DEBUG] ✅ 找到匹配的 audio_dir: {audio_dir}")
                 break
 
         if not audio_dir:
             # 如果找不到缓存，尝试使用默认路径
             audio_dir = f"audio_segments/{task_id}"
+            print(f"[DEBUG] ⚠️  未找到缓存，使用默认路径: {audio_dir}")
 
-        # 检查说话人是否已编码
-        speaker_encoded_dir = os.path.join(audio_dir, f"speaker_{new_speaker_id}_encoded")
-        fake_npy_path = os.path.join(speaker_encoded_dir, "fake.npy")
+            # 检查目录是否存在
+            if not os.path.exists(audio_dir):
+                print(f"[DEBUG] ❌ 默认路径不存在，尝试在 backend 目录下查找")
+                backend_audio_dir = os.path.join("backend", audio_dir)
+                if os.path.exists(backend_audio_dir):
+                    audio_dir = backend_audio_dir
+                    print(f"[DEBUG] ✅ 找到: {audio_dir}")
+                else:
+                    print(f"[DEBUG] ❌ backend 目录下也不存在")
 
         from fish_voice_cloner import FishVoiceCloner
         cloner = FishVoiceCloner()
 
-        # 如果该说话人尚未编码，先编码
-        if not os.path.exists(fake_npy_path):
-            print(f"说话人 {new_speaker_id} 尚未编码，开始编码...")
-            ref_data = speaker_references[new_speaker_id]
+        # 首先在所有可能的目录中查找已编码的文件
+        print(f"[查找编码] 查找 speaker_{new_speaker_id} 的编码文件...")
+
+        possible_dirs = [
+            "audio_segments",
+            "../audio_segments",
+            "backend/audio_segments",
+        ]
+
+        found_npy = None
+        for base_dir in possible_dirs:
+            if not os.path.exists(base_dir):
+                continue
+
+            # 遍历该目录下的所有任务文件夹
+            for task_folder in os.listdir(base_dir):
+                task_path = os.path.join(base_dir, task_folder)
+                if not os.path.isdir(task_path):
+                    continue
+
+                # 检查该任务文件夹中是否有此说话人的编码
+                encoded_path = os.path.join(task_path, f"speaker_{new_speaker_id}_encoded", "fake.npy")
+                if os.path.exists(encoded_path):
+                    found_npy = encoded_path
+                    print(f"[查找编码] ✅ 找到编码文件: {encoded_path}")
+                    break
+
+            if found_npy:
+                break
+
+        # 如果找到了，直接使用（不复制，节省时间）
+        if found_npy:
+            fake_npy_path = found_npy
+            print(f"[编码] ✅ 使用已存在的编码文件: {fake_npy_path}")
+        else:
+            # 如果没找到，需要重新编码
+            print(f"[查找编码] ❌ 未找到已有编码，需要重新编码...")
+
+            # 创建编码目录
+            speaker_encoded_dir = os.path.join(audio_dir, f"speaker_{new_speaker_id}_encoded")
             os.makedirs(speaker_encoded_dir, exist_ok=True)
+
+            ref_data = speaker_references[new_speaker_id]
+            reference_audio_path = ref_data["reference_audio"]
+            print(f"[编码] 参考音频: {reference_audio_path}")
+            print(f"[编码] 输出目录: {speaker_encoded_dir}")
+
             fake_npy_path = cloner.encode_reference_audio(
-                ref_data["reference_audio"],
+                reference_audio_path,
                 speaker_encoded_dir
             )
 
         # 获取参考文本
         ref_text = speaker_references[new_speaker_id]["reference_text"]
 
-        # 生成输出路径
+        # 生成输出路径（使用统一的文件名格式）
         cloned_audio_dir = status.get("cloned_audio_dir", os.path.join("exports", f"cloned_{task_id}"))
-        output_audio = os.path.join(cloned_audio_dir, f"segment_{segment_index:04d}.wav")
+        audio_filename = f"segment_{segment_index}.wav"  # 统一使用简单格式
+        output_audio = os.path.join(cloned_audio_dir, audio_filename)
         work_dir = os.path.join(audio_dir, f"regen_{segment_index}_{new_speaker_id}")
         os.makedirs(work_dir, exist_ok=True)
 
@@ -1028,7 +1307,6 @@ async def regenerate_segment(request: RegenerateSegmentRequest):
         cloner.decode_to_audio(codes_path, output_audio)
 
         # 生成API路径
-        audio_filename = f"segment_{segment_index}.wav"
         api_path = f"/cloned-audio/{task_id}/{audio_filename}"
 
         # 更新克隆结果
