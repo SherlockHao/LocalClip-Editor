@@ -3,6 +3,19 @@
 import os
 os.environ["TORCH_DYNAMO_DISABLE"] = "1"
 
+# 加载 .env 配置文件
+from pathlib import Path
+from dotenv import load_dotenv
+
+# 加载项目根目录的 .env 文件
+project_root = Path(__file__).parent.parent
+dotenv_path = project_root / '.env'
+if dotenv_path.exists():
+    load_dotenv(dotenv_path)
+    print(f"[OK] 已加载环境配置: {dotenv_path}")
+else:
+    print(f"[WARNING] 未找到 .env 文件: {dotenv_path}")
+
 from fastapi import FastAPI, File, UploadFile, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -674,21 +687,10 @@ async def run_voice_cloning_process(
         # ========== 开始语音克隆流程（批量处理） ==========
         await asyncio.sleep(1)  # 给前端时间轮询
 
-        # 环境变量开关：启用/禁用并行模式
-        use_parallel = os.getenv("FISH_PARALLEL_MODE", "true").lower() == "true"
-
-        if use_parallel:
-            print("🚀 启用并行模式（第二阶段优化）")
-            from fish_parallel_cloner import ParallelFishCloner
-            batch_cloner = ParallelFishCloner(
-                num_workers=None,  # 自动检测
-                batch_size=5,
-                io_threads=2
-            )
-        else:
-            print("🔄 使用顺序模式（Fallback）")
-            from fish_batch_cloner import FishBatchCloner
-            batch_cloner = FishBatchCloner()
+        # 使用新的简单批量克隆器（参照 batch_inference.py）
+        print("[Voice Clone] Using simple batch cloner (based on batch_inference.py)")
+        from fish_simple_cloner import SimpleFishCloner
+        batch_cloner = SimpleFishCloner()
 
         # 9. 批量编码所有说话人的参考音频
         voice_cloning_status[task_id] = {
@@ -765,13 +767,20 @@ async def run_voice_cloning_process(
             script_dir=script_dir
         )
 
+        # 调试：打印生成结果
+        print(f"\n[DEBUG] generated_audio_files 类型: {type(generated_audio_files)}")
+        print(f"[DEBUG] generated_audio_files 键示例 (前3个): {list(generated_audio_files.keys())[:3]}")
+        print(f"[DEBUG] generated_audio_files 示例:")
+        for key in list(generated_audio_files.keys())[:3]:
+            print(f"  key={key} (type={type(key)}), value={generated_audio_files[key]}")
+
         # 更新结果，添加生成成功的音频路径
         for task in tasks:
             segment_index = task["segment_index"]
             if segment_index in generated_audio_files:
-                # 生成API路径
-                audio_filename = f"segment_{segment_index:04d}.wav"
-                api_path = f"/api/cloned-audio/{task_id}/{audio_filename}"
+                # 生成API路径（与 fish_simple_cloner.py 中的文件名格式一致）
+                audio_filename = f"segment_{segment_index}.wav"
+                api_path = f"/cloned-audio/{task_id}/{audio_filename}"
 
                 cloned_results.append({
                     "index": segment_index,
@@ -790,6 +799,11 @@ async def run_voice_cloning_process(
 
         # 按索引排序结果
         cloned_results.sort(key=lambda x: x["index"])
+
+        # 调试：打印前几个结果
+        print(f"\n[DEBUG] cloned_results 示例 (前3个):")
+        for i, result in enumerate(cloned_results[:3]):
+            print(f"  [{i}] index={result['index']}, speaker_id={result['speaker_id']}, cloned_audio_path={result.get('cloned_audio_path', 'None')}")
 
         # 计算总耗时
         end_time = time.time()
@@ -1014,8 +1028,8 @@ async def regenerate_segment(request: RegenerateSegmentRequest):
         cloner.decode_to_audio(codes_path, output_audio)
 
         # 生成API路径
-        audio_filename = f"segment_{segment_index:04d}.wav"
-        api_path = f"/api/cloned-audio/{task_id}/{audio_filename}"
+        audio_filename = f"segment_{segment_index}.wav"
+        api_path = f"/cloned-audio/{task_id}/{audio_filename}"
 
         # 更新克隆结果
         cloned_results[segment_index]["speaker_id"] = new_speaker_id

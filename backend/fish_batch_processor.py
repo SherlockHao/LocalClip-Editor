@@ -5,11 +5,23 @@
 作者：Claude (第二阶段优化)
 """
 import os
+import sys
+import platform
 import torch
 import numpy as np
 from typing import List, Dict, Tuple, Optional
 from loguru import logger
 from fish_io_pipeline import IOPipeline
+
+# 添加 fish-speech 目录到 Python 路径
+if platform.system() == "Windows":
+    FISH_SPEECH_DIR = os.environ.get("FISH_SPEECH_DIR", r"C:\workspace\ai_editing\fish-speech-win")
+else:
+    FISH_SPEECH_DIR = os.environ.get("FISH_SPEECH_DIR", "/Users/yiya_workstation/Documents/ai_editing/fish-speech")
+
+# 确保 fish_speech 模块可以被导入
+if FISH_SPEECH_DIR not in sys.path:
+    sys.path.insert(0, FISH_SPEECH_DIR)
 
 
 class BatchProcessor:

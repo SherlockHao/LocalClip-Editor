@@ -2,6 +2,7 @@
 性别识别模块
 使用Wav2Vec2模型对音频进行男女声识别
 """
+import os
 import torch
 import librosa
 from typing import Dict, List, Tuple
@@ -31,7 +32,6 @@ class GenderClassifier:
 
     def _get_local_model_path(self):
         """获取本地模型路径"""
-        import os
         # 尝试几个可能的路径
         possible_paths = [
             # Windows: 相对于 backend 目录的路径

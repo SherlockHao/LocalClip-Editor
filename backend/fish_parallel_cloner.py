@@ -5,6 +5,8 @@
 作者：Claude (第二阶段优化)
 """
 import os
+import sys
+import platform
 import psutil
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Dict, List
@@ -13,8 +15,13 @@ from fish_worker_process import worker_process_main, init_worker_process
 
 
 # fish-speech 仓库路径
-FISH_SPEECH_DIR = "/Users/yiya_workstation/Documents/ai_editing/fish-speech"
-CHECKPOINT_DIR = os.path.join(FISH_SPEECH_DIR, "checkpoints/openaudio-s1-mini")
+# 根据操作系统自动检测路径
+if platform.system() == "Windows":
+    FISH_SPEECH_DIR = os.environ.get("FISH_SPEECH_DIR", r"C:\workspace\ai_editing\fish-speech-win")
+else:
+    FISH_SPEECH_DIR = os.environ.get("FISH_SPEECH_DIR", "/Users/yiya_workstation/Documents/ai_editing/fish-speech")
+
+CHECKPOINT_DIR = os.path.join(FISH_SPEECH_DIR, "checkpoints", "openaudio-s1-mini")
 
 
 class ParallelFishCloner:

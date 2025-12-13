@@ -9,9 +9,21 @@ import shutil
 from pathlib import Path
 
 # fish-speech 仓库路径
-FISH_SPEECH_DIR = "/Users/yiya_workstation/Documents/ai_editing/fish-speech"
-CHECKPOINT_DIR = os.path.join(FISH_SPEECH_DIR, "checkpoints/openaudio-s1-mini")
-FISH_AUDIO_PYTHON = "/Users/yiya_workstation/miniconda3/envs/fish-speech/bin/python"
+import sys
+import platform
+
+# 根据操作系统自动检测路径
+if platform.system() == "Windows":
+    # Windows 默认路径
+    FISH_SPEECH_DIR = os.environ.get("FISH_SPEECH_DIR", r"C:\workspace\ai_editing\fish-speech-win")
+    CHECKPOINT_DIR = os.path.join(FISH_SPEECH_DIR, "checkpoints", "openaudio-s1-mini")
+    # 使用当前激活的 conda 环境中的 Python
+    FISH_AUDIO_PYTHON = os.environ.get("FISH_SPEECH_PYTHON", sys.executable)
+else:
+    # macOS/Linux 默认路径
+    FISH_SPEECH_DIR = os.environ.get("FISH_SPEECH_DIR", "/Users/yiya_workstation/Documents/ai_editing/fish-speech")
+    CHECKPOINT_DIR = os.path.join(FISH_SPEECH_DIR, "checkpoints/openaudio-s1-mini")
+    FISH_AUDIO_PYTHON = os.environ.get("FISH_SPEECH_PYTHON", "/Users/yiya_workstation/miniconda3/envs/fish-speech/bin/python")
 
 
 class FishBatchCloner:
@@ -48,7 +60,12 @@ class FishBatchCloner:
         cmd = [self.python_executable, script_path]
 
         env = os.environ.copy()
-        env["PYTHONPATH"] = self.fish_speech_dir + (f":{env.get('PYTHONPATH', '')}" if env.get('PYTHONPATH') else '')
+        # 使用 os.pathsep 自动适配 Windows (;) 和 Unix (:)
+        path_sep = os.pathsep
+        if env.get('PYTHONPATH'):
+            env["PYTHONPATH"] = f"{self.fish_speech_dir}{path_sep}{env['PYTHONPATH']}"
+        else:
+            env["PYTHONPATH"] = self.fish_speech_dir
 
         try:
             print(f"执行批量编码脚本: {script_path}")
@@ -61,6 +78,8 @@ class FishBatchCloner:
                 env=env
             )
             print(result.stdout)
+            if result.stderr:
+                print("stderr:", result.stderr)
 
             # 读取生成的.npy文件路径
             speaker_npy_files = {}
@@ -138,7 +157,12 @@ class FishBatchCloner:
             cmd = [self.python_executable, script_path]
 
             env = os.environ.copy()
-            env["PYTHONPATH"] = self.fish_speech_dir + (f":{env.get('PYTHONPATH', '')}" if env.get('PYTHONPATH') else '')
+            # 使用 os.pathsep 自动适配 Windows (;) 和 Unix (:)
+            path_sep = os.pathsep
+            if env.get('PYTHONPATH'):
+                env["PYTHONPATH"] = f"{self.fish_speech_dir}{path_sep}{env['PYTHONPATH']}"
+            else:
+                env["PYTHONPATH"] = self.fish_speech_dir
 
             try:
                 print(f"执行批量生成脚本: {script_path}")
@@ -189,20 +213,29 @@ class FishBatchCloner:
         # 确保输出目录也是绝对路径
         output_dir = os.path.abspath(output_dir)
 
+        # 转换路径为正斜杠（Python 可以正确处理）或使用 repr() 来正确转义
+        checkpoint_path_repr = repr(self.checkpoint_dir)
+        output_dir_repr = repr(output_dir)
+        fish_speech_dir_repr = repr(self.fish_speech_dir)
+
         script = f'''#!/usr/bin/env python3
 import os
 import sys
 import torch
 import numpy as np
 import torchaudio
+import soundfile as sf
 from loguru import logger
+
+# 添加 fish-speech 目录到 Python 路径
+sys.path.insert(0, {fish_speech_dir_repr})
 
 # 导入 Fish Speech 的推理模块
 from fish_speech.models.dac.inference import load_model as load_dac_model
 
 # 配置
-CHECKPOINT_PATH = "{self.checkpoint_dir}"
-OUTPUT_DIR = "{output_dir}"
+CHECKPOINT_PATH = {checkpoint_path_repr}
+OUTPUT_DIR = {output_dir_repr}
 
 REF_AUDIO_PATH_LIST = {json.dumps(ref_audio_list)}
 REF_TEXT_LIST = {json.dumps(ref_text_list)}
@@ -234,12 +267,19 @@ def main():
         logger.info(f"\\n正在编码说话人 {{speaker_id}}: {{ref_audio}}")
 
         try:
-            # 加载音频
-            audio, sr = torchaudio.load(str(ref_audio))
+            # 加载音频（使用 soundfile 后端避免 torchcodec 依赖）
+            audio_np, sr = sf.read(str(ref_audio))
 
-            # 转换为单声道
-            if audio.shape[0] > 1:
-                audio = audio.mean(0, keepdim=True)
+            # 转换为 torch tensor
+            audio = torch.from_numpy(audio_np).float()
+
+            # 如果是单声道，添加通道维度；如果是多声道，转置并转为单声道
+            if audio.ndim == 1:
+                audio = audio.unsqueeze(0)  # [1, T]
+            else:
+                audio = audio.T  # [channels, T]
+                if audio.shape[0] > 1:
+                    audio = audio.mean(0, keepdim=True)  # 转为单声道
 
             # 重采样
             audio = torchaudio.functional.resample(audio, sr, dac_model.sample_rate)
@@ -293,6 +333,13 @@ if __name__ == "__main__":
         # 获取 backend 目录的绝对路径（用于导入 IOPipeline）
         backend_dir = os.path.dirname(os.path.abspath(__file__))
 
+        # 使用 repr() 来正确转义 Windows 路径
+        backend_dir_repr = repr(backend_dir)
+        checkpoint_path_repr = repr(self.checkpoint_dir)
+        output_dir_repr = repr(output_dir)
+        npy_file_repr = repr(npy_file)
+        fish_speech_dir_repr = repr(self.fish_speech_dir)
+
         script = f'''#!/usr/bin/env python3
 import os
 import sys
@@ -301,8 +348,11 @@ import numpy as np
 import soundfile as sf
 from loguru import logger
 
+# 添加 fish-speech 目录到 Python 路径
+sys.path.insert(0, {fish_speech_dir_repr})
+
 # 添加 backend 目录到 Python 路径（用于导入 IOPipeline）
-sys.path.insert(0, "{backend_dir}")
+sys.path.insert(0, {backend_dir_repr})
 
 # 导入 Fish Speech 的推理模块
 from fish_speech.models.text2semantic.inference import init_model, generate_long
@@ -312,9 +362,9 @@ from fish_speech.models.dac.inference import load_model as load_dac_model
 from fish_io_pipeline import IOPipeline
 
 # 配置
-CHECKPOINT_PATH = "{self.checkpoint_dir}"
-OUTPUT_DIR = "{output_dir}"
-PROMPT_TOKENS_PATH = "{npy_file}"
+CHECKPOINT_PATH = {checkpoint_path_repr}
+OUTPUT_DIR = {output_dir_repr}
+PROMPT_TOKENS_PATH = {npy_file_repr}
 REF_TEXT = {json.dumps(ref_text)}
 TEXT_LIST = {json.dumps(text_list)}
 SEGMENT_INDICES = {json.dumps(segment_indices)}
