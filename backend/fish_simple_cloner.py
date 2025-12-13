@@ -1,9 +1,10 @@
 """
-简单批量语音克隆器
+批量语音克隆器
 完全参照 batch_inference.py 的实现方式
-- 不使用多进程/并行
-- 模型只加载一次
-- 逐个处理所有音频片段
+
+支持两种模式：
+1. 单进程模式（默认）：模型只加载一次，逐个处理
+2. 多进程模式：按说话人并行处理，充分利用显存
 
 作者：Claude
 """
@@ -31,9 +32,18 @@ class SimpleFishCloner:
         self,
         fish_speech_dir: str = None,
         checkpoint_dir: str = None,
-        fish_python: str = None
+        fish_python: str = None,
+        use_multiprocess: bool = None
     ):
-        """初始化"""
+        """
+        初始化
+
+        Args:
+            fish_speech_dir: fish-speech 目录
+            checkpoint_dir: 模型检查点目录
+            fish_python: fish-speech Python 可执行文件
+            use_multiprocess: 是否使用多进程模式。None 表示自动检测（从环境变量读取）
+        """
         import platform
 
         if platform.system() == "Windows":
@@ -59,9 +69,17 @@ class SimpleFishCloner:
             self.fish_speech_dir, "checkpoints", "openaudio-s1-mini"
         )
 
+        # 多进程模式配置
+        if use_multiprocess is None:
+            # 从环境变量读取（默认关闭）
+            self.use_multiprocess = os.environ.get("FISH_MULTIPROCESS_MODE", "false").lower() == "true"
+        else:
+            self.use_multiprocess = use_multiprocess
+
         logger.info(f"Fish-Speech 目录: {self.fish_speech_dir}")
         logger.info(f"检查点目录: {self.checkpoint_dir}")
         logger.info(f"Python 路径: {self.fish_python}")
+        logger.info(f"多进程模式: {'启用' if self.use_multiprocess else '禁用'}")
 
     def batch_encode_speakers(
         self,
@@ -248,16 +266,26 @@ class SimpleFishCloner:
             config_file = f.name
 
         try:
-            # 调用批量生成脚本（按说话人分组批量处理）
+            # 选择使用单进程或多进程脚本
+            if self.use_multiprocess:
+                script_name = "fish_multiprocess_generate.py"
+                mode_desc = "多进程并行"
+            else:
+                script_name = "fish_batch_generate.py"
+                mode_desc = "单进程批量"
+
             script_path = os.path.join(
                 os.path.dirname(__file__),
-                "fish_batch_generate.py"
+                script_name
             )
 
             cmd = [self.fish_python, script_path, config_file]
 
-            logger.info(f"执行生成命令: {' '.join(cmd)}")
-            logger.info(f"预计时间: 约 {len(tasks) * 20 // 60} 分钟")
+            logger.info(f"执行生成命令 ({mode_desc}): {' '.join(cmd)}")
+            if self.use_multiprocess:
+                logger.info(f"多进程模式：将自动检测GPU并行处理多个说话人")
+            else:
+                logger.info(f"预计时间: 约 {len(tasks) * 20 // 60} 分钟")
             logger.info("正在生成，请查看下方进度...")
 
             # 使用 Popen 实时显示输出
@@ -278,8 +306,8 @@ class SimpleFishCloner:
             for line in proc.stdout:
                 line = line.rstrip()
                 if line:
-                    # 显示进度信息
-                    if '[BatchGen]' in line or 'tokens/sec' in line or 'INFO' in line:
+                    # 显示进度信息（支持两种模式的标记）
+                    if any(keyword in line for keyword in ['[BatchGen]', '[Worker', '[Main]', '[GPU', 'tokens/sec', 'INFO']):
                         print(line, flush=True)
                     output_lines.append(line)
 
