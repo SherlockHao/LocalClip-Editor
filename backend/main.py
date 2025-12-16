@@ -1408,6 +1408,8 @@ async def regenerate_segment(request: RegenerateSegmentRequest):
         cloned_results[segment_index]["cloned_audio_path"] = api_path
         voice_cloning_status[task_id]["cloned_results"] = cloned_results
 
+        print(f"[重新生成] 片段 {segment_index} 已更新: speaker_id={new_speaker_id}, 文件已覆盖: {output_audio}")
+
         return {
             "success": True,
             "segment_index": segment_index,
@@ -1468,6 +1470,11 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
                 continue
 
             # 读取音频
+            file_mtime = os.path.getmtime(audio_file_path)
+            import datetime
+            mtime_str = datetime.datetime.fromtimestamp(file_mtime).strftime('%Y-%m-%d %H:%M:%S')
+            print(f"[音频拼接] 读取片段 {idx}: {audio_file_path} (修改时间: {mtime_str}, speaker_id: {result.get('speaker_id', 'unknown')})")
+
             audio_data, sr = sf.read(audio_file_path)
             if sample_rate is None:
                 sample_rate = sr

@@ -531,8 +531,10 @@ const App: React.FC = () => {
 
         // 使用setTimeout确保状态更新完成后再设置新路径
         setTimeout(() => {
+          // 添加时间戳参数防止浏览器缓存
+          const audioPathWithCache = `${result.stitched_audio_path}?t=${Date.now()}`;
           // 保存拼接音频路径并自动切换到拼接音频
-          setStitchedAudioPath(result.stitched_audio_path);
+          setStitchedAudioPath(audioPathWithCache);
           setUseStitchedAudio(true);
         }, 0);
 
