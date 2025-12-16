@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { Loader2, Wand2 } from 'lucide-react';
 
 interface Subtitle {
   start_time: number;
@@ -7,6 +8,8 @@ interface Subtitle {
   end_time_formatted: string;
   text: string;
   speaker_id?: number;
+  target_text?: string;
+  cloned_audio_path?: string;
 }
 
 interface SubtitleTimelineProps {
@@ -14,17 +17,28 @@ interface SubtitleTimelineProps {
   currentTime: number;
   duration: number;
   onSeek: (time: number) => void;
+  onStitchAudio?: () => void;
+  stitching?: boolean;
 }
 
 const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
   subtitles,
   currentTime,
   duration,
-  onSeek
+  onSeek,
+  onStitchAudio,
+  stitching = false
 }) => {
   const [zoom, setZoom] = useState(1); // 缩放级别，1 = 100%
   const [scrollOffset, setScrollOffset] = useState(0); // 滚动偏移量（像素）
+  const [isDragging, setIsDragging] = useState(false);
+  const [isZooming, setIsZooming] = useState(false); // 缩放状态
+  const [dragStartX, setDragStartX] = useState(0);
+  const [dragStartOffset, setDragStartOffset] = useState(0);
+
   const timelineRef = useRef<HTMLDivElement>(null);
+  const zoomTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   const speakerColors = [
     { bg: 'from-blue-600 to-blue-500', border: 'border-blue-400' },
     { bg: 'from-green-600 to-green-500', border: 'border-green-400' },
@@ -39,45 +53,79 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
     return speakerColors[speakerId % speakerColors.length];
   };
 
-  // 处理缩放
+  // 处理拖拽
   useEffect(() => {
-    const handleWheel = (e: WheelEvent) => {
-      // 检查是否在时间轴上
-      if (!timelineRef.current?.contains(e.target as Node)) return;
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDragging) return;
 
-      // Ctrl/Cmd + 滚轮 = 缩放
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault();
+      const deltaX = e.clientX - dragStartX;
+      const newOffset = dragStartOffset - deltaX;
 
-        const rect = timelineRef.current.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left; // 鼠标在时间轴上的位置
-        const mousePositionRatio = (mouseX + scrollOffset) / (rect.width * zoom); // 鼠标位置对应的时间比例
-
-        // 计算新的缩放级别
-        const zoomDelta = -e.deltaY * 0.01;
-        const newZoom = Math.max(1, Math.min(10, zoom + zoomDelta)); // 限制在1x到10x之间
-
-        // 调整滚动偏移，使鼠标位置保持不变
-        const newScrollOffset = mousePositionRatio * rect.width * newZoom - mouseX;
-        const maxScroll = rect.width * (newZoom - 1);
-
-        setZoom(newZoom);
-        setScrollOffset(Math.max(0, Math.min(maxScroll, newScrollOffset)));
-      } else {
-        // 普通滚轮 = 水平滚动（当放大时）
-        if (zoom > 1) {
-          e.preventDefault();
-
-          const rect = timelineRef.current.getBoundingClientRect();
-          const maxScroll = rect.width * (zoom - 1);
-          const newOffset = scrollOffset + e.deltaY;
-
-          setScrollOffset(Math.max(0, Math.min(maxScroll, newOffset)));
-        }
+      const rect = timelineRef.current?.getBoundingClientRect();
+      if (rect) {
+        const maxScroll = rect.width * (zoom - 1);
+        setScrollOffset(Math.max(0, Math.min(maxScroll, newOffset)));
       }
     };
 
+    const handleMouseUp = () => {
+      setIsDragging(false);
+    };
+
+    if (isDragging) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDragging, dragStartX, dragStartOffset, zoom]);
+
+  // 处理滚轮缩放
+  useEffect(() => {
+    const handleWheel = (e: WheelEvent) => {
+      const target = e.target as Node;
+      if (!timelineRef.current?.contains(target)) return;
+
+      e.preventDefault();
+
+      const rect = timelineRef.current?.getBoundingClientRect();
+      if (!rect) return;
+
+      const mouseX = e.clientX - rect.left;
+      const mousePositionRatio = (mouseX + scrollOffset) / (rect.width * zoom);
+
+      // 滚轮缩放 - 使用更平滑的缩放因子
+      const zoomDelta = -e.deltaY * 0.005; // 减少灵敏度，提升丝滑度
+      const newZoom = Math.max(1, Math.min(10, zoom + zoomDelta));
+
+      // 只有缩放值真正改变时才更新
+      if (Math.abs(newZoom - zoom) < 0.01) return;
+
+      const newScrollOffset = mousePositionRatio * rect.width * newZoom - mouseX;
+      const maxScroll = rect.width * (newZoom - 1);
+      const clampedOffset = Math.max(0, Math.min(maxScroll, newScrollOffset));
+
+      // 标记正在缩放
+      setIsZooming(true);
+
+      // 批量更新状态
+      setZoom(newZoom);
+      setScrollOffset(clampedOffset);
+
+      // 300ms后取消缩放状态，恢复过渡动画
+      if (zoomTimeoutRef.current) {
+        clearTimeout(zoomTimeoutRef.current);
+      }
+      zoomTimeoutRef.current = setTimeout(() => {
+        setIsZooming(false);
+      }, 300);
+    };
+
     const timeline = timelineRef.current;
+
     if (timeline) {
       timeline.addEventListener('wheel', handleWheel, { passive: false });
     }
@@ -86,10 +134,21 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
       if (timeline) {
         timeline.removeEventListener('wheel', handleWheel);
       }
+      if (zoomTimeoutRef.current) {
+        clearTimeout(zoomTimeoutRef.current);
+      }
     };
   }, [zoom, scrollOffset]);
 
+  const handleMouseDown = (e: React.MouseEvent) => {
+    setIsDragging(true);
+    setDragStartX(e.clientX);
+    setDragStartOffset(scrollOffset);
+  };
+
   const handleTimelineClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (Math.abs(e.clientX - dragStartX) > 5) return; // 防止拖拽时触发点击
+
     const rect = e.currentTarget.getBoundingClientRect();
     const clickPosition = e.clientX - rect.left + scrollOffset;
     const timelineWidth = rect.width * zoom;
@@ -97,34 +156,74 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
     onSeek(time);
   };
 
+  const hasClonedAudio = subtitles.some(s => s.cloned_audio_path);
+
   return (
-    <div className="w-full">
-      {/* 时间轴标签和缩放提示 */}
-      <div className="flex justify-between items-center text-xs font-mono text-slate-400 mb-3">
-        <span className="font-semibold">00:00</span>
-        <span className="text-xs text-slate-500">
-          {zoom > 1 ? `缩放: ${zoom.toFixed(1)}x | 滚轮滚动，Ctrl+滚轮缩放` : 'Ctrl+滚轮缩放时间轴'}
-        </span>
-        <span className="font-semibold">{new Date(duration * 1000).toISOString().substr(11, 8)}</span>
+    <div className="w-full space-y-3">
+      {/* 顶部工具栏 */}
+      <div className="flex justify-between items-center">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 text-xs">
+            <span className="w-2 h-2 bg-slate-400 rounded-full"></span>
+            <span className="text-slate-300 font-semibold">原始字幕</span>
+          </div>
+          <div className="flex items-center gap-2 text-xs">
+            <span className="w-2 h-2 bg-emerald-400 rounded-full"></span>
+            <span className="text-emerald-300 font-semibold">
+              克隆音频 {hasClonedAudio && `(${subtitles.filter(s => s.cloned_audio_path).length}/${subtitles.length})`}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-slate-500">
+            {zoom > 1 ? `缩放: ${zoom.toFixed(1)}x | 拖拽移动 • 滚轮缩放` : '拖拽移动 • 滚轮缩放'}
+          </span>
+          {hasClonedAudio && onStitchAudio && (
+            <button
+              onClick={onStitchAudio}
+              disabled={stitching}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                stitching
+                  ? 'bg-emerald-600/30 text-emerald-400/50 cursor-not-allowed'
+                  : 'bg-emerald-600/40 text-emerald-100 hover:bg-emerald-600/60 shadow-md hover:shadow-lg'
+              }`}
+            >
+              {stitching ? (
+                <>
+                  <Loader2 size={14} className="animate-spin" />
+                  拼接中...
+                </>
+              ) : (
+                <>
+                  <Wand2 size={14} />
+                  生成完整音频
+                </>
+              )}
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* 主时间轴 */}
+      {/* 统一时间轴容器 */}
       <div
         ref={timelineRef}
-        className="relative h-28 bg-gradient-to-b from-slate-700 to-slate-800 rounded-lg cursor-pointer border-2 border-slate-600 hover:border-slate-500 transition-colors shadow-lg overflow-hidden"
-        onClick={handleTimelineClick}
+        className="relative bg-gradient-to-b from-slate-700 to-slate-800 rounded-lg border-2 border-slate-600 hover:border-slate-500 transition-colors shadow-lg overflow-hidden"
+        style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+        onMouseDown={handleMouseDown}
       >
-        {/* 可缩放的内容容器 */}
+        {/* 可缩放内容容器 */}
         <div
-          className="absolute top-0 left-0 h-full"
+          className="relative will-change-transform"
           style={{
             width: `${100 * zoom}%`,
             transform: `translateX(-${scrollOffset}px)`,
-            transition: 'transform 0.1s ease-out'
+            transition: (isDragging || isZooming) ? 'none' : 'transform 0.1s ease-out'
           }}
+          onClick={handleTimelineClick}
         >
           {/* 背景网格 */}
-          <div className="absolute inset-0 opacity-10">
+          <div className="absolute inset-0 opacity-10 pointer-events-none">
             {[...Array(Math.ceil(10 * zoom))].map((_, i) => (
               <div
                 key={i}
@@ -134,8 +233,8 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
             ))}
           </div>
 
-          {/* 字幕块 */}
-          <div className="absolute top-0 left-0 w-full h-full">
+          {/* 原始字幕轨道 */}
+          <div className="relative h-16 border-b border-slate-600/50">
             {subtitles.map((subtitle, index) => {
               const left = (subtitle.start_time / duration) * 100;
               const width = ((subtitle.end_time - subtitle.start_time) / duration) * 100;
@@ -144,16 +243,16 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
 
               return (
                 <div
-                  key={index}
-                  className={`absolute top-3 h-20 flex flex-col items-center justify-center rounded-md overflow-hidden border-2 transition-all duration-200 cursor-pointer group
-                    ${isPlaying
-                      ? `bg-gradient-to-br ${colors.bg} ${colors.border} shadow-lg scale-110`
+                  key={`orig-${index}`}
+                  className={`absolute top-2 h-12 flex flex-col items-center justify-center rounded-md overflow-hidden border-2 transition-all duration-200 cursor-pointer group ${
+                    isPlaying
+                      ? `bg-gradient-to-br ${colors.bg} ${colors.border} shadow-lg scale-105`
                       : `bg-slate-600/40 border-slate-500 hover:border-slate-300 hover:shadow-md hover:bg-slate-600/60`
-                    }`}
+                  }`}
                   style={{
                     left: `${left}%`,
                     width: `${Math.max(width, 2.5 / zoom)}%`,
-                    minWidth: '45px'
+                    minWidth: '30px'
                   }}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -167,28 +266,101 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
                     </span>
                   )}
                   <span className={`text-xs px-1 truncate max-w-full text-center leading-tight ${isPlaying ? 'text-white' : 'text-slate-300'}`}>
-                    {subtitle.text.length > 15 ? `${subtitle.text.substring(0, 15)}...` : subtitle.text}
+                    {subtitle.text.length > 10 ? `${subtitle.text.substring(0, 10)}...` : subtitle.text}
                   </span>
                 </div>
               );
             })}
           </div>
 
-          {/* 播放头指示器 */}
+          {/* 克隆音频轨道 */}
+          <div className="relative h-14">
+            {subtitles.map((subtitle, index) => {
+              if (!subtitle.cloned_audio_path) return null;
+
+              const left = (subtitle.start_time / duration) * 100;
+              const width = ((subtitle.end_time - subtitle.start_time) / duration) * 100;
+              const isPlaying = currentTime >= subtitle.start_time && currentTime <= subtitle.end_time;
+              const displayText = subtitle.target_text;
+
+              return (
+                <div
+                  key={`cloned-${index}`}
+                  className={`absolute top-1 h-12 flex flex-col items-center justify-center rounded-md overflow-hidden border-2 transition-all duration-200 cursor-pointer group ${
+                    isPlaying
+                      ? 'bg-emerald-600 border-emerald-400 shadow-lg scale-105'
+                      : 'bg-emerald-600/40 border-emerald-500 hover:border-emerald-300 hover:shadow-md hover:bg-emerald-600/60'
+                  }`}
+                  style={{
+                    left: `${left}%`,
+                    width: `${Math.max(width, 2.5 / zoom)}%`,
+                    minWidth: '30px'
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSeek(subtitle.start_time);
+                  }}
+                  title={displayText || subtitle.text}
+                >
+                  <span className={`text-xs px-1 truncate max-w-full text-center leading-tight ${isPlaying ? 'text-white' : 'text-slate-200'}`}>
+                    {displayText && displayText.length > 10 ? `${displayText.substring(0, 10)}...` : displayText || '🎵'}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* 播放头指示器 - 贯穿所有轨道 */}
           <div
-            className="absolute top-0 h-full w-1 bg-gradient-to-b from-red-500 to-red-600 z-20 shadow-lg"
+            className="absolute top-0 bottom-0 w-0.5 bg-gradient-to-b from-red-500 to-red-600 z-30 shadow-lg pointer-events-none"
             style={{
               left: `${(currentTime / duration) * 100}%`
             }}
           >
-            <div className="absolute -top-2 -left-2 w-5 h-5 bg-red-500 border-2 border-white rounded-full shadow-lg"></div>
+            {/* 顶部圆点和时间显示 */}
+            <div className="absolute -top-8 left-1/2 -translate-x-1/2 flex flex-col items-center">
+              <div className="bg-slate-900/90 backdrop-blur-sm border border-red-500/50 rounded px-2 py-0.5 shadow-lg mb-1">
+                <span className="text-xs font-mono text-red-300 font-semibold whitespace-nowrap">
+                  {new Date(currentTime * 1000).toISOString().substr(14, 5)}
+                </span>
+              </div>
+              <div className="w-3 h-3 bg-red-500 border-2 border-white rounded-full shadow-lg"></div>
+            </div>
           </div>
+        </div>
+
+        {/* 时间刻度 */}
+        <div
+          className="relative h-6 bg-slate-800/50 border-t border-slate-600"
+          style={{
+            width: `${100 * zoom}%`,
+            transform: `translateX(-${scrollOffset}px)`,
+            transition: (isDragging || isZooming) ? 'none' : 'transform 0.1s ease-out'
+          }}
+        >
+          {[...Array(Math.ceil(10 * zoom) + 1)].map((_, i) => {
+            const timePercent = (i * 10) / zoom;
+            const timeSeconds = (timePercent / 100) * duration;
+            return (
+              <div
+                key={i}
+                className="absolute top-0 h-full flex flex-col items-center"
+                style={{ left: `${timePercent}%` }}
+              >
+                <div className="w-px h-2 bg-slate-500"></div>
+                <span className="text-[10px] text-slate-400 font-mono mt-0.5">
+                  {new Date(timeSeconds * 1000).toISOString().substr(14, 5)}
+                </span>
+              </div>
+            );
+          })}
         </div>
       </div>
 
       {/* 提示信息 */}
-      <div className="mt-3 text-xs text-slate-500 text-center font-medium">
-        点击时间轴或字幕卡片快速定位 • 总共 {subtitles.length} 条字幕
+      <div className="text-xs text-slate-500 text-center font-medium">
+        点击字幕卡片快速定位 • 总共 {subtitles.length} 条字幕
+        {hasClonedAudio && ` • ${subtitles.filter(s => s.cloned_audio_path).length} 条已克隆`}
       </div>
     </div>
   );

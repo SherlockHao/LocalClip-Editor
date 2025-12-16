@@ -17,6 +17,14 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
+      '/cloned-audio': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/exports': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
     },
   },
 })

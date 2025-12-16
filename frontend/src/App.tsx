@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Video, Clock, Settings, Play, Pause, RotateCcw, Zap } from 'lucide-react';
+import { Upload, Video, Clock, Settings, Play, Pause, RotateCcw, Zap, Volume2, Music } from 'lucide-react';
 import VideoPlayer from './components/VideoPlayer';
 import SubtitleTimeline from './components/SubtitleTimeline';
 import SubtitleDetails from './components/SubtitleDetails';
@@ -59,6 +59,9 @@ const App: React.FC = () => {
   const [targetSrtFilename, setTargetSrtFilename] = useState<string | null>(null);
   const [isProcessingVoiceCloning, setIsProcessingVoiceCloning] = useState(false);
   const [voiceCloningTaskId, setVoiceCloningTaskId] = useState<string | null>(null);
+  const [isStitchingAudio, setIsStitchingAudio] = useState(false);
+  const [stitchedAudioPath, setStitchedAudioPath] = useState<string | null>(null);
+  const [useStitchedAudio, setUseStitchedAudio] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const isSeekingRef = useRef<boolean>(false);
@@ -495,6 +498,54 @@ const App: React.FC = () => {
     }
   };
 
+  // 拼接克隆音频
+  const handleStitchAudio = async () => {
+    if (!voiceCloningTaskId) {
+      alert('语音克隆任务ID不存在');
+      return;
+    }
+
+    try {
+      setIsStitchingAudio(true);
+
+      const response = await fetch('/api/voice-cloning/stitch-audio', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          task_id: voiceCloningTaskId
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`拼接音频失败: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        // 先清空音频路径，确保effect会被触发
+        setStitchedAudioPath(null);
+        setUseStitchedAudio(false);
+
+        // 使用setTimeout确保状态更新完成后再设置新路径
+        setTimeout(() => {
+          // 保存拼接音频路径并自动切换到拼接音频
+          setStitchedAudioPath(result.stitched_audio_path);
+          setUseStitchedAudio(true);
+        }, 0);
+
+        alert(`拼接成功！已生成完整音频，共 ${result.segments_count} 个片段，总时长 ${result.total_duration.toFixed(2)}s`);
+      }
+    } catch (error) {
+      console.error('拼接音频失败:', error);
+      alert('拼接音频失败: ' + (error as Error).message);
+    } finally {
+      setIsStitchingAudio(false);
+    }
+  };
+
   // 轮询语音克隆状态
   const pollVoiceCloningStatus = async (taskId: string) => {
     try {
@@ -580,19 +631,55 @@ const App: React.FC = () => {
           </h1>
         </div>
         
-        <div className="flex items-center space-x-3">
-          <button 
-            onClick={handlePlayPause}
-            className="flex items-center space-x-2 bg-gradient-to-r from-blue-600 to-blue-500 text-white px-4 py-2.5 rounded-lg hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-200 font-medium"
-          >
-            {isPlaying ? <Pause size={18} /> : <Play size={18} />}
-            <span>{isPlaying ? '暂停' : '播放'}</span>
-          </button>
-          
-          <button className="flex items-center space-x-2 bg-slate-700 text-slate-100 px-4 py-2.5 rounded-lg hover:bg-slate-600 transition-all duration-200 font-medium">
-            <RotateCcw size={18} />
-            <span>重置</span>
-          </button>
+        <div className="flex items-center gap-6">
+          {/* 播放控制按钮 */}
+          <div className="flex items-center space-x-3">
+            <button
+              onClick={handlePlayPause}
+              className="flex items-center space-x-2 bg-gradient-to-r from-blue-600 to-blue-500 text-white px-4 py-2.5 rounded-lg hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-200 font-medium"
+            >
+              {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+              <span>{isPlaying ? '暂停' : '播放'}</span>
+            </button>
+
+            <button
+              onClick={() => handleSeek(0)}
+              className="flex items-center space-x-2 bg-slate-700 text-slate-100 px-4 py-2.5 rounded-lg hover:bg-slate-600 transition-all duration-200 font-medium"
+            >
+              <RotateCcw size={18} />
+              <span>重置</span>
+            </button>
+          </div>
+
+          {/* 简洁时间轴 */}
+          {currentVideo && duration > 0 && (
+            <div className="flex items-center gap-3 flex-1 max-w-md">
+              <span className="text-xs font-mono text-slate-400 min-w-[45px]">
+                {new Date(currentTime * 1000).toISOString().substr(14, 5)}
+              </span>
+              <div
+                className="flex-1 h-2 bg-slate-700 rounded-full cursor-pointer relative group"
+                onClick={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const x = e.clientX - rect.left;
+                  const percentage = x / rect.width;
+                  handleSeek(percentage * duration);
+                }}
+              >
+                <div
+                  className="absolute h-full bg-gradient-to-r from-blue-500 to-blue-400 rounded-full transition-all"
+                  style={{ width: `${(currentTime / duration) * 100}%` }}
+                />
+                <div
+                  className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-lg transition-all"
+                  style={{ left: `${(currentTime / duration) * 100}%`, transform: 'translate(-50%, -50%)' }}
+                />
+              </div>
+              <span className="text-xs font-mono text-slate-400 min-w-[45px]">
+                {new Date(duration * 1000).toISOString().substr(14, 5)}
+              </span>
+            </div>
+          )}
         </div>
       </header>
 
@@ -646,18 +733,50 @@ const App: React.FC = () => {
               </div>
 
               {/* 视频播放器区域 */}
-              <div className="flex-1 flex items-center justify-center bg-black/40 overflow-hidden">
+              <div className="flex-1 flex items-center justify-center bg-black/40 overflow-hidden relative">
                 {currentVideo ? (
-                  <VideoPlayer
-                    videoRef={videoRef}
-                    src={`/uploads/${currentVideo.filename}`}
-                    key={`/uploads/${currentVideo.filename}`}
-                    onTimeUpdate={handleTimeUpdate}
-                    onLoadedMetadata={handleLoadedMetadata}
-                    isPlaying={isPlaying}
-                    currentTime={currentTime}
-                    duration={duration}
-                  />
+                  <>
+                    <VideoPlayer
+                      videoRef={videoRef}
+                      src={`/uploads/${currentVideo.filename}`}
+                      key={`/uploads/${currentVideo.filename}`}
+                      onTimeUpdate={handleTimeUpdate}
+                      onLoadedMetadata={handleLoadedMetadata}
+                      isPlaying={isPlaying}
+                      currentTime={currentTime}
+                      duration={duration}
+                      audioSrc={stitchedAudioPath}
+                      useExternalAudio={useStitchedAudio}
+                    />
+                    {/* 音频切换按钮 */}
+                    {stitchedAudioPath && (
+                      <div className="absolute top-4 right-4 flex items-center gap-2 bg-slate-900/80 backdrop-blur-sm border border-slate-700 rounded-lg px-3 py-2 shadow-lg">
+                        <span className="text-xs text-slate-400 font-medium">音频源:</span>
+                        <button
+                          onClick={() => setUseStitchedAudio(false)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                            !useStitchedAudio
+                              ? 'bg-blue-600 text-white shadow-md'
+                              : 'bg-slate-700/50 text-slate-400 hover:bg-slate-700 hover:text-slate-300'
+                          }`}
+                        >
+                          <Volume2 size={14} />
+                          原音频
+                        </button>
+                        <button
+                          onClick={() => setUseStitchedAudio(true)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                            useStitchedAudio
+                              ? 'bg-emerald-600 text-white shadow-md'
+                              : 'bg-slate-700/50 text-slate-400 hover:bg-slate-700 hover:text-slate-300'
+                          }`}
+                        >
+                          <Music size={14} />
+                          克隆音频
+                        </button>
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <div className="text-center text-slate-400">
                     <div className="mb-4 flex justify-center">
@@ -675,12 +794,12 @@ const App: React.FC = () => {
 
           {/* 下层：时间轴 */}
           {subtitles.length > 0 && (
-            <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl shadow-xl border border-slate-700 p-5 flex-shrink-0">
-              <div className="flex items-center space-x-2 mb-4">
-                <Zap size={18} className="text-yellow-400" />
-                <h3 className="text-lg font-semibold text-slate-100">字幕时间轴</h3>
-                <span className="ml-auto text-sm text-slate-400 bg-slate-700/50 px-2.5 py-1 rounded">
-                  {subtitles.length} 条字幕
+            <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl shadow-xl border border-slate-700 p-4 flex-shrink-0">
+              <div className="flex items-center space-x-2 mb-3">
+                <Zap size={14} className="text-yellow-400" />
+                <h3 className="text-sm font-semibold text-slate-100">字幕时间轴</h3>
+                <span className="ml-auto text-xs text-slate-400 bg-slate-700/50 px-2 py-0.5 rounded">
+                  {subtitles.length} 条
                 </span>
               </div>
               <SubtitleTimeline
@@ -688,6 +807,8 @@ const App: React.FC = () => {
                 currentTime={currentTime}
                 duration={duration}
                 onSeek={handleSeek}
+                onStitchAudio={handleStitchAudio}
+                stitching={isStitchingAudio}
               />
             </div>
           )}

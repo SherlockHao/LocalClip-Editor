@@ -117,8 +117,69 @@ async def serve_video(filename: str, request: Request):
         }
     )
 
+# 自定义音频路由，支持 Range 请求（用于拼接音频）
+@app.get("/exports/stitched_{task_id}.wav")
+async def serve_stitched_audio(task_id: str, request: Request):
+    """提供支持 HTTP Range 请求的拼接音频流式传输"""
+    file_path = EXPORTS_DIR / f"stitched_{task_id}.wav"
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="音频文件未找到")
+
+    file_size = file_path.stat().st_size
+    range_header = request.headers.get("range")
+
+    # 如果没有 Range 请求头，返回整个文件
+    if not range_header:
+        return FileResponse(
+            file_path,
+            media_type="audio/wav",
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(file_size),
+            }
+        )
+
+    # 解析 Range 请求头
+    range_match = re.match(r"bytes=(\d+)-(\d*)", range_header)
+    if not range_match:
+        raise HTTPException(status_code=416, detail="Invalid range")
+
+    start = int(range_match.group(1))
+    end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+
+    # 确保范围有效
+    if start >= file_size or end >= file_size or start > end:
+        raise HTTPException(status_code=416, detail="Range not satisfiable")
+
+    chunk_size = end - start + 1
+
+    # 读取文件的指定范围
+    def iterfile():
+        with open(file_path, "rb") as f:
+            f.seek(start)
+            remaining = chunk_size
+            while remaining > 0:
+                chunk = f.read(min(8192, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    # 返回 206 Partial Content
+    return StreamingResponse(
+        iterfile(),
+        status_code=206,
+        media_type="audio/wav",
+        headers={
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(chunk_size),
+        }
+    )
+
 # 挂载静态文件目录（用于其他非视频文件）
-# 注意：视频文件会被上面的路由优先处理
+# 注意：视频和拼接音频文件会被上面的路由优先处理
 app.mount("/exports", StaticFiles(directory=EXPORTS_DIR), name="exports")
 
 # 初始化处理器
@@ -964,14 +1025,18 @@ async def run_voice_cloning_process(
                     "index": idx,
                     "speaker_id": speaker_id,
                     "target_text": target_text,
-                    "cloned_audio_path": None
+                    "cloned_audio_path": None,
+                    "start_time": target_sub.get("start_time", 0),
+                    "end_time": target_sub.get("end_time", 0)
                 })
             else:
                 # 添加到批量生成任务
                 tasks.append({
                     "speaker_id": speaker_id,
                     "target_text": target_text,
-                    "segment_index": idx
+                    "segment_index": idx,
+                    "start_time": target_sub.get("start_time", 0),
+                    "end_time": target_sub.get("end_time", 0)
                 })
 
         # 批量生成所有语音
@@ -1005,7 +1070,9 @@ async def run_voice_cloning_process(
                     "index": segment_index,
                     "speaker_id": task["speaker_id"],
                     "target_text": task["target_text"],
-                    "cloned_audio_path": api_path
+                    "cloned_audio_path": api_path,
+                    "start_time": task.get("start_time", 0),
+                    "end_time": task.get("end_time", 0)
                 })
             else:
                 cloned_results.append({
@@ -1013,7 +1080,9 @@ async def run_voice_cloning_process(
                     "speaker_id": task["speaker_id"],
                     "target_text": task["target_text"],
                     "cloned_audio_path": None,
-                    "error": "生成失败"
+                    "error": "生成失败",
+                    "start_time": task.get("start_time", 0),
+                    "end_time": task.get("end_time", 0)
                 })
 
         # 按索引排序结果
@@ -1138,7 +1207,16 @@ async def serve_cloned_audio(task_id: str, filename: str, request: Request):
     chunk_size = end - start + 1
 
     # 读取文件的指定范围
-    def iterfile():
+    async def iterfile():
+        # 延迟一小段时间，确保文件写入完成
+        import asyncio
+        await asyncio.sleep(0.01)
+
+        # 重新检查文件大小，防止文件还在写入
+        current_size = file_path.stat().st_size
+        if current_size != file_size:
+            print(f"⚠️  警告：文件 {filename} 大小变化: {file_size} -> {current_size}")
+
         with open(file_path, "rb") as f:
             f.seek(start)
             remaining = chunk_size
@@ -1166,6 +1244,10 @@ class RegenerateSegmentRequest(BaseModel):
     task_id: str
     segment_index: int
     new_speaker_id: int
+
+
+class StitchAudioRequest(BaseModel):
+    task_id: str
 
 
 @app.post("/voice-cloning/regenerate-segment")
@@ -1240,6 +1322,12 @@ async def regenerate_segment(request: RegenerateSegmentRequest):
             "backend/audio_segments",
         ]
 
+        # 可能的编码文件路径格式
+        encoding_patterns = [
+            ("encoded", f"speaker_{new_speaker_id}_codes.npy"),  # 新格式：批量编码
+            (f"speaker_{new_speaker_id}_encoded", "fake.npy"),   # 旧格式：单独编码
+        ]
+
         found_npy = None
         for base_dir in possible_dirs:
             if not os.path.exists(base_dir):
@@ -1251,11 +1339,15 @@ async def regenerate_segment(request: RegenerateSegmentRequest):
                 if not os.path.isdir(task_path):
                     continue
 
-                # 检查该任务文件夹中是否有此说话人的编码
-                encoded_path = os.path.join(task_path, f"speaker_{new_speaker_id}_encoded", "fake.npy")
-                if os.path.exists(encoded_path):
-                    found_npy = encoded_path
-                    print(f"[查找编码] ✅ 找到编码文件: {encoded_path}")
+                # 尝试不同的编码文件路径格式
+                for subdir, filename in encoding_patterns:
+                    encoded_path = os.path.join(task_path, subdir, filename)
+                    if os.path.exists(encoded_path):
+                        found_npy = encoded_path
+                        print(f"[查找编码] ✅ 找到编码文件: {encoded_path}")
+                        break
+
+                if found_npy:
                     break
 
             if found_npy:
@@ -1295,7 +1387,9 @@ async def regenerate_segment(request: RegenerateSegmentRequest):
 
         print(f"重新生成片段 {segment_index}: 新说话人 {new_speaker_id}, 文本: {target_text[:30]}...")
 
-        # 步骤2: 生成语义token
+        # 步骤2: 直接生成语义token（使用新说话人的编码）
+        # 说话人改变时，即使文本相同也需要重新生成语义token
+        print(f"[语义Token] 使用说话人{new_speaker_id}生成语义token...")
         codes_path = cloner.generate_semantic_tokens(
             target_text=target_text,
             ref_text=ref_text,
@@ -1326,6 +1420,184 @@ async def regenerate_segment(request: RegenerateSegmentRequest):
         import traceback
         error_detail = traceback.format_exc()
         print(f"重新生成片段失败: {error_detail}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/voice-cloning/stitch-audio")
+async def stitch_cloned_audio(request: StitchAudioRequest):
+    """
+    拼接所有克隆的音频片段为完整音频，处理时长不匹配的情况
+    """
+    try:
+        import soundfile as sf
+        import numpy as np
+
+        task_id = request.task_id
+
+        # 检查任务是否存在
+        if task_id not in voice_cloning_status:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        status = voice_cloning_status[task_id]
+        cloned_results = status.get("cloned_results", [])
+
+        if not cloned_results:
+            raise HTTPException(status_code=400, detail="没有可拼接的音频片段")
+
+        # 获取克隆音频目录
+        cloned_audio_dir = status.get("cloned_audio_dir", os.path.join("exports", f"cloned_{task_id}"))
+
+        print(f"[音频拼接] 开始拼接任务 {task_id} 的音频片段...")
+
+        # 读取所有音频片段
+        segments_with_timing = []
+        sample_rate = None
+
+        for idx, result in enumerate(cloned_results):
+            cloned_audio_path = result.get("cloned_audio_path")
+            if not cloned_audio_path:
+                print(f"[音频拼接] 跳过片段 {idx}: 没有克隆音频")
+                continue
+
+            # 构建实际文件路径
+            audio_filename = f"segment_{idx}.wav"
+            audio_file_path = os.path.join(cloned_audio_dir, audio_filename)
+
+            if not os.path.exists(audio_file_path):
+                print(f"[音频拼接] 跳过片段 {idx}: 文件不存在 {audio_file_path}")
+                continue
+
+            # 读取音频
+            audio_data, sr = sf.read(audio_file_path)
+            if sample_rate is None:
+                sample_rate = sr
+            elif sr != sample_rate:
+                print(f"[音频拼接] 警告: 片段 {idx} 采样率不一致 ({sr} vs {sample_rate})")
+
+            # 获取原始时间戳
+            start_time = result.get("start_time", 0)
+            end_time = result.get("end_time", 0)
+            timestamp_duration = end_time - start_time
+
+            # 计算实际音频时长
+            actual_duration = len(audio_data) / sample_rate
+
+            segments_with_timing.append({
+                "index": idx,
+                "audio_data": audio_data,
+                "start_time": start_time,
+                "end_time": end_time,
+                "timestamp_duration": timestamp_duration,
+                "actual_duration": actual_duration
+            })
+
+        if not segments_with_timing:
+            raise HTTPException(status_code=400, detail="没有有效的音频片段可拼接")
+
+        # 按开始时间排序
+        segments_with_timing.sort(key=lambda x: x["start_time"])
+
+        # 处理每个片段的时长
+        processed_segments = []
+
+        for seg in segments_with_timing:
+            audio_data = seg["audio_data"]
+            timestamp_duration = seg["timestamp_duration"]
+            actual_duration = seg["actual_duration"]
+
+            target_samples = int(timestamp_duration * sample_rate)
+            actual_samples = len(audio_data)
+
+            if actual_samples > target_samples:
+                # 情况1: 音频过长，从两端等比例裁剪
+                excess_samples = actual_samples - target_samples
+                trim_left = excess_samples // 2
+                trim_right = excess_samples - trim_left
+                processed_audio = audio_data[trim_left:actual_samples - trim_right]
+
+            elif actual_samples < target_samples:
+                # 情况2: 音频过短，居中并两端补零
+                pad_samples = target_samples - actual_samples
+                pad_left = pad_samples // 2
+                pad_right = pad_samples - pad_left
+                processed_audio = np.pad(audio_data, (pad_left, pad_right), mode='constant', constant_values=0)
+
+            else:
+                # 情况3: 时长完全匹配
+                processed_audio = audio_data
+
+            processed_segments.append({
+                "audio": processed_audio,
+                "start_time": seg["start_time"],
+                "end_time": seg["end_time"]
+            })
+
+        # 拼接所有片段，中间填充静音
+        final_audio_parts = []
+        last_end_time = 0
+
+        for seg in processed_segments:
+            # 计算与上一段的间隙
+            gap_duration = seg["start_time"] - last_end_time
+
+            if gap_duration > 0.001:  # 大于1ms才填充静音
+                gap_samples = int(gap_duration * sample_rate)
+                silence = np.zeros(gap_samples, dtype=audio_data.dtype)
+                final_audio_parts.append(silence)
+
+            final_audio_parts.append(seg["audio"])
+            last_end_time = seg["end_time"]
+
+        # 合并所有部分
+        if not final_audio_parts:
+            raise ValueError("没有音频部分可以拼接")
+
+        final_audio = np.concatenate(final_audio_parts)
+
+        # 数据验证和清理
+        has_nan = np.isnan(final_audio).any()
+        has_inf = np.isinf(final_audio).any()
+
+        if has_nan or has_inf:
+            print(f"[音频拼接] 警告: 音频数据包含 NaN 或 Inf，进行清理")
+            final_audio = np.nan_to_num(final_audio, nan=0.0, posinf=1.0, neginf=-1.0)
+
+        # 转换为 int16 PCM 格式（浏览器最兼容的格式）
+        # 归一化到 [-1, 1] 范围
+        max_val = np.max(np.abs(final_audio))
+        if max_val > 0:
+            final_audio = final_audio / max_val
+        # 转换为 int16 (-32768 to 32767)
+        final_audio_int16 = (final_audio * 32767).astype(np.int16)
+
+        # 保存最终音频
+        stitched_filename = f"stitched_{task_id}.wav"
+        stitched_path = os.path.join(EXPORTS_DIR, stitched_filename)
+
+        # 使用 scipy.io.wavfile 保存，生成标准 WAV 文件
+        from scipy.io import wavfile
+        wavfile.write(stitched_path, sample_rate, final_audio_int16)
+
+        # 计算总时长
+        total_duration = len(final_audio) / sample_rate
+
+        print(f"[音频拼接] 完成! 总时长: {total_duration:.3f}s")
+
+        # 更新状态
+        voice_cloning_status[task_id]["stitched_audio_path"] = f"/exports/{stitched_filename}"
+
+        return {
+            "success": True,
+            "stitched_audio_path": f"/exports/{stitched_filename}",
+            "total_duration": total_duration,
+            "segments_count": len(processed_segments),
+            "message": f"成功拼接 {len(processed_segments)} 个音频片段"
+        }
+
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"[音频拼接] 失败: {error_detail}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
