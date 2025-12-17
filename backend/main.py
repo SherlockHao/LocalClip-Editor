@@ -1451,6 +1451,67 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
 
         print(f"[音频拼接] 开始拼接任务 {task_id} 的音频片段...")
 
+        # 音频优化：在拼接前优化过长的音频片段
+        from audio_optimizer import AudioOptimizer
+
+        print(f"[音频优化] 检查是否有需要优化的片段...")
+        optimizer = AudioOptimizer()
+        optimized_files = optimizer.optimize_segments_for_stitching(
+            cloned_results=cloned_results,
+            cloned_audio_dir=cloned_audio_dir,
+            threshold_ratio=1.1  # 超过目标长度10%的片段将被优化
+        )
+
+        if optimized_files:
+            print(f"[音频优化] 成功优化 {len(optimized_files)} 个片段")
+        else:
+            print(f"[音频优化] 无需优化")
+
+        # 获取原视频文件路径，用于提取原始音频音量
+        video_file = status.get("video_file")
+        original_audio_volumes = {}
+
+        if video_file:
+            video_path = os.path.join("uploads", video_file)
+            if os.path.exists(video_path):
+                print(f"[音频拼接] 从原视频提取音频音量信息: {video_path}")
+                try:
+                    import subprocess
+                    # 提取原视频的音频
+                    temp_audio_path = os.path.join("exports", f"temp_original_audio_{task_id}.wav")
+                    cmd = [
+                        'ffmpeg', '-i', video_path,
+                        '-vn', '-acodec', 'pcm_s16le',
+                        '-ar', '44100', '-ac', '1',
+                        '-y', temp_audio_path
+                    ]
+                    subprocess.run(cmd, capture_output=True, check=True)
+
+                    # 读取原视频音频
+                    original_audio, orig_sr = sf.read(temp_audio_path)
+
+                    # 计算每个片段的原始音量
+                    for idx, result in enumerate(cloned_results):
+                        start_time = result.get("start_time", 0)
+                        end_time = result.get("end_time", 0)
+
+                        start_sample = int(start_time * orig_sr)
+                        end_sample = int(end_time * orig_sr)
+
+                        if end_sample <= len(original_audio):
+                            segment_audio = original_audio[start_sample:end_sample]
+                            # 计算 RMS (均方根) 音量
+                            rms = np.sqrt(np.mean(segment_audio**2))
+                            original_audio_volumes[idx] = rms
+                            print(f"[音频拼接] 片段 {idx} 原始音量 RMS: {rms:.6f}")
+
+                    # 删除临时文件
+                    if os.path.exists(temp_audio_path):
+                        os.remove(temp_audio_path)
+
+                except Exception as e:
+                    print(f"[音频拼接] 警告: 无法提取原视频音频音量: {e}")
+
         # 读取所有音频片段
         segments_with_timing = []
         sample_rate = None
@@ -1461,9 +1522,14 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
                 print(f"[音频拼接] 跳过片段 {idx}: 没有克隆音频")
                 continue
 
-            # 构建实际文件路径
-            audio_filename = f"segment_{idx}.wav"
-            audio_file_path = os.path.join(cloned_audio_dir, audio_filename)
+            # 优先使用优化后的文件路径，如果没有则使用原始文件
+            if idx in optimized_files:
+                audio_file_path = optimized_files[idx]
+                print(f"[音频拼接] 片段 {idx} 使用优化后的音频: {audio_file_path}")
+            else:
+                # 构建实际文件路径
+                audio_filename = f"segment_{idx}.wav"
+                audio_file_path = os.path.join(cloned_audio_dir, audio_filename)
 
             if not os.path.exists(audio_file_path):
                 print(f"[音频拼接] 跳过片段 {idx}: 文件不存在 {audio_file_path}")
@@ -1495,7 +1561,8 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
                 "start_time": start_time,
                 "end_time": end_time,
                 "timestamp_duration": timestamp_duration,
-                "actual_duration": actual_duration
+                "actual_duration": actual_duration,
+                "original_volume": original_audio_volumes.get(idx, None)
             })
 
         if not segments_with_timing:
@@ -1504,13 +1571,15 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
         # 按开始时间排序
         segments_with_timing.sort(key=lambda x: x["start_time"])
 
-        # 处理每个片段的时长
+        # 处理每个片段的时长和音量
         processed_segments = []
 
         for seg in segments_with_timing:
             audio_data = seg["audio_data"]
             timestamp_duration = seg["timestamp_duration"]
             actual_duration = seg["actual_duration"]
+            original_volume = seg.get("original_volume")
+            idx = seg["index"]
 
             target_samples = int(timestamp_duration * sample_rate)
             actual_samples = len(audio_data)
@@ -1532,6 +1601,26 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
             else:
                 # 情况3: 时长完全匹配
                 processed_audio = audio_data
+
+            # 调整音量以匹配原视频
+            if original_volume is not None and original_volume > 1e-6:
+                # 计算当前克隆音频的 RMS
+                cloned_rms = np.sqrt(np.mean(processed_audio**2))
+
+                if cloned_rms > 1e-6:  # 避免除以零
+                    # 计算音量调整比例
+                    volume_ratio = original_volume / cloned_rms
+                    # 限制音量调整范围，避免过度放大或缩小
+                    volume_ratio = np.clip(volume_ratio, 0.1, 10.0)
+
+                    # 应用音量调整
+                    processed_audio = processed_audio * volume_ratio
+
+                    print(f"[音频拼接] 片段 {idx} 音量调整: 原始={original_volume:.6f}, 克隆={cloned_rms:.6f}, 比例={volume_ratio:.2f}")
+                else:
+                    print(f"[音频拼接] 片段 {idx} 音量过低，跳过调整")
+            else:
+                print(f"[音频拼接] 片段 {idx} 无原始音量信息，跳过音量调整")
 
             processed_segments.append({
                 "audio": processed_audio,

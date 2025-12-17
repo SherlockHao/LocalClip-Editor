@@ -53,6 +53,7 @@ const App: React.FC = () => {
     uniqueSpeakers: undefined as number | undefined
   });
   const [speakerNameMapping, setSpeakerNameMapping] = useState<{[key: number]: string}>({});
+  const [filteredSpeakerId, setFilteredSpeakerId] = useState<number | null>(null); // 筛选的说话人ID
 
   // 语音克隆相关状态
   const [targetLanguage, setTargetLanguage] = useState<string>('');
@@ -712,6 +713,8 @@ const App: React.FC = () => {
               onPlayClonedAudio={handlePlayClonedAudio}
               onRegenerateSegment={handleRegenerateSegment}
               voiceCloningTaskId={voiceCloningTaskId || undefined}
+              filteredSpeakerId={filteredSpeakerId}
+              onFilteredSpeakerChange={setFilteredSpeakerId}
             />
 
             {/* 右侧：播放器 + 视频信息 */}
@@ -749,6 +752,8 @@ const App: React.FC = () => {
                       duration={duration}
                       audioSrc={stitchedAudioPath}
                       useExternalAudio={useStitchedAudio}
+                      filteredSpeakerId={filteredSpeakerId}
+                      subtitles={subtitles}
                     />
                     {/* 音频切换按钮 */}
                     {stitchedAudioPath && (

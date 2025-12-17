@@ -25,6 +25,8 @@ interface SubtitleDetailsProps {
   onPlayClonedAudio?: (audioPath: string) => void;
   onRegenerateSegment?: (index: number, newSpeakerId: number) => void;
   voiceCloningTaskId?: string;
+  filteredSpeakerId?: number | null;
+  onFilteredSpeakerChange?: (speakerId: number | null) => void;
 }
 
 const getUniqueSpeakers = (subtitles: Subtitle[]): number[] => {
@@ -45,7 +47,9 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
   onRemoveSpeaker,
   onPlayClonedAudio,
   onRegenerateSegment,
-  voiceCloningTaskId
+  voiceCloningTaskId,
+  filteredSpeakerId = null,
+  onFilteredSpeakerChange
 }) => {
   const activeSubtitleRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -53,7 +57,6 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
   const [editingText, setEditingText] = useState<string>('');
   const [selectedClonedSpeaker, setSelectedClonedSpeaker] = useState<{[index: number]: number}>({});
   const [regeneratingIndex, setRegeneratingIndex] = useState<number | null>(null);
-  const [filteredSpeakerId, setFilteredSpeakerId] = useState<number | null>(null); // 筛选的说话人ID
 
   const uniqueSpeakers = getUniqueSpeakers(subtitles);
 
@@ -66,7 +69,9 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
 
   // 切换说话人筛选
   const toggleSpeakerFilter = (speakerId: number) => {
-    setFilteredSpeakerId(prev => prev === speakerId ? null : speakerId);
+    if (onFilteredSpeakerChange) {
+      onFilteredSpeakerChange(filteredSpeakerId === speakerId ? null : speakerId);
+    }
   };
 
   // 获取所有说话人ID（包括手动添加但未分配的）

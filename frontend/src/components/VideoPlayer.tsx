@@ -1,5 +1,11 @@
 import React, { useEffect, useState, useRef as useReactRef } from 'react';
 
+interface Subtitle {
+  start_time: number;
+  end_time: number;
+  speaker_id?: number;
+}
+
 interface VideoPlayerProps {
   videoRef: React.RefObject<HTMLVideoElement>;
   src: string;
@@ -10,6 +16,8 @@ interface VideoPlayerProps {
   duration: number;
   audioSrc?: string | null;
   useExternalAudio?: boolean;
+  filteredSpeakerId?: number | null;
+  subtitles?: Subtitle[];
 }
 
 const VideoPlayer: React.FC<VideoPlayerProps> = ({
@@ -21,7 +29,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   currentTime,
   duration,
   audioSrc = null,
-  useExternalAudio = false
+  useExternalAudio = false,
+  filteredSpeakerId = null,
+  subtitles = []
 }) => {
   const [hasLoaded, setHasLoaded] = useState(false);
   const audioRef = useReactRef<HTMLAudioElement>(null);
@@ -122,6 +132,114 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       video.muted = false;
     }
   }, [useExternalAudio, audioSrc]);
+
+  // 根据筛选的说话人控制播放：跳过非筛选说话人的段落
+  useEffect(() => {
+    const video = videoRef.current;
+    const audio = audioRef.current;
+
+    if (!video || filteredSpeakerId === null || !subtitles.length) return;
+
+    // 当筛选说话人改变时，立即检查并跳转
+    const checkAndJumpToFilteredSpeaker = () => {
+      const currentVideoTime = video.currentTime;
+      const currentSubtitle = subtitles.find(
+        sub => currentVideoTime >= sub.start_time && currentVideoTime <= sub.end_time
+      );
+
+      // 如果当前不是筛选的说话人，立即跳转
+      if (!currentSubtitle || currentSubtitle.speaker_id !== filteredSpeakerId) {
+        const nextFilteredSubtitle = subtitles.find(
+          sub => sub.start_time > currentVideoTime && sub.speaker_id === filteredSpeakerId
+        );
+
+        if (nextFilteredSubtitle) {
+          video.currentTime = nextFilteredSubtitle.start_time;
+          if (audio && useExternalAudio) {
+            audio.currentTime = nextFilteredSubtitle.start_time;
+          }
+        } else {
+          // 查找第一个筛选说话人的段落
+          const firstFilteredSubtitle = subtitles.find(
+            sub => sub.speaker_id === filteredSpeakerId
+          );
+          if (firstFilteredSubtitle) {
+            video.currentTime = firstFilteredSubtitle.start_time;
+            if (audio && useExternalAudio) {
+              audio.currentTime = firstFilteredSubtitle.start_time;
+            }
+          } else {
+            // 没有任何筛选说话人的段落，暂停
+            video.pause();
+            if (audio && useExternalAudio) {
+              audio.pause();
+            }
+          }
+        }
+      }
+    };
+
+    // 筛选说话人改变时立即检查
+    checkAndJumpToFilteredSpeaker();
+
+    const handleTimeUpdate = () => {
+      const currentVideoTime = video.currentTime;
+
+      // 查找当前时间对应的字幕
+      const currentSubtitle = subtitles.find(
+        sub => currentVideoTime >= sub.start_time && currentVideoTime <= sub.end_time
+      );
+
+      // 如果当前在某个字幕段落中
+      if (currentSubtitle) {
+        // 如果不是筛选的说话人，跳到下一个筛选说话人的段落
+        if (currentSubtitle.speaker_id !== filteredSpeakerId) {
+          // 查找下一个筛选说话人的段落
+          const nextFilteredSubtitle = subtitles.find(
+            sub => sub.start_time > currentVideoTime && sub.speaker_id === filteredSpeakerId
+          );
+
+          if (nextFilteredSubtitle) {
+            // 跳转到下一个筛选说话人的段落开始
+            video.currentTime = nextFilteredSubtitle.start_time;
+            if (audio && useExternalAudio) {
+              audio.currentTime = nextFilteredSubtitle.start_time;
+            }
+          } else {
+            // 没有下一个筛选说话人的段落了，暂停播放
+            video.pause();
+            if (audio && useExternalAudio) {
+              audio.pause();
+            }
+          }
+        }
+      } else {
+        // 不在任何字幕段落中，查找下一个筛选说话人的段落
+        const nextFilteredSubtitle = subtitles.find(
+          sub => sub.start_time > currentVideoTime && sub.speaker_id === filteredSpeakerId
+        );
+
+        if (nextFilteredSubtitle) {
+          video.currentTime = nextFilteredSubtitle.start_time;
+          if (audio && useExternalAudio) {
+            audio.currentTime = nextFilteredSubtitle.start_time;
+          }
+        } else {
+          // 没有下一个段落了，暂停
+          video.pause();
+          if (audio && useExternalAudio) {
+            audio.pause();
+          }
+        }
+      }
+    };
+
+    video.addEventListener('timeupdate', handleTimeUpdate);
+
+    return () => {
+      video.removeEventListener('timeupdate', handleTimeUpdate);
+    };
+  }, [filteredSpeakerId, subtitles, useExternalAudio]);
 
   return (
     <div className="w-full h-full flex items-center justify-center relative bg-black">
