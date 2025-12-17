@@ -53,8 +53,21 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
   const [editingText, setEditingText] = useState<string>('');
   const [selectedClonedSpeaker, setSelectedClonedSpeaker] = useState<{[index: number]: number}>({});
   const [regeneratingIndex, setRegeneratingIndex] = useState<number | null>(null);
+  const [filteredSpeakerId, setFilteredSpeakerId] = useState<number | null>(null); // 筛选的说话人ID
 
   const uniqueSpeakers = getUniqueSpeakers(subtitles);
+
+  // 根据筛选条件过滤字幕，保留原始索引
+  const filteredSubtitlesWithIndex = filteredSpeakerId !== null
+    ? subtitles
+        .map((sub, idx) => ({ subtitle: sub, originalIndex: idx }))
+        .filter(item => item.subtitle.speaker_id === filteredSpeakerId)
+    : subtitles.map((sub, idx) => ({ subtitle: sub, originalIndex: idx }));
+
+  // 切换说话人筛选
+  const toggleSpeakerFilter = (speakerId: number) => {
+    setFilteredSpeakerId(prev => prev === speakerId ? null : speakerId);
+  };
 
   // 获取所有说话人ID（包括手动添加但未分配的）
   const allSpeakerIds = Object.keys(speakerNameMapping).map(id => parseInt(id));
@@ -237,10 +250,22 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
               <span className="flex-shrink-0 text-xs font-semibold text-blue-400">男:</span>
               {maleSpeakers.map(speaker => {
                 const colors = getColorBySpacker(speaker.id);
+                const isFiltered = filteredSpeakerId === speaker.id;
+                const isDimmed = filteredSpeakerId !== null && !isFiltered;
                 return (
-                  <div key={speaker.id} className={`flex-shrink-0 px-3 py-1.5 rounded-lg border-2 ${colors.badge} ${colors.border} text-xs font-semibold`}>
+                  <button
+                    key={speaker.id}
+                    onClick={() => toggleSpeakerFilter(speaker.id)}
+                    className={`flex-shrink-0 px-3 py-1.5 rounded-lg border-2 text-xs font-semibold transition-all cursor-pointer ${
+                      isFiltered
+                        ? `${colors.badge} ${colors.border} ring-2 ring-blue-400 shadow-lg`
+                        : isDimmed
+                        ? 'bg-slate-700/30 border-slate-600/30 text-slate-500 opacity-40'
+                        : `${colors.badge} ${colors.border} hover:ring-2 hover:ring-blue-400/50`
+                    }`}
+                  >
                     {speaker.name}
-                  </div>
+                  </button>
                 );
               })}
               <button onClick={() => onAddSpeaker?.('male')} className="flex-shrink-0 w-7 h-7 rounded-lg border-2 border-dashed border-blue-600/50 bg-blue-700/20 hover:bg-blue-700/40 text-blue-400 flex items-center justify-center" title="添加男声">
@@ -257,10 +282,22 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
               <span className="flex-shrink-0 text-xs font-semibold text-pink-400">女:</span>
               {femaleSpeakers.map(speaker => {
                 const colors = getColorBySpacker(speaker.id);
+                const isFiltered = filteredSpeakerId === speaker.id;
+                const isDimmed = filteredSpeakerId !== null && !isFiltered;
                 return (
-                  <div key={speaker.id} className={`flex-shrink-0 px-3 py-1.5 rounded-lg border-2 ${colors.badge} ${colors.border} text-xs font-semibold`}>
+                  <button
+                    key={speaker.id}
+                    onClick={() => toggleSpeakerFilter(speaker.id)}
+                    className={`flex-shrink-0 px-3 py-1.5 rounded-lg border-2 text-xs font-semibold transition-all cursor-pointer ${
+                      isFiltered
+                        ? `${colors.badge} ${colors.border} ring-2 ring-pink-400 shadow-lg`
+                        : isDimmed
+                        ? 'bg-slate-700/30 border-slate-600/30 text-slate-500 opacity-40'
+                        : `${colors.badge} ${colors.border} hover:ring-2 hover:ring-pink-400/50`
+                    }`}
+                  >
                     {speaker.name}
-                  </div>
+                  </button>
                 );
               })}
               <button onClick={() => onAddSpeaker?.('female')} className="flex-shrink-0 w-7 h-7 rounded-lg border-2 border-dashed border-pink-600/50 bg-pink-700/20 hover:bg-pink-700/40 text-pink-400 flex items-center justify-center" title="添加女声">
@@ -278,7 +315,8 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
 
       {/* 字幕列表 */}
       <div ref={containerRef} className="flex-1 overflow-y-auto p-4 space-y-2.5">
-        {subtitles.map((subtitle, index) => {
+        {filteredSubtitlesWithIndex.map(({ subtitle, originalIndex }) => {
+          const index = originalIndex; // 使用原始索引
           const isPlaying = currentTime >= subtitle.start_time && currentTime <= subtitle.end_time;
           const colors = getColorBySpacker(subtitle.speaker_id);
 
