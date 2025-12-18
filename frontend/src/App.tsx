@@ -29,6 +29,11 @@ interface Subtitle {
   end_time_formatted: string;
   text: string;
   speaker_id?: number;
+  target_text?: string;
+  cloned_audio_path?: string;
+  cloned_speaker_id?: number;
+  actual_start_time?: number;
+  actual_end_time?: number;
 }
 
 const App: React.FC = () => {
@@ -66,6 +71,8 @@ const App: React.FC = () => {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const isSeekingRef = useRef<boolean>(false);
+  const progressBarRef = useRef<HTMLDivElement>(null);
+  const [isDraggingProgress, setIsDraggingProgress] = useState(false);
 
   // 空格键播放/暂停
   useEffect(() => {
@@ -85,6 +92,44 @@ const App: React.FC = () => {
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [isPlaying]);
+
+  // 进度条拖拽功能
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDraggingProgress || !progressBarRef.current) return;
+
+      const rect = progressBarRef.current.getBoundingClientRect();
+      const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+      const percentage = x / rect.width;
+      const newTime = percentage * duration;
+
+      handleSeek(newTime);
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingProgress(false);
+    };
+
+    if (isDraggingProgress) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDraggingProgress, duration]);
+
+  const handleProgressBarMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    setIsDraggingProgress(true);
+
+    // 立即跳转到点击位置
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = x / rect.width;
+    handleSeek(percentage * duration);
+  };
 
   const refreshVideos = async () => {
     try {
@@ -539,7 +584,31 @@ const App: React.FC = () => {
           setUseStitchedAudio(true);
         }, 0);
 
-        alert(`拼接成功！已生成完整音频，共 ${result.segments_count} 个片段，总时长 ${result.total_duration.toFixed(2)}s`);
+        // 重新获取语音克隆状态以更新字幕数据（包含 actual_start_time 和 actual_end_time）
+        const statusResponse = await fetch(`/api/voice-cloning/status/${voiceCloningTaskId}`);
+        if (statusResponse.ok) {
+          const status = await statusResponse.json();
+          if (status.cloned_results && Array.isArray(status.cloned_results)) {
+            setSubtitles(prevSubtitles => {
+              return prevSubtitles.map((subtitle, index) => {
+                const clonedResult = status.cloned_results.find((r: any) => r.index === index);
+                if (clonedResult) {
+                  return {
+                    ...subtitle,
+                    target_text: clonedResult.target_text,
+                    cloned_audio_path: clonedResult.cloned_audio_path,
+                    cloned_speaker_id: clonedResult.speaker_id,
+                    actual_start_time: clonedResult.actual_start_time,
+                    actual_end_time: clonedResult.actual_end_time
+                  };
+                }
+                return subtitle;
+              });
+            });
+          }
+        }
+
+        alert(`拼接成功！已生成完整音频，共 ${result.segments_count} 个片段，总时长 ${result.total_duration.toFixed(2)}s${result.replanned_segments > 0 ? `，其中 ${result.replanned_segments} 个片段使用了智能时间轴规划` : ''}`);
       }
     } catch (error) {
       console.error('拼接音频失败:', error);
@@ -657,26 +726,37 @@ const App: React.FC = () => {
           {/* 简洁时间轴 */}
           {currentVideo && duration > 0 && (
             <div className="flex items-center gap-3 flex-1 max-w-md">
-              <span className="text-xs font-mono text-slate-400 min-w-[45px]">
+              <span className="text-xs font-mono text-blue-300 min-w-[45px] font-semibold">
                 {new Date(currentTime * 1000).toISOString().substr(14, 5)}
               </span>
               <div
-                className="flex-1 h-2 bg-slate-700 rounded-full cursor-pointer relative group"
-                onClick={(e) => {
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  const x = e.clientX - rect.left;
-                  const percentage = x / rect.width;
-                  handleSeek(percentage * duration);
-                }}
+                ref={progressBarRef}
+                className="flex-1 h-3 bg-slate-700/50 rounded-full cursor-pointer relative group shadow-inner hover:shadow-lg transition-all duration-200"
+                onMouseDown={handleProgressBarMouseDown}
+                style={{ cursor: isDraggingProgress ? 'grabbing' : 'pointer' }}
               >
+                {/* 进度条背景光晕 */}
                 <div
-                  className="absolute h-full bg-gradient-to-r from-blue-500 to-blue-400 rounded-full transition-all"
+                  className="absolute h-full bg-gradient-to-r from-blue-600/20 to-blue-400/20 rounded-full transition-all duration-200"
                   style={{ width: `${(currentTime / duration) * 100}%` }}
                 />
+                {/* 进度条主体 */}
                 <div
-                  className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-lg transition-all"
-                  style={{ left: `${(currentTime / duration) * 100}%`, transform: 'translate(-50%, -50%)' }}
+                  className="absolute h-full bg-gradient-to-r from-blue-500 via-blue-400 to-blue-500 rounded-full transition-all duration-200 shadow-md"
+                  style={{ width: `${(currentTime / duration) * 100}%` }}
                 />
+                {/* 进度条光泽效果 */}
+                <div
+                  className="absolute top-0 h-1/2 bg-gradient-to-b from-white/30 to-transparent rounded-full transition-all duration-200"
+                  style={{ width: `${(currentTime / duration) * 100}%` }}
+                />
+                {/* 播放头 */}
+                <div
+                  className="absolute top-1/2 w-4 h-4 bg-white rounded-full shadow-lg transition-all duration-200 group-hover:scale-125 border-2 border-blue-400"
+                  style={{ left: `${(currentTime / duration) * 100}%`, transform: 'translate(-50%, -50%)' }}
+                >
+                  <div className="absolute inset-0 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 opacity-50"></div>
+                </div>
               </div>
               <span className="text-xs font-mono text-slate-400 min-w-[45px]">
                 {new Date(duration * 1000).toISOString().substr(14, 5)}

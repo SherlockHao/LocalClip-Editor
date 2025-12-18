@@ -147,7 +147,7 @@ class AudioOptimizer:
     def time_stretch_audio(
         self,
         audio_data: np.ndarray,
-        rate: float = 1.1
+        rate: float = 1.05
     ) -> np.ndarray:
         """
         对音频进行变速不变调处理

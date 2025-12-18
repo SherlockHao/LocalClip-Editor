@@ -10,6 +10,8 @@ interface Subtitle {
   speaker_id?: number;
   target_text?: string;
   cloned_audio_path?: string;
+  actual_start_time?: number;  // 重新规划后的实际开始时间
+  actual_end_time?: number;    // 重新规划后的实际结束时间
 }
 
 interface SubtitleTimelineProps {
@@ -149,9 +151,12 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
   const handleTimelineClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (Math.abs(e.clientX - dragStartX) > 5) return; // 防止拖拽时触发点击
 
-    const rect = e.currentTarget.getBoundingClientRect();
-    const clickPosition = e.clientX - rect.left + scrollOffset;
-    const timelineWidth = rect.width * zoom;
+    // 获取时间轴容器的位置
+    const timelineRect = timelineRef.current?.getBoundingClientRect();
+    if (!timelineRect) return;
+
+    const clickPosition = e.clientX - timelineRect.left + scrollOffset;
+    const timelineWidth = timelineRect.width * zoom;
     const time = (clickPosition / timelineWidth) * duration;
     onSeek(time);
   };
@@ -254,8 +259,7 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
                     width: `${Math.max(width, 2.5 / zoom)}%`,
                     minWidth: '30px'
                   }}
-                  onClick={(e) => {
-                    e.stopPropagation();
+                  onClick={() => {
                     onSeek(subtitle.start_time);
                   }}
                   title={subtitle.text}
@@ -278,9 +282,13 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
             {subtitles.map((subtitle, index) => {
               if (!subtitle.cloned_audio_path) return null;
 
-              const left = (subtitle.start_time / duration) * 100;
-              const width = ((subtitle.end_time - subtitle.start_time) / duration) * 100;
-              const isPlaying = currentTime >= subtitle.start_time && currentTime <= subtitle.end_time;
+              // 使用重新规划的时间（如果有），否则使用原始时间
+              const actualStart = subtitle.actual_start_time ?? subtitle.start_time;
+              const actualEnd = subtitle.actual_end_time ?? subtitle.end_time;
+
+              const left = (actualStart / duration) * 100;
+              const width = ((actualEnd - actualStart) / duration) * 100;
+              const isPlaying = currentTime >= actualStart && currentTime <= actualEnd;
               const displayText = subtitle.target_text;
 
               return (
@@ -296,8 +304,7 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
                     width: `${Math.max(width, 2.5 / zoom)}%`,
                     minWidth: '30px'
                   }}
-                  onClick={(e) => {
-                    e.stopPropagation();
+                  onClick={() => {
                     onSeek(subtitle.start_time);
                   }}
                   title={displayText || subtitle.text}
@@ -312,19 +319,34 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
 
           {/* 播放头指示器 - 贯穿所有轨道 */}
           <div
-            className="absolute top-0 bottom-0 w-0.5 bg-gradient-to-b from-red-500 to-red-600 z-30 shadow-lg pointer-events-none"
+            className="absolute top-0 bottom-0 z-30 pointer-events-none"
             style={{
               left: `${(currentTime / duration) * 100}%`
             }}
           >
-            {/* 顶部圆点和时间显示 */}
-            <div className="absolute -top-8 left-1/2 -translate-x-1/2 flex flex-col items-center">
-              <div className="bg-slate-900/90 backdrop-blur-sm border border-red-500/50 rounded px-2 py-0.5 shadow-lg mb-1">
-                <span className="text-xs font-mono text-red-300 font-semibold whitespace-nowrap">
+            {/* 发光效果背景 */}
+            <div className="absolute top-0 bottom-0 w-1 -translate-x-1/2 bg-red-500/30 blur-sm"></div>
+
+            {/* 主线条 */}
+            <div className="absolute top-0 bottom-0 w-0.5 -translate-x-1/2 bg-gradient-to-b from-red-400 via-red-500 to-red-600 shadow-lg shadow-red-500/50"></div>
+
+            {/* 顶部装饰和时间显示 */}
+            <div className="absolute -top-10 left-1/2 -translate-x-1/2 flex flex-col items-center">
+              {/* 时间标签 */}
+              <div className="bg-gradient-to-br from-red-600 to-red-700 backdrop-blur-sm border border-red-400/50 rounded-md px-2.5 py-1 shadow-xl shadow-red-500/30 mb-1.5">
+                <span className="text-xs font-mono text-white font-bold whitespace-nowrap drop-shadow-sm">
                   {new Date(currentTime * 1000).toISOString().substr(14, 5)}
                 </span>
               </div>
-              <div className="w-3 h-3 bg-red-500 border-2 border-white rounded-full shadow-lg"></div>
+
+              {/* 装饰性三角形箭头 */}
+              <div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-red-600 mb-0.5"></div>
+
+              {/* 顶部圆点 */}
+              <div className="relative">
+                <div className="w-4 h-4 bg-gradient-to-br from-red-400 to-red-600 rounded-full shadow-lg shadow-red-500/50 border-2 border-white"></div>
+                <div className="absolute inset-0 w-4 h-4 bg-red-300 rounded-full animate-ping opacity-20"></div>
+              </div>
             </div>
           </div>
         </div>

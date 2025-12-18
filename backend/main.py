@@ -22,7 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, FileResponse
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict
 import json
 import re
 
@@ -1425,6 +1425,129 @@ async def regenerate_segment(request: RegenerateSegmentRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _replan_audio_timeline(
+    cloned_results: List[Dict],
+    cloned_audio_dir: str,
+    optimized_files: Dict[int, str]
+) -> Dict[int, Dict]:
+    """
+    重新规划音频时间轴，为超长片段借用相邻空闲时间
+
+    Args:
+        cloned_results: 克隆结果列表
+        cloned_audio_dir: 克隆音频目录
+        optimized_files: 已优化的文件字典
+
+    Returns:
+        {segment_index: {'actual_start': float, 'actual_end': float, 'borrowed_before': float, 'borrowed_after': float}}
+    """
+    import soundfile as sf
+
+    replanned = {}
+
+    # 构建所有片段的时间信息
+    segments_info = []
+    for idx, result in enumerate(cloned_results):
+        # 优先使用优化后的文件
+        if idx in optimized_files:
+            audio_file_path = optimized_files[idx]
+        else:
+            audio_filename = f"segment_{idx}.wav"
+            audio_file_path = os.path.join(cloned_audio_dir, audio_filename)
+
+        if not os.path.exists(audio_file_path):
+            continue
+
+        try:
+            audio_data, sr = sf.read(audio_file_path)
+            actual_duration = len(audio_data) / sr
+
+            start_time = result.get("start_time", 0)
+            end_time = result.get("end_time", 0)
+            target_duration = end_time - start_time
+
+            segments_info.append({
+                'index': idx,
+                'start_time': start_time,
+                'end_time': end_time,
+                'target_duration': target_duration,
+                'actual_duration': actual_duration,
+                'audio_file_path': audio_file_path,
+                'sr': sr
+            })
+        except Exception as e:
+            print(f"[时间轴规划] 读取片段 {idx} 失败: {e}")
+            continue
+
+    # 按时间排序
+    segments_info.sort(key=lambda x: x['start_time'])
+
+    # 为每个超长片段计算可借用的时间
+    for i, seg in enumerate(segments_info):
+        excess = seg['actual_duration'] - seg['target_duration']
+
+        # 使用小阈值判断，避免浮点误差导致不必要的调整
+        if excess <= 0.001:
+            continue  # 不超长，不需要调整
+
+        idx = seg['index']
+
+        # 计算最大可借用时间（原字幕时长的20%）
+        max_borrow = seg['target_duration'] * 0.2
+
+        # 计算前后的可用空闲时间
+        gap_before = 0
+        if i > 0:
+            prev_seg = segments_info[i - 1]
+            gap_before = seg['start_time'] - prev_seg['end_time']
+
+        gap_after = 0
+        if i < len(segments_info) - 1:
+            next_seg = segments_info[i + 1]
+            gap_after = next_seg['start_time'] - seg['end_time']
+
+        # 优先策略：均匀借用，但不超过20%限制和可用间隙
+        # 1. 先尝试平均分配
+        half_excess = excess / 2
+        borrow_before = min(gap_before, max_borrow, half_excess)
+        borrow_after = min(gap_after, max_borrow, half_excess)
+
+        # 2. 如果总借用不够，尝试从有剩余空间的一侧多借
+        total_borrowed = borrow_before + borrow_after
+        if total_borrowed < excess:
+            remaining_needed = excess - total_borrowed
+
+            # 前面还有可借用空间
+            can_borrow_more_before = min(gap_before - borrow_before, max_borrow - borrow_before)
+            # 后面还有可借用空间
+            can_borrow_more_after = min(gap_after - borrow_after, max_borrow - borrow_after)
+
+            if can_borrow_more_before > 0:
+                extra_before = min(can_borrow_more_before, remaining_needed)
+                borrow_before += extra_before
+                remaining_needed -= extra_before
+
+            if remaining_needed > 0 and can_borrow_more_after > 0:
+                extra_after = min(can_borrow_more_after, remaining_needed)
+                borrow_after += extra_after
+
+        # 记录调整后的实际时间（只有真正借用了时间才记录）
+        if borrow_before > 0.001 or borrow_after > 0.001:  # 使用小阈值避免浮点误差
+            actual_start = seg['start_time'] - borrow_before
+            actual_end = seg['end_time'] + borrow_after
+            replanned[idx] = {
+                'actual_start': actual_start,
+                'actual_end': actual_end,
+                'actual_duration': actual_end - actual_start,
+                'borrowed_before': borrow_before,
+                'borrowed_after': borrow_after,
+                'original_start': seg['start_time'],
+                'original_end': seg['end_time']
+            }
+
+    return replanned
+
+
 @app.post("/voice-cloning/stitch-audio")
 async def stitch_cloned_audio(request: StitchAudioRequest):
     """
@@ -1451,7 +1574,7 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
 
         print(f"[音频拼接] 开始拼接任务 {task_id} 的音频片段...")
 
-        # 音频优化：在拼接前优化过长的音频片段
+        # 步骤1: 音频优化（VAD 去除静音）
         from audio_optimizer import AudioOptimizer
 
         print(f"[音频优化] 检查是否有需要优化的片段...")
@@ -1466,6 +1589,15 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
             print(f"[音频优化] 成功优化 {len(optimized_files)} 个片段")
         else:
             print(f"[音频优化] 无需优化")
+
+        # 步骤2: 时间轴重新规划（VAD后仍超长的片段尝试借用相邻空闲时间）
+        print(f"[时间轴规划] 开始规划音频时间轴...")
+        replanned_segments = _replan_audio_timeline(
+            cloned_results=cloned_results,
+            cloned_audio_dir=cloned_audio_dir,
+            optimized_files=optimized_files
+        )
+        print(f"[时间轴规划] 完成，共调整 {len(replanned_segments)} 个片段的时间轴")
 
         # 获取原视频文件路径，用于提取原始音频音量
         video_file = status.get("video_file")
@@ -1567,7 +1699,22 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
             original_volume = seg.get("original_volume")
             idx = seg["index"]
 
-            target_samples = int(timestamp_duration * sample_rate)
+            # 检查是否有重新规划的时间轴
+            if idx in replanned_segments:
+                replan_info = replanned_segments[idx]
+                # 使用重新规划的时长
+                target_duration = replan_info['actual_duration']
+                actual_start = replan_info['actual_start']
+                actual_end = replan_info['actual_end']
+
+                print(f"[音频拼接] 片段 {idx}: 使用重新规划的时间轴 {actual_start:.3f}s - {actual_end:.3f}s")
+            else:
+                # 使用原始时间
+                target_duration = timestamp_duration
+                actual_start = seg["start_time"]
+                actual_end = seg["end_time"]
+
+            target_samples = int(target_duration * sample_rate)
             actual_samples = len(audio_data)
 
             if actual_samples > target_samples:
@@ -1598,8 +1745,8 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
 
             processed_segments.append({
                 "audio": processed_audio,
-                "start_time": seg["start_time"],
-                "end_time": seg["end_time"]
+                "start_time": actual_start,
+                "end_time": actual_end
             })
 
         # 拼接所有片段，中间填充静音
@@ -1653,15 +1800,25 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
 
         print(f"[音频拼接] 完成! 总时长: {total_duration:.3f}s")
 
+        # 更新重新规划的片段时间到 cloned_results（用于前端时间轴显示）
+        for idx, replan_info in replanned_segments.items():
+            if idx < len(cloned_results):
+                # 保存重新规划的实际播放时间
+                cloned_results[idx]['actual_start_time'] = replan_info['actual_start']
+                cloned_results[idx]['actual_end_time'] = replan_info['actual_end']
+                print(f"[音频拼接] 更新片段 {idx} 时间轴: {replan_info['actual_start']:.3f}s - {replan_info['actual_end']:.3f}s")
+
         # 更新状态
         voice_cloning_status[task_id]["stitched_audio_path"] = f"/exports/{stitched_filename}"
+        voice_cloning_status[task_id]["cloned_results"] = cloned_results  # 更新结果
 
         return {
             "success": True,
             "stitched_audio_path": f"/exports/{stitched_filename}",
             "total_duration": total_duration,
             "segments_count": len(processed_segments),
-            "message": f"成功拼接 {len(processed_segments)} 个音频片段"
+            "message": f"成功拼接 {len(processed_segments)} 个音频片段",
+            "replanned_segments": len(replanned_segments)  # 返回重新规划的片段数量
         }
 
     except Exception as e:
