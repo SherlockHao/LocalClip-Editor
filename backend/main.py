@@ -1474,10 +1474,8 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
         if video_file:
             video_path = os.path.join("uploads", video_file)
             if os.path.exists(video_path):
-                print(f"[音频拼接] 从原视频提取音频音量信息: {video_path}")
                 try:
                     import subprocess
-                    # 提取原视频的音频
                     temp_audio_path = os.path.join("exports", f"temp_original_audio_{task_id}.wav")
                     cmd = [
                         'ffmpeg', '-i', video_path,
@@ -1487,25 +1485,19 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
                     ]
                     subprocess.run(cmd, capture_output=True, check=True)
 
-                    # 读取原视频音频
                     original_audio, orig_sr = sf.read(temp_audio_path)
 
-                    # 计算每个片段的原始音量
                     for idx, result in enumerate(cloned_results):
                         start_time = result.get("start_time", 0)
                         end_time = result.get("end_time", 0)
-
                         start_sample = int(start_time * orig_sr)
                         end_sample = int(end_time * orig_sr)
 
                         if end_sample <= len(original_audio):
                             segment_audio = original_audio[start_sample:end_sample]
-                            # 计算 RMS (均方根) 音量
                             rms = np.sqrt(np.mean(segment_audio**2))
                             original_audio_volumes[idx] = rms
-                            print(f"[音频拼接] 片段 {idx} 原始音量 RMS: {rms:.6f}")
 
-                    # 删除临时文件
                     if os.path.exists(temp_audio_path):
                         os.remove(temp_audio_path)
 
@@ -1525,7 +1517,6 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
             # 优先使用优化后的文件路径，如果没有则使用原始文件
             if idx in optimized_files:
                 audio_file_path = optimized_files[idx]
-                print(f"[音频拼接] 片段 {idx} 使用优化后的音频: {audio_file_path}")
             else:
                 # 构建实际文件路径
                 audio_filename = f"segment_{idx}.wav"
@@ -1536,11 +1527,6 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
                 continue
 
             # 读取音频
-            file_mtime = os.path.getmtime(audio_file_path)
-            import datetime
-            mtime_str = datetime.datetime.fromtimestamp(file_mtime).strftime('%Y-%m-%d %H:%M:%S')
-            print(f"[音频拼接] 读取片段 {idx}: {audio_file_path} (修改时间: {mtime_str}, speaker_id: {result.get('speaker_id', 'unknown')})")
-
             audio_data, sr = sf.read(audio_file_path)
             if sample_rate is None:
                 sample_rate = sr
@@ -1604,23 +1590,11 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
 
             # 调整音量以匹配原视频
             if original_volume is not None and original_volume > 1e-6:
-                # 计算当前克隆音频的 RMS
                 cloned_rms = np.sqrt(np.mean(processed_audio**2))
-
-                if cloned_rms > 1e-6:  # 避免除以零
-                    # 计算音量调整比例
+                if cloned_rms > 1e-6:
                     volume_ratio = original_volume / cloned_rms
-                    # 限制音量调整范围，避免过度放大或缩小
                     volume_ratio = np.clip(volume_ratio, 0.1, 10.0)
-
-                    # 应用音量调整
                     processed_audio = processed_audio * volume_ratio
-
-                    print(f"[音频拼接] 片段 {idx} 音量调整: 原始={original_volume:.6f}, 克隆={cloned_rms:.6f}, 比例={volume_ratio:.2f}")
-                else:
-                    print(f"[音频拼接] 片段 {idx} 音量过低，跳过调整")
-            else:
-                print(f"[音频拼接] 片段 {idx} 无原始音量信息，跳过音量调整")
 
             processed_segments.append({
                 "audio": processed_audio,

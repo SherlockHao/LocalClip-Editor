@@ -95,7 +95,6 @@ class AudioOptimizer:
 
             # 如果采样率不是 16000，需要重采样
             if original_sr != target_sr:
-                print(f"[音频优化] 重采样: {original_sr}Hz -> {target_sr}Hz")
                 audio_data_resampled = librosa.resample(audio_data, orig_sr=original_sr, target_sr=target_sr)
                 vad_audio = audio_data_resampled
                 vad_sr = target_sr
@@ -103,43 +102,30 @@ class AudioOptimizer:
                 vad_audio = audio_data
                 vad_sr = original_sr
 
-            # 转换为 tensor，参考 example.py 的处理方式
+            # 转换为 tensor
             audio_tensor = torch.from_numpy(vad_audio).float()
 
-            # 处理音频维度，参考 example.py 第58-63行
+            # 处理音频维度
             if audio_tensor.ndim == 1:
-                # Mono audio - 保持一维即可
                 pass
             elif audio_tensor.ndim > 1:
-                # Multi-channel audio - 只取第一个声道
                 audio_tensor = audio_tensor[:, 0] if audio_tensor.shape[1] < audio_tensor.shape[0] else audio_tensor[0, :]
 
-            # 获取语音时间戳，参考 example.py 第66-70行
+            # 获取语音时间戳
             speech_timestamps = self.get_speech_timestamps(
-                audio_tensor,  # 传入一维 tensor
+                audio_tensor,
                 self.vad_model,
                 return_seconds=True
             )
 
             if not speech_timestamps:
-                print("[音频优化] VAD 未检测到语音段")
                 return None
 
-            # 打印检测到的语音段
-            total_audio_duration = len(vad_audio) / vad_sr
-            print(f"[音频优化] VAD 检测到 {len(speech_timestamps)} 个语音段 (VAD处理音频时长: {total_audio_duration:.2f}s):")
-            for i, segment in enumerate(speech_timestamps):
-                duration = segment['end'] - segment['start']
-                print(f"  段 {i+1}: {segment['start']:.2f}s - {segment['end']:.2f}s (时长: {duration:.2f}s)")
-
-            # 拼接语音段，参考 example.py 第8-23行
-            # 注意：使用原始音频数据和原始采样率
+            # 拼接语音段
             speech_segments = []
             for segment in speech_timestamps:
-                # 时间戳是基于 VAD 处理的音频（16kHz），需要映射回原始采样率
                 start_sample = int(segment['start'] * original_sr)
                 end_sample = int(segment['end'] * original_sr)
-                # 确保不超出音频范围
                 start_sample = min(start_sample, len(audio_data))
                 end_sample = min(end_sample, len(audio_data))
 
@@ -149,8 +135,6 @@ class AudioOptimizer:
 
             if speech_segments:
                 concatenated = np.concatenate(speech_segments)
-                concatenated_duration = len(concatenated) / original_sr
-                print(f"[音频优化] 拼接后总时长: {concatenated_duration:.2f}s (原始采样率: {original_sr}Hz)")
                 return concatenated
             return None
 
@@ -213,29 +197,17 @@ class AudioOptimizer:
             audio_file_path = seg_info['audio_file_path']
             target_duration = seg_info['target_duration']
             actual_duration = seg_info['actual_duration']
-            target_text = seg_info.get('target_text', '')
-            original_text = seg_info.get('text', '')
-
-            print(f"[音频优化] 片段 {index}: 目标={target_duration:.3f}s, 实际={actual_duration:.3f}s")
-            if target_text:
-                print(f"  目标文字: {target_text}")
-            if original_text:
-                print(f"  原文: {original_text}")
 
             try:
                 # 读取音频
                 audio_data, sr = sf.read(audio_file_path)
-                actual_audio_duration = len(audio_data) / sr
-                print(f"  实际音频文件时长: {actual_audio_duration:.3f}s")
 
                 # 步骤1: 尝试使用 VAD 去除静音
                 if vad_available:
-                    print(f"[音频优化] 片段 {index}: 使用 VAD 去除静音...")
                     vad_audio = self.concatenate_speech_segments(audio_data, sr)
 
                     if vad_audio is not None:
                         vad_duration = len(vad_audio) / sr
-                        print(f"[音频优化] 片段 {index}: VAD 后时长={vad_duration:.3f}s")
 
                         # 如果 VAD 后长度符合要求，保存并使用
                         if vad_duration <= target_duration:
@@ -245,7 +217,6 @@ class AudioOptimizer:
                             )
                             sf.write(output_path, vad_audio, sr)
                             optimized_segments[index] = output_path
-                            print(f"[音频优化] 片段 {index}: VAD 优化成功，已保存")
                             continue
 
                         # VAD 后仍然过长，使用 VAD 结果继续处理
@@ -254,31 +225,24 @@ class AudioOptimizer:
 
                 # 步骤2: 如果 VAD 后仍然过长，使用变速
                 if actual_duration > target_duration:
-                    # 计算需要的加速倍率
                     rate = actual_duration / target_duration
-                    # 限制倍率范围（1.0 - 2.0）
                     rate = min(max(rate, 1.0), 2.0)
 
-                    print(f"[音频优化] 片段 {index}: 使用变速，倍率={rate:.2f}...")
                     stretched_audio = self.time_stretch_audio(audio_data, rate=rate)
 
-                    stretched_duration = len(stretched_audio) / sr
-                    print(f"[音频优化] 片段 {index}: 变速后时长={stretched_duration:.3f}s")
-
-                    # 保存优化后的音频
                     output_path = os.path.join(
                         cloned_audio_dir,
                         f"segment_{index}_optimized.wav"
                     )
                     sf.write(output_path, stretched_audio, sr)
                     optimized_segments[index] = output_path
-                    print(f"[音频优化] 片段 {index}: 变速优化完成，已保存")
 
             except Exception as e:
                 print(f"[音频优化] 片段 {index} 优化失败: {e}")
                 continue
 
-        print(f"[音频优化] 优化完成，共优化 {len(optimized_segments)} 个片段")
+        if optimized_segments:
+            print(f"[音频优化] 优化完成，共优化 {len(optimized_segments)} 个片段")
         return optimized_segments
 
     def optimize_segments_for_stitching(
