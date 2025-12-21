@@ -121,9 +121,11 @@ class AudioOptimizer:
             if not speech_timestamps:
                 return None
 
-            # 拼接语音段
+            # 拼接语音段（在两段之间保留 0.05 秒间隙以保证自然度）
             speech_segments = []
-            for segment in speech_timestamps:
+            gap_samples = int(0.05 * original_sr)  # 0.05 秒的间隙
+
+            for i, segment in enumerate(speech_timestamps):
                 start_sample = int(segment['start'] * original_sr)
                 end_sample = int(segment['end'] * original_sr)
                 start_sample = min(start_sample, len(audio_data))
@@ -133,8 +135,14 @@ class AudioOptimizer:
                     speech_segment = audio_data[start_sample:end_sample]
                     speech_segments.append(speech_segment)
 
+                    # 在非最后一段后添加间隙
+                    if i < len(speech_timestamps) - 1:
+                        gap_silence = np.zeros(gap_samples, dtype=audio_data.dtype)
+                        speech_segments.append(gap_silence)
+
             if speech_segments:
                 concatenated = np.concatenate(speech_segments)
+                print(f"  [VAD] 拼接 {len(speech_timestamps)} 个语音段，段间间隙: 0.05s")
                 return concatenated
             return None
 

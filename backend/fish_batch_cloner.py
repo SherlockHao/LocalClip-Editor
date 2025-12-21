@@ -180,7 +180,7 @@ class FishBatchCloner:
                 # 收集生成的音频文件
                 for task in speaker_tasks:
                     segment_index = task['segment_index']
-                    audio_path = os.path.join(output_dir, f"segment_{segment_index:04d}.wav")
+                    audio_path = os.path.join(output_dir, f"segment_{segment_index}.wav")
                     if os.path.exists(audio_path):
                         generated_audio_files[segment_index] = audio_path
                         print(f"✅ 片段 {segment_index} 生成完成")
@@ -547,7 +547,7 @@ def main():
             # Step 3: 异步保存（第一阶段优化）
             logger.info(f"  💾 异步保存 {{len(audios)}} 个音频文件...")
             for audio, segment_idx in zip(audios, valid_indices):
-                output_filename = os.path.join(OUTPUT_DIR, f"segment_{{segment_idx:04d}}.wav")
+                output_filename = os.path.join(OUTPUT_DIR, f"segment_{{segment_idx}}.wav")
                 # 异步提交保存任务（不阻塞）
                 io_pipeline.async_save_audio(
                     audio=audio,

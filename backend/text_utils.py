@@ -107,7 +107,7 @@ def check_translation_length(
     source_text: str,
     target_text: str,
     target_language: str,
-    max_ratio: float = 1.2
+    max_ratio: float = 1.1
 ) -> Tuple[bool, int, int, float]:
     """
     检查译文长度是否超过原文的指定倍数

@@ -69,6 +69,12 @@ const App: React.FC = () => {
   const [stitchedAudioPath, setStitchedAudioPath] = useState<string | null>(null);
   const [useStitchedAudio, setUseStitchedAudio] = useState(false);
 
+  // 默认音色库和音色映射状态
+  const [defaultVoices, setDefaultVoices] = useState<Array<{id: string, name: string, audio_url: string, reference_text: string}>>([]);
+  const [speakerVoiceMapping, setSpeakerVoiceMapping] = useState<{[speakerId: string]: string}>({});
+  const [initialSpeakerVoiceMapping, setInitialSpeakerVoiceMapping] = useState<{[speakerId: string]: string}>({});
+  const [isRegeneratingVoices, setIsRegeneratingVoices] = useState(false);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const isSeekingRef = useRef<boolean>(false);
   const progressBarRef = useRef<HTMLDivElement>(null);
@@ -143,6 +149,28 @@ const App: React.FC = () => {
       // 获取视频列表失败
     }
   };
+
+  // 加载默认音色库
+  useEffect(() => {
+    const loadDefaultVoices = async () => {
+      try {
+        console.log('[加载默认音色] 开始加载...');
+        const response = await fetch('/api/voice-cloning/default-voices');
+        console.log('[加载默认音色] 响应状态:', response.status, response.ok);
+        if (response.ok) {
+          const result = await response.json();
+          console.log('[加载默认音色] 返回数据:', result);
+          setDefaultVoices(result.voices || []);
+          console.log('[加载默认音色] 设置音色数量:', result.voices?.length);
+        } else {
+          console.error('[加载默认音色] 响应失败:', response.status, response.statusText);
+        }
+      } catch (error) {
+        console.error('加载默认音色库失败:', error);
+      }
+    };
+    loadDefaultVoices();
+  }, []);
 
   const handleVideoUpload = async (file: File) => {
     const formData = new FormData();
@@ -466,7 +494,8 @@ const App: React.FC = () => {
           video_filename: currentVideo.filename,
           source_subtitle_filename: subtitleFilename,
           target_language: targetLanguage,
-          target_subtitle_filename: targetSrtFilename
+          target_subtitle_filename: targetSrtFilename,
+          speaker_voice_mapping: speakerVoiceMapping
         }),
       });
 
@@ -486,9 +515,16 @@ const App: React.FC = () => {
 
   // 播放克隆音频
   const handlePlayClonedAudio = (audioPath: string) => {
-    // 构建完整的音频URL
-    const audioUrl = `/api/cloned-audio/${voiceCloningTaskId}/${audioPath.split('/').pop()}`;
-    const audio = new Audio(audioUrl);
+    console.log('[播放音频] 输入路径:', audioPath);
+    // 构建完整的音频URL，添加额外的随机参数确保不使用缓存
+    const separator = audioPath.includes('?') ? '&' : '?';
+    const audioUrl = `/api${audioPath}${separator}_=${Date.now()}`;
+    console.log('[播放音频] 实际URL:', audioUrl);
+    const audio = new Audio();
+    // 设置不使用缓存
+    audio.preload = 'none';
+    audio.src = audioUrl;
+    audio.load(); // 强制重新加载
     audio.play().catch(error => {
       console.error('播放克隆音频失败:', error);
       alert('播放克隆音频失败');
@@ -496,23 +532,29 @@ const App: React.FC = () => {
   };
 
   // 重新生成单个片段
-  const handleRegenerateSegment = async (index: number, newSpeakerId: number) => {
+  const handleRegenerateSegment = async (index: number, newSpeakerId: number, newTargetText?: string) => {
     if (!voiceCloningTaskId) {
       alert('语音克隆任务ID不存在');
       return;
     }
 
     try {
+      const requestBody: any = {
+        task_id: voiceCloningTaskId,
+        segment_index: index,
+        new_speaker_id: newSpeakerId
+      };
+
+      if (newTargetText) {
+        requestBody.new_target_text = newTargetText;
+      }
+
       const response = await fetch('/api/voice-cloning/regenerate-segment', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          task_id: voiceCloningTaskId,
-          segment_index: index,
-          new_speaker_id: newSpeakerId
-        })
+        body: JSON.stringify(requestBody)
       });
 
       if (!response.ok) {
@@ -526,11 +568,16 @@ const App: React.FC = () => {
         setSubtitles(prevSubtitles => {
           return prevSubtitles.map((subtitle, i) => {
             if (i === index) {
-              return {
+              const updates: any = {
                 ...subtitle,
                 cloned_audio_path: result.cloned_audio_path,
                 cloned_speaker_id: result.new_speaker_id
               };
+              // 如果有新的译文，也更新
+              if (newTargetText) {
+                updates.target_text = newTargetText;
+              }
+              return updates;
             }
             return subtitle;
           });
@@ -542,6 +589,109 @@ const App: React.FC = () => {
       console.error('重新生成失败:', error);
       alert('重新生成失败: ' + (error as Error).message);
     }
+  };
+
+  // 批量重新生成音色变化的说话人
+  const handleRegenerateVoices = async () => {
+    if (!voiceCloningTaskId) {
+      alert('语音克隆任务ID不存在');
+      return;
+    }
+
+    try {
+      setIsRegeneratingVoices(true);
+
+      const response = await fetch('/api/voice-cloning/regenerate-voices', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          task_id: voiceCloningTaskId,
+          speaker_voice_mapping: speakerVoiceMapping
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`重新生成失败: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        // 更新初始映射
+        setInitialSpeakerVoiceMapping({...speakerVoiceMapping});
+
+        // 获取最新的字幕数据
+        const statusResponse = await fetch(`/api/voice-cloning/status/${voiceCloningTaskId}`);
+        if (statusResponse.ok) {
+          const status = await statusResponse.json();
+
+          console.log('[重新生成] 获取到的 cloned_results 数量:', status.cloned_results?.length);
+          console.log('[重新生成] 前3个 cloned_results:', status.cloned_results?.slice(0, 3));
+
+          // 更新字幕数据，添加克隆音频路径
+          if (status.cloned_results && Array.isArray(status.cloned_results)) {
+            const newSubtitles = subtitles.map((subtitle, index) => {
+              const clonedResult = status.cloned_results.find((r: any) => r.index === index);
+              if (clonedResult) {
+                if (index <= 2) {
+                  console.log(`[重新生成] 更新片段 ${index}:`, {
+                    old: subtitle.cloned_audio_path,
+                    new: clonedResult.cloned_audio_path
+                  });
+                }
+                return {
+                  ...subtitle,
+                  cloned_audio_path: clonedResult.cloned_audio_path,
+                  cloned_speaker_id: clonedResult.speaker_id
+                };
+              }
+              return subtitle;
+            });
+
+            const updatedCount = newSubtitles.filter((s, i) => s.cloned_audio_path !== subtitles[i].cloned_audio_path).length;
+            console.log(`[重新生成] 总共更新了 ${updatedCount} 个片段`);
+
+            setSubtitles(newSubtitles);
+
+            // 验证更新是否生效
+            setTimeout(() => {
+              console.log('[重新生成] 验证: 片段0的音频路径:', newSubtitles[0]?.cloned_audio_path);
+            }, 100);
+          }
+        }
+
+        // 显示成功通知
+        setNotificationData({
+          title: '重新生成完成',
+          message: `已成功重新生成 ${result.regenerated_count} 个片段，可在字幕详情中播放克隆音频。 (耗时: ${result.duration})`,
+          uniqueSpeakers: undefined
+        });
+        setShowNotification(true);
+      }
+    } catch (error) {
+      console.error('重新生成失败:', error);
+      alert('重新生成失败: ' + (error as Error).message);
+    } finally {
+      setIsRegeneratingVoices(false);
+    }
+  };
+
+  // 检查音色映射是否有变化
+  const hasVoiceMappingChanged = () => {
+    const currentKeys = Object.keys(speakerVoiceMapping);
+    const initialKeys = Object.keys(initialSpeakerVoiceMapping);
+
+    if (currentKeys.length !== initialKeys.length) return true;
+
+    for (const key of currentKeys) {
+      if (speakerVoiceMapping[key] !== initialSpeakerVoiceMapping[key]) {
+        return true;
+      }
+    }
+
+    return false;
   };
 
   // 拼接克隆音频
@@ -649,6 +799,9 @@ const App: React.FC = () => {
             });
           });
         }
+
+        // 保存初始音色映射，用于后续检测变化
+        setInitialSpeakerVoiceMapping({...speakerVoiceMapping});
 
         // 显示成功通知，包含处理时间
         const durationInfo = status.duration_str ? ` (耗时: ${status.duration_str})` : '';
@@ -780,24 +933,33 @@ const App: React.FC = () => {
         <div className="flex-1 flex flex-col overflow-hidden gap-3">
           {/* 上层：字幕详情 + 播放器 */}
           <div className="flex gap-3 flex-1 overflow-hidden">
-            {/* 左侧：字幕详细信息列表 */}
+            {/* 左侧：字幕详细信息列表 (增加宽度比例) */}
             <SubtitleDetails
-              subtitles={subtitles}
-              currentTime={currentTime}
-              onEditSubtitle={handleEditSubtitle}
-              onDeleteSubtitle={handleDeleteSubtitle}
-              onSeek={handleSeek}
-              speakerNameMapping={speakerNameMapping}
-              onAddSpeaker={handleAddSpeaker}
-              onRemoveSpeaker={handleRemoveSpeaker}
-              onPlayClonedAudio={handlePlayClonedAudio}
-              onRegenerateSegment={handleRegenerateSegment}
-              voiceCloningTaskId={voiceCloningTaskId || undefined}
-              filteredSpeakerId={filteredSpeakerId}
-              onFilteredSpeakerChange={setFilteredSpeakerId}
-            />
+                subtitles={subtitles}
+                currentTime={currentTime}
+                onEditSubtitle={handleEditSubtitle}
+                onDeleteSubtitle={handleDeleteSubtitle}
+                onSeek={handleSeek}
+                speakerNameMapping={speakerNameMapping}
+                onAddSpeaker={handleAddSpeaker}
+                onRemoveSpeaker={handleRemoveSpeaker}
+                onPlayClonedAudio={handlePlayClonedAudio}
+                onRegenerateSegment={handleRegenerateSegment}
+                voiceCloningTaskId={voiceCloningTaskId || undefined}
+                filteredSpeakerId={filteredSpeakerId}
+                onFilteredSpeakerChange={setFilteredSpeakerId}
+                defaultVoices={defaultVoices}
+                speakerVoiceMapping={speakerVoiceMapping}
+                onSpeakerVoiceMappingChange={setSpeakerVoiceMapping}
+                onRegenerateVoices={handleRegenerateVoices}
+                hasVoiceMappingChanged={hasVoiceMappingChanged()}
+                isRegeneratingVoices={isRegeneratingVoices}
+                isProcessingVoiceCloning={isProcessingVoiceCloning}
+                isStitchingAudio={isStitchingAudio}
+                targetLanguage={targetLanguage}
+              />
 
-            {/* 右侧：播放器 + 视频信息 */}
+            {/* 右侧：播放器 + 视频信息 (缩小宽度比例) */}
             <div className="flex-1 flex flex-col overflow-hidden bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl shadow-xl border border-slate-700">
               {/* 视频头部信息 */}
               <div className="p-5 border-b border-slate-700 flex items-center justify-between bg-gradient-to-r from-slate-800 via-slate-800 to-slate-900 flex-shrink-0">
@@ -896,6 +1058,7 @@ const App: React.FC = () => {
                 onSeek={handleSeek}
                 onStitchAudio={handleStitchAudio}
                 stitching={isStitchingAudio}
+                isRegeneratingVoices={isRegeneratingVoices}
               />
             </div>
           )}

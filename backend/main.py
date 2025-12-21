@@ -137,6 +137,9 @@ async def serve_stitched_audio(task_id: str, request: Request):
             headers={
                 "Accept-Ranges": "bytes",
                 "Content-Length": str(file_size),
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
             }
         )
 
@@ -175,6 +178,9 @@ async def serve_stitched_audio(task_id: str, request: Request):
             "Content-Range": f"bytes {start}-{end}/{file_size}",
             "Accept-Ranges": "bytes",
             "Content-Length": str(chunk_size),
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
         }
     )
 
@@ -195,6 +201,39 @@ voice_cloning_status = {}
 # 全局缓存：存储已提取的音频片段信息，避免重复提取
 # key: (video_filename, subtitle_filename), value: {"audio_paths": [...], "speaker_labels": [...], "audio_dir": "..."}
 audio_extraction_cache = {}
+
+# 默认音色库配置
+DEFAULT_VOICES_DIR = Path(__file__).parent / "default_seed"
+DEFAULT_VOICES = [
+    {
+        "id": "voice_1",
+        "name": "沉稳绅士",
+        "npy_file": "沉稳绅士_codes.npy",
+        "audio_file": "沉稳绅士.wav",
+        "reference_text": "今天早晨市中心的主要道路因突发事故造成了严重堵塞，请驾驶员朋友们注意绕行并听从现场交警的指挥。"
+    },
+    {
+        "id": "voice_2",
+        "name": "清爽少年",
+        "npy_file": "清爽少年_codes.npy",
+        "audio_file": "清爽少年.wav",
+        "reference_text": "今天早晨市中心的主要道路因突发事故造成了严重堵塞，请驾驶员朋友们注意绕行并听从现场交警的指挥。"
+    },
+    {
+        "id": "voice_3",
+        "name": "甜美女声",
+        "npy_file": "甜美女声_codes.npy",
+        "audio_file": "甜美女声.wav",
+        "reference_text": "今天早晨市中心的主要道路因突发事故造成了严重堵塞，请驾驶员朋友们注意绕行并听从现场交警的指挥。"
+    },
+    {
+        "id": "voice_4",
+        "name": "知性御姐",
+        "npy_file": "知性御姐_codes.npy",
+        "audio_file": "知性御姐.wav",
+        "reference_text": "今天早晨市中心的主要道路因突发事故造成了严重堵塞，请驾驶员朋友们注意绕行并听从现场交警的指挥。"
+    }
+]
 
 @app.get("/")
 async def root():
@@ -528,6 +567,7 @@ class VoiceCloningRequest(BaseModel):
     source_subtitle_filename: str
     target_language: str
     target_subtitle_filename: str
+    speaker_voice_mapping: Optional[Dict[str, str]] = None  # {speaker_id: voice_id}, voice_id可以是"default"或默认音色的id
 
 
 @app.post("/voice-cloning/process")
@@ -562,7 +602,8 @@ async def process_voice_cloning(request: VoiceCloningRequest):
             str(video_path),
             str(source_subtitle_path),
             request.target_language,
-            str(target_subtitle_path)
+            str(target_subtitle_path),
+            request.speaker_voice_mapping
         ))
 
         # 添加异常处理回调
@@ -589,11 +630,16 @@ async def run_voice_cloning_process(
     video_path: str,
     source_subtitle_path: str,
     target_language: str,
-    target_subtitle_path: str
+    target_subtitle_path: str,
+    speaker_voice_mapping: Optional[Dict[str, str]] = None
 ):
     """后台执行语音克隆处理"""
     import time
     start_time = time.time()  # 记录开始时间
+
+    # 设置默认值
+    if speaker_voice_mapping is None:
+        speaker_voice_mapping = {}
 
     try:
         import asyncio
@@ -764,11 +810,53 @@ async def run_voice_cloning_process(
         encode_output_dir = os.path.join(audio_dir, "encoded")
         os.makedirs(encode_output_dir, exist_ok=True)
 
+        # 处理音色映射：使用默认音色或说话人自己的音色（已通过函数参数传入）
         print(f"\n🚀 批量编码 {len(speaker_references)} 个说话人的参考音频...")
-        speaker_npy_files = batch_cloner.batch_encode_speakers(
-            speaker_references,
-            encode_output_dir
-        )
+        print(f"   音色映射: {speaker_voice_mapping}")
+
+        # 分离需要编码的说话人和使用默认音色的说话人
+        speakers_to_encode = {}
+        speaker_npy_files = {}
+
+        print(f"\n📋 处理音色映射：")
+        for speaker_id, ref_data in speaker_references.items():
+            # speaker_id是整数，需要转换为字符串来查找映射
+            speaker_id_str = str(speaker_id)
+            selected_voice = speaker_voice_mapping.get(speaker_id_str, "default")
+            print(f"  说话人 {speaker_id}: 映射key='{speaker_id_str}', 选择音色='{selected_voice}'")
+
+            if selected_voice == "default":
+                # 使用说话人自己的音色，需要编码
+                speakers_to_encode[speaker_id] = ref_data
+                print(f"    → 使用原音色，需要编码")
+            else:
+                # 使用默认音色库中的音色
+                default_voice = next((v for v in DEFAULT_VOICES if v["id"] == selected_voice), None)
+                if default_voice:
+                    npy_path = str(DEFAULT_VOICES_DIR / default_voice["npy_file"])
+                    speaker_npy_files[speaker_id] = npy_path
+                    print(f"    → 使用默认音色: {default_voice['name']}")
+                    print(f"    → NPY文件: {npy_path}")
+                    # 更新参考文本为默认音色的参考文本
+                    speaker_references[speaker_id]["reference_text"] = default_voice["reference_text"]
+                else:
+                    # 如果找不到指定的默认音色，回退到说话人自己的音色
+                    print(f"    ⚠️ 未找到音色 {selected_voice}，使用原音色")
+                    speakers_to_encode[speaker_id] = ref_data
+
+        # 批量编码需要编码的说话人
+        print(f"\n📊 处理结果：")
+        print(f"  使用默认音色: {len(speaker_npy_files)} 个说话人")
+        print(f"  需要编码: {len(speakers_to_encode)} 个说话人")
+
+        if speakers_to_encode:
+            encoded_npy_files = batch_cloner.batch_encode_speakers(
+                speakers_to_encode,
+                encode_output_dir
+            )
+            speaker_npy_files.update(encoded_npy_files)
+        else:
+            print(f"  所有说话人都使用默认音色，无需编码")
 
         # 10. 读取目标语言字幕
         voice_cloning_status[task_id] = {
@@ -922,6 +1010,11 @@ async def run_voice_cloning_process(
                             print(f"[Retranslate] stderr:\n{filtered_stderr}")
 
                     if returncode == 0 and stdout:
+                        # 打印完整的stdout用于调试
+                        print(f"\n[Retranslate] ===== 完整stdout输出 =====")
+                        print(stdout)
+                        print(f"[Retranslate] ===== stdout输出结束 =====\n")
+
                         # 解析输出中的 JSON 结果
                         output_lines = stdout.strip().split('\n')
                         # 查找最后一个 JSON 块
@@ -1115,6 +1208,12 @@ async def run_voice_cloning_process(
 
         duration_str = format_duration(total_duration)
 
+        # 创建完整的初始音色映射（为所有说话人设置默认值）
+        complete_initial_mapping = {}
+        for speaker_id in speaker_references.keys():
+            speaker_id_str = str(speaker_id)
+            complete_initial_mapping[speaker_id_str] = speaker_voice_mapping.get(speaker_id_str, "default")
+
         # 更新状态：完成
         voice_cloning_status[task_id] = {
             "status": "completed",
@@ -1125,7 +1224,9 @@ async def run_voice_cloning_process(
             "speaker_name_mapping": speaker_name_mapping,
             "gender_dict": gender_dict,
             "cloned_results": cloned_results,
-            "cloned_audio_dir": cloned_audio_dir,
+            "audio_dir": audio_dir,  # 保存音频片段目录
+            "cloned_audio_dir": cloned_audio_dir,  # 保存克隆音频目录
+            "initial_speaker_voice_mapping": complete_initial_mapping,  # 保存完整的初始音色映射
             "total_duration": total_duration,  # 原始秒数
             "duration_str": duration_str  # 格式化的时间字符串
         }
@@ -1170,6 +1271,32 @@ async def get_voice_cloning_status(task_id: str):
     return voice_cloning_status[task_id]
 
 
+@app.get("/voice-cloning/default-voices")
+async def get_default_voices():
+    """获取默认音色库列表"""
+    voices = []
+    for voice in DEFAULT_VOICES:
+        voice_info = {
+            "id": voice["id"],
+            "name": voice["name"],
+            "audio_url": f"/default-voices/{voice['audio_file']}",
+            "reference_text": voice["reference_text"]
+        }
+        voices.append(voice_info)
+    return {"voices": voices}
+
+
+@app.get("/default-voices/{filename}")
+async def serve_default_voice_audio(filename: str):
+    """提供默认音色的音频文件"""
+    file_path = DEFAULT_VOICES_DIR / filename
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="音频文件未找到")
+
+    return FileResponse(file_path, media_type="audio/wav")
+
+
 @app.get("/cloned-audio/{task_id}/{filename}")
 async def serve_cloned_audio(task_id: str, filename: str, request: Request):
     """提供克隆音频文件的流式传输，支持 HTTP Range 请求"""
@@ -1189,6 +1316,9 @@ async def serve_cloned_audio(task_id: str, filename: str, request: Request):
             headers={
                 "Accept-Ranges": "bytes",
                 "Content-Length": str(file_size),
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
             }
         )
 
@@ -1236,6 +1366,9 @@ async def serve_cloned_audio(task_id: str, filename: str, request: Request):
             "Content-Range": f"bytes {start}-{end}/{file_size}",
             "Accept-Ranges": "bytes",
             "Content-Length": str(chunk_size),
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0"
         }
     )
 
@@ -1244,10 +1377,393 @@ class RegenerateSegmentRequest(BaseModel):
     task_id: str
     segment_index: int
     new_speaker_id: int
+    new_text: Optional[str] = None  # 新的原文（如果修改了）
+    new_target_text: Optional[str] = None  # 新的译文（如果修改了）
+
+
+class TranslateTextRequest(BaseModel):
+    text: str
+    target_language: str
 
 
 class StitchAudioRequest(BaseModel):
     task_id: str
+
+
+class RegenerateVoicesRequest(BaseModel):
+    task_id: str
+    speaker_voice_mapping: Dict[str, str]  # {speaker_id: voice_id}
+
+
+@app.post("/voice-cloning/regenerate-voices")
+async def regenerate_voices_with_new_mapping(request: RegenerateVoicesRequest):
+    """重新生成使用了不同音色的说话人的所有语音片段"""
+    try:
+        import asyncio
+        from fish_batch_cloner import FishBatchCloner
+        import time
+
+        task_id = request.task_id
+
+        # 检查任务是否存在
+        if task_id not in voice_cloning_status:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        status = voice_cloning_status[task_id]
+        cloned_results = status.get("cloned_results", [])
+        speaker_references = status.get("speaker_references", {})
+
+        if not cloned_results or not speaker_references:
+            raise HTTPException(status_code=400, detail="没有可重新生成的语音数据")
+
+        # 记录开始时间
+        start_time = time.time()
+
+        # 设置状态为重新生成中
+        voice_cloning_status[task_id]["status"] = "regenerating"
+        voice_cloning_status[task_id]["message"] = "正在重新生成语音..."
+        voice_cloning_status[task_id]["progress"] = 0
+
+        # 获取音频目录
+        audio_dir = status.get("audio_dir")
+        cloned_audio_dir = status.get("cloned_audio_dir")
+
+        print(f"\n[重新生成] 开始重新生成任务 {task_id} 的语音...")
+        print(f"[重新生成] 新音色映射: {request.speaker_voice_mapping}")
+
+        # 获取初始音色映射
+        initial_mapping = status.get("initial_speaker_voice_mapping", {})
+        print(f"[重新生成] 初始音色映射: {initial_mapping}")
+
+        # 分析需要重新生成的说话人（对比初始映射和新映射）
+        speakers_to_regenerate = set()
+        for speaker_id_str in speaker_references.keys():
+            speaker_id_str_key = str(speaker_id_str)
+            initial_voice = initial_mapping.get(speaker_id_str_key, "default")
+            new_voice = request.speaker_voice_mapping.get(speaker_id_str_key, "default")
+
+            if initial_voice != new_voice:
+                speakers_to_regenerate.add(int(speaker_id_str))
+                print(f"  说话人 {speaker_id_str}: {initial_voice} -> {new_voice} (需要重新生成)")
+            else:
+                print(f"  说话人 {speaker_id_str}: {initial_voice} (无变化)")
+
+        if not speakers_to_regenerate:
+            print(f"[重新生成] 没有需要重新生成的说话人")
+            voice_cloning_status[task_id]["status"] = "completed"
+            return {"success": True, "message": "没有需要重新生成的说话人"}
+
+        print(f"\n[重新生成] 需要重新生成的说话人: {speakers_to_regenerate}")
+
+        # 收集需要重新生成的任务（格式与初始克隆时一致）
+        tasks_to_regenerate = []
+        for idx, result in enumerate(cloned_results):
+            if result["speaker_id"] in speakers_to_regenerate:
+                tasks_to_regenerate.append({
+                    "speaker_id": result["speaker_id"],
+                    "target_text": result["target_text"],
+                    "segment_index": idx,
+                    "start_time": result.get("start_time", 0),
+                    "end_time": result.get("end_time", 0)
+                })
+
+        print(f"[重新生成] 总共需要重新生成 {len(tasks_to_regenerate)} 个片段")
+
+        # 准备npy文件
+        encode_output_dir = os.path.join(audio_dir, "encoded")
+        os.makedirs(encode_output_dir, exist_ok=True)
+
+        batch_cloner = FishBatchCloner()
+        speaker_npy_files = {}
+
+        for speaker_id in speakers_to_regenerate:
+            speaker_id_str = str(speaker_id)
+            selected_voice = request.speaker_voice_mapping.get(speaker_id_str, "default")
+
+            if selected_voice == "default":
+                # 使用说话人自己的音色
+                ref_data = speaker_references[speaker_id]
+                speakers_dict = {speaker_id: ref_data}
+                encoded_npy = batch_cloner.batch_encode_speakers(speakers_dict, encode_output_dir)
+                speaker_npy_files[speaker_id] = encoded_npy[speaker_id]
+                print(f"  ✅ 说话人 {speaker_id} 使用自己的音色")
+            else:
+                # 使用默认音色
+                default_voice = next((v for v in DEFAULT_VOICES if v["id"] == selected_voice), None)
+                if default_voice:
+                    npy_path = str(DEFAULT_VOICES_DIR / default_voice["npy_file"])
+                    speaker_npy_files[speaker_id] = npy_path
+                    print(f"  ✅ 说话人 {speaker_id} 使用默认音色: {default_voice['name']}")
+                    # 更新参考文本
+                    speaker_references[speaker_id]["reference_text"] = default_voice["reference_text"]
+
+        # 获取脚本目录
+        script_dir = os.path.join(audio_dir, "scripts")
+
+        # 批量生成语音
+        print(f"\n[重新生成] 开始批量生成...")
+        generated_audio_files = batch_cloner.batch_generate_audio(
+            tasks_to_regenerate,
+            speaker_npy_files,
+            speaker_references,
+            cloned_audio_dir,
+            script_dir=script_dir
+        )
+
+        # 更新 cloned_results
+        print(f"\n[重新生成] 更新 cloned_results...")
+        import time
+        timestamp = int(time.time() * 1000)  # 毫秒级时间戳
+        for task in tasks_to_regenerate:
+            segment_index = task["segment_index"]
+            if segment_index in generated_audio_files:
+                # 生成API路径，添加时间戳参数破坏浏览器缓存
+                audio_filename = f"segment_{segment_index}.wav"
+                api_path = f"/cloned-audio/{task_id}/{audio_filename}?t={timestamp}"
+
+                # 更新该片段的信息
+                old_path = cloned_results[segment_index].get("cloned_audio_path")
+                cloned_results[segment_index]["cloned_audio_path"] = api_path
+                print(f"  ✅ 片段 {segment_index}: {old_path} -> {api_path}")
+            else:
+                print(f"  ❌ 片段 {segment_index} 重新生成失败")
+
+        voice_cloning_status[task_id]["cloned_results"] = cloned_results
+        print(f"[重新生成] cloned_results 已更新到 voice_cloning_status")
+
+        # 计算耗时
+        end_time = time.time()
+        duration = end_time - start_time
+
+        def format_duration(seconds):
+            if seconds < 60:
+                return f"{seconds:.1f}秒"
+            elif seconds < 3600:
+                minutes = int(seconds // 60)
+                secs = int(seconds % 60)
+                return f"{minutes}分{secs}秒"
+            else:
+                hours = int(seconds // 3600)
+                minutes = int((seconds % 3600) // 60)
+                return f"{hours}小时{minutes}分钟"
+
+        duration_str = format_duration(duration)
+
+        voice_cloning_status[task_id]["status"] = "completed"
+        voice_cloning_status[task_id]["message"] = f"重新生成完成 (耗时: {duration_str})"
+        voice_cloning_status[task_id]["progress"] = 100
+
+        # 创建完整的新音色映射（为所有说话人设置默认值）
+        complete_new_mapping = {}
+        for speaker_id in speaker_references.keys():
+            speaker_id_str = str(speaker_id)
+            complete_new_mapping[speaker_id_str] = request.speaker_voice_mapping.get(speaker_id_str, "default")
+
+        # 更新初始音色映射为新的映射
+        voice_cloning_status[task_id]["initial_speaker_voice_mapping"] = complete_new_mapping
+
+        print(f"\n✅ 重新生成任务 {task_id} 成功完成！")
+        print(f"⏱️  总耗时: {duration_str}")
+
+        return {
+            "success": True,
+            "message": f"成功重新生成 {len(tasks_to_regenerate)} 个片段",
+            "regenerated_count": len(tasks_to_regenerate),
+            "duration": duration_str
+        }
+
+    except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"[重新生成] 失败: {error_detail}")
+
+        voice_cloning_status[task_id]["status"] = "failed"
+        voice_cloning_status[task_id]["message"] = f"重新生成失败: {str(e)}"
+
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/translate-text")
+async def translate_text(request: TranslateTextRequest):
+    """使用LLM翻译文本"""
+    print(f"\n[翻译API] 收到请求")
+    print(f"[翻译API] 原文: {request.text}")
+    print(f"[翻译API] 目标语言: {request.target_language}")
+
+    try:
+        import json
+        import subprocess
+        import tempfile
+        import os
+
+        # 获取正确的模型路径
+        backend_dir = os.path.dirname(os.path.abspath(__file__))
+        localclip_dir = os.path.dirname(backend_dir)
+        workspace_dir = os.path.dirname(localclip_dir)
+        ai_editing_dir = os.path.dirname(workspace_dir)
+        model_path = os.path.join(ai_editing_dir, "models", "Qwen3-1.7B")
+
+        # 创建临时配置文件
+        config_data = {
+            "tasks": [{
+                "task_id": "translate-1",
+                "source": request.text,
+                "target_language": request.target_language
+            }],
+            "model_path": model_path,
+            "num_processes": 1
+        }
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
+            json.dump(config_data, f, ensure_ascii=False)
+            config_file = f.name
+
+        print(f"[翻译API] 创建临时配置文件: {config_file}")
+
+        try:
+            # 使用 qwen_inference conda 环境
+            qwen_env_python = os.environ.get("QWEN_INFERENCE_PYTHON")
+            if not qwen_env_python:
+                import platform
+                if platform.system() == "Windows":
+                    qwen_env_python = r"C:\Users\7\miniconda3\envs\qwen_inference\python.exe"
+                else:
+                    qwen_env_python = os.path.expanduser("~/miniconda3/envs/qwen_inference/bin/python")
+
+            # 调用批量翻译脚本
+            print(f"[翻译API] 调用翻译脚本...")
+            print(f"[翻译API] Python可执行文件: {qwen_env_python}")
+            print(f"[翻译API] 工作目录: {os.path.dirname(__file__)}")
+
+            # 使用 Popen 以实时获取输出
+            import sys
+            import threading
+            import time as time_module
+
+            process = subprocess.Popen(
+                [qwen_env_python, "batch_retranslate.py", config_file],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8',
+                cwd=os.path.dirname(__file__),
+                bufsize=1  # 行缓冲
+            )
+
+            print(f"[翻译API] 进程已启动 PID={process.pid}，等待输出...")
+
+            # 实时读取输出（使用线程）
+            stdout_lines = []
+            stderr_lines = []
+
+            def read_stdout():
+                for line in process.stdout:
+                    line = line.rstrip('\n')
+                    print(f"[翻译脚本] {line}")
+                    stdout_lines.append(line)
+                    sys.stdout.flush()
+
+            def read_stderr():
+                for line in process.stderr:
+                    line = line.rstrip('\n')
+                    print(f"[翻译脚本 STDERR] {line}")
+                    stderr_lines.append(line)
+                    sys.stdout.flush()
+
+            # 启动读取线程
+            stdout_thread = threading.Thread(target=read_stdout)
+            stderr_thread = threading.Thread(target=read_stderr)
+            stdout_thread.daemon = True
+            stderr_thread.daemon = True
+            stdout_thread.start()
+            stderr_thread.start()
+
+            # 等待进程结束（带超时）
+            try:
+                return_code = process.wait(timeout=300)
+            except subprocess.TimeoutExpired:
+                print(f"[翻译API] 超时！正在终止进程...")
+                process.kill()
+                process.wait()
+                raise
+
+            # 等待线程结束
+            stdout_thread.join(timeout=5)
+            stderr_thread.join(timeout=5)
+
+            # 构建结果对象
+            class Result:
+                def __init__(self, returncode, stdout, stderr):
+                    self.returncode = returncode
+                    self.stdout = stdout
+                    self.stderr = stderr
+
+            result = Result(
+                return_code,
+                '\n'.join(stdout_lines),
+                '\n'.join(stderr_lines)
+            )
+
+            print(f"[翻译API] 进程结束，返回码={result.returncode}")
+
+            if result.returncode != 0:
+                print(f"[翻译API] 翻译脚本stderr: {result.stderr}")
+                print(f"[翻译API] 翻译脚本stdout: {result.stdout}")
+                raise HTTPException(status_code=500, detail=f"翻译脚本执行失败: {result.stderr}")
+
+            # 解析输出中的JSON结果
+            print(f"[翻译API] 解析翻译结果...")
+            output_lines = result.stdout.split('\n')
+            json_started = False
+            json_lines = []
+
+            for line in output_lines:
+                if 'FINAL RESULTS (JSON)' in line:
+                    json_started = True
+                    continue
+                if json_started:
+                    # 跳过分隔线
+                    if line.strip().startswith('='):
+                        continue
+                    # 开始收集JSON（从 [ 开始）
+                    if line.strip().startswith('['):
+                        json_lines.append(line)
+                    elif len(json_lines) > 0:
+                        # 已经开始收集了，继续添加
+                        json_lines.append(line)
+
+            json_text = '\n'.join(json_lines).strip()
+            print(f"[翻译API] JSON文本: {json_text[:200]}...")
+
+            results = json.loads(json_text)
+            print(f"[翻译API] 解析结果数量: {len(results)}")
+
+            if results and len(results) > 0:
+                translation = results[0].get('translation', request.text)
+                print(f"[翻译API] 翻译成功: {translation}")
+                return {"translation": translation}
+            else:
+                print(f"[翻译API] 警告: 没有翻译结果，返回原文")
+                return {"translation": request.text}
+
+        finally:
+            # 删除临时文件
+            if os.path.exists(config_file):
+                os.remove(config_file)
+                print(f"[翻译API] 删除临时文件: {config_file}")
+
+    except subprocess.TimeoutExpired:
+        print(f"[翻译API] 超时: 翻译耗时超过300秒")
+        # 超时时返回原文，不抛出异常
+        return {"translation": request.text, "error": "timeout"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[翻译API] 异常: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        # 异常时返回原文，不抛出HTTP异常
+        return {"translation": request.text, "error": str(e)}
 
 
 @app.post("/voice-cloning/regenerate-segment")
@@ -1276,9 +1792,14 @@ async def regenerate_segment(request: RegenerateSegmentRequest):
         if new_speaker_id not in speaker_references:
             raise HTTPException(status_code=400, detail=f"说话人 {new_speaker_id} 不存在")
 
-        # 获取目标文本
+        # 获取目标文本 - 优先使用新文本
         segment_data = cloned_results[segment_index]
-        target_text = segment_data["target_text"]
+        if request.new_target_text:
+            target_text = request.new_target_text
+            print(f"[重新生成片段] 使用新的译文: {target_text}")
+        else:
+            target_text = segment_data["target_text"]
+            print(f"[重新生成片段] 使用原译文: {target_text}")
 
         # 查找音频提取缓存以获取audio_dir
         audio_dir = None
@@ -1556,6 +2077,10 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
     try:
         import soundfile as sf
         import numpy as np
+        import time
+
+        # 记录开始时间
+        start_time = time.time()
 
         task_id = request.task_id
 
@@ -1808,17 +2333,42 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
                 cloned_results[idx]['actual_end_time'] = replan_info['actual_end']
                 print(f"[音频拼接] 更新片段 {idx} 时间轴: {replan_info['actual_start']:.3f}s - {replan_info['actual_end']:.3f}s")
 
+        # 计算总耗时
+        end_time = time.time()
+        stitch_duration = end_time - start_time
+
+        # 格式化时间显示（使用与语音克隆相同的格式函数）
+        def format_duration(seconds):
+            """将秒数格式化为易读的时间字符串"""
+            if seconds < 60:
+                return f"{seconds:.1f}秒"
+            elif seconds < 3600:
+                minutes = int(seconds // 60)
+                secs = int(seconds % 60)
+                return f"{minutes}分{secs}秒"
+            else:
+                hours = int(seconds // 3600)
+                minutes = int((seconds % 3600) // 60)
+                return f"{hours}小时{minutes}分钟"
+
+        duration_str = format_duration(stitch_duration)
+
         # 更新状态
         voice_cloning_status[task_id]["stitched_audio_path"] = f"/exports/{stitched_filename}"
         voice_cloning_status[task_id]["cloned_results"] = cloned_results  # 更新结果
+
+        print(f"\n✅ 音频拼接任务 {task_id} 成功完成！")
+        print(f"⏱️  总耗时: {duration_str}")
 
         return {
             "success": True,
             "stitched_audio_path": f"/exports/{stitched_filename}",
             "total_duration": total_duration,
             "segments_count": len(processed_segments),
-            "message": f"成功拼接 {len(processed_segments)} 个音频片段",
-            "replanned_segments": len(replanned_segments)  # 返回重新规划的片段数量
+            "message": f"音频拼接完成 (耗时: {duration_str})",
+            "replanned_segments": len(replanned_segments),  # 返回重新规划的片段数量
+            "stitch_duration": stitch_duration,  # 原始秒数
+            "duration_str": duration_str  # 格式化的时间字符串
         }
 
     except Exception as e:

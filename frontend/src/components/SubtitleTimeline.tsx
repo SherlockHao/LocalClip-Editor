@@ -21,6 +21,7 @@ interface SubtitleTimelineProps {
   onSeek: (time: number) => void;
   onStitchAudio?: () => void;
   stitching?: boolean;
+  isRegeneratingVoices?: boolean;
 }
 
 const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
@@ -29,7 +30,8 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
   duration,
   onSeek,
   onStitchAudio,
-  stitching = false
+  stitching = false,
+  isRegeneratingVoices = false
 }) => {
   const [zoom, setZoom] = useState(1); // 缩放级别，1 = 100%
   const [scrollOffset, setScrollOffset] = useState(0); // 滚动偏移量（像素）
@@ -187,12 +189,13 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
           {hasClonedAudio && onStitchAudio && (
             <button
               onClick={onStitchAudio}
-              disabled={stitching}
+              disabled={stitching || isRegeneratingVoices}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                stitching
+                stitching || isRegeneratingVoices
                   ? 'bg-emerald-600/30 text-emerald-400/50 cursor-not-allowed'
                   : 'bg-emerald-600/40 text-emerald-100 hover:bg-emerald-600/60 shadow-md hover:shadow-lg'
               }`}
+              title={isRegeneratingVoices ? '正在重新生成音色...' : ''}
             >
               {stitching ? (
                 <>

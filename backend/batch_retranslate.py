@@ -33,18 +33,52 @@ def load_model(model_path: str):
     Returns:
         tuple: (tokenizer, model)
     """
-    print(f"[PID {os.getpid()}] Loading model from {model_path}...")
+    # 设置环境变量禁用 HuggingFace Hub（在导入之前设置）
+    os.environ['HF_HUB_OFFLINE'] = '1'
+    os.environ['TRANSFORMERS_OFFLINE'] = '1'
+    os.environ['HF_DATASETS_OFFLINE'] = '1'
 
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_path,
-        dtype=torch.float16,
-        device_map="auto",
-        trust_remote_code=True
-    )
+    print(f"[PID {os.getpid()}] Loading model from {model_path}...", flush=True)
 
-    print(f"[PID {os.getpid()}] Model loaded on device: {model.device}")
-    return tokenizer, model
+    # 确保路径存在
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model path does not exist: {model_path}")
+
+    # 检查必需的文件是否存在
+    tokenizer_config = os.path.join(model_path, "tokenizer_config.json")
+    if not os.path.exists(tokenizer_config):
+        raise FileNotFoundError(f"tokenizer_config.json not found in {model_path}")
+
+    try:
+        # 尝试使用本地路径加载（禁用所有远程调用）
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_path,
+            local_files_only=True,
+            trust_remote_code=True,
+            use_fast=True
+        )
+        print(f"[PID {os.getpid()}] Tokenizer loaded, loading model...", flush=True)
+
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            dtype=torch.float16,
+            device_map="auto",
+            trust_remote_code=True,
+            local_files_only=True
+        )
+
+        print(f"[PID {os.getpid()}] Model loaded on device: {model.device}", flush=True)
+        return tokenizer, model
+
+    except Exception as e:
+        print(f"[PID {os.getpid()}] Error loading model: {str(e)}", flush=True)
+        print(f"[PID {os.getpid()}] Model path: {model_path}", flush=True)
+        print(f"[PID {os.getpid()}] Path exists: {os.path.exists(model_path)}", flush=True)
+        print(f"[PID {os.getpid()}] Files in directory:", flush=True)
+        if os.path.exists(model_path):
+            for f in os.listdir(model_path):
+                print(f"  - {f}", flush=True)
+        raise
 
 
 def translate_task(
@@ -92,11 +126,10 @@ def translate_task(
     language_name = language_map.get(target_language_lower, target_language)
 
     # 简洁的 prompt - 直接要求翻译，不要思考过程
-    prompt = f"请将以下中文翻译成{language_name}，要求简洁且口语化，直接输出翻译结果，不要解释：\n\n{source_text}"
+    prompt = f"请将以下中文翻译成{language_name}，要求字数极少且口语化，直接输出翻译结果，不要解释和思考过程：\n\n{source_text}"
     messages = [{"role": "user", "content": prompt}]
 
-    print(f"\n[Task {task_id}] Target language: {target_language} -> {language_name}")
-    print(f"[Task {task_id}] Prompt: {prompt}")
+    print(f"\n[Task {task_id}] Prompt: {prompt}", flush=True)
 
     # 准备输入
     formatted_text = tokenizer.apply_chat_template(
@@ -104,11 +137,11 @@ def translate_task(
         tokenize=False,
         add_generation_prompt=True
     )
+
     model_inputs = tokenizer([formatted_text], return_tensors="pt").to(model.device)
 
-    print(f"[Task {task_id}] Formatted input length: {len(model_inputs.input_ids[0])}")
-
     # 生成翻译
+    print(f"[Task {task_id}] 开始生成...", flush=True)
     generated_ids = model.generate(
         **model_inputs,
         max_new_tokens=128,
@@ -118,14 +151,12 @@ def translate_task(
     output_ids = generated_ids[0][len(model_inputs.input_ids[0]):].tolist()
     raw_translation = tokenizer.decode(output_ids, skip_special_tokens=True).strip("\n")
 
-    # 打印原始翻译（调试）
-    print(f"\n[Task {task_id}] 原始翻译: '{raw_translation}'")
+    print(f"[Task {task_id}] 模型输出: '{raw_translation}'", flush=True)
 
     # 后处理：移除思考过程
     translation = remove_thinking_process(raw_translation)
 
-    # 打印清理后的翻译（调试）
-    print(f"[Task {task_id}] 清理后翻译: '{translation}'")
+    print(f"[Task {task_id}] 最终输出: '{translation}'", flush=True)
 
     # 如果翻译为空，使用原文
     if not translation or translation.strip() == "":
@@ -181,12 +212,10 @@ def worker_process(
         result_queue: 结果队列
         model_path: 模型路径
     """
-    print(f"\n{'='*60}")
-    print(f"Process {process_id} (PID {os.getpid()}) starting...")
-    print(f"{'='*60}")
-
+    print(f"[Worker {process_id}] 进程启动，准备加载模型...", flush=True)
     # 在进程内加载模型（每个进程只加载一次）
     tokenizer, model = load_model(model_path)
+    print(f"[Worker {process_id}] 模型加载完成，开始处理任务", flush=True)
 
     task_count = 0
 
@@ -202,8 +231,6 @@ def worker_process(
             target_language = task["target_language"]
 
             task_count += 1
-
-            print(f"[Process {process_id}] Processing task {task_id}...")
             start_time = time.time()
 
             result = translate_task(tokenizer, model, source_text, target_language, task_id)
@@ -216,15 +243,11 @@ def worker_process(
             # 立即将结果放入队列
             result_queue.put(result)
 
-            print(f"[Process {process_id}] Task {task_id} completed in {elapsed:.2f}s")
-
         except Exception as e:
             print(f"[Process {process_id}] Error: {e}")
             import traceback
             traceback.print_exc()
             break
-
-    print(f"\n[Process {process_id}] Finished processing {task_count} tasks")
 
 
 def result_collector(result_queue: Queue, total_tasks: int) -> List[Dict[str, Any]]:
@@ -242,21 +265,14 @@ def result_collector(result_queue: Queue, total_tasks: int) -> List[Dict[str, An
     all_results = []
     collected_count = 0
 
-    print("\n" + "="*60)
-    print("RE-TRANSLATION RESULTS (Real-time)")
-    print("="*60)
-
     while collected_count < total_tasks:
         try:
             result = result_queue.get(timeout=1)
             all_results.append(result)
             collected_count += 1
 
-            # 立即打印结果
-            print(f"\n[{result['task_id']}] (Process {result['process_id']}, {result['time']:.2f}s)")
-            print(f"原文: {result['source']}")
-            print(f"译文: {result['translation']}")
-            print("-"*60)
+            # 简化打印
+            print(f"[{result['task_id']}] {result['source']} -> {result['translation']}")
 
         except:
             continue
@@ -281,16 +297,7 @@ def run_batch_retranslation(
         list: 翻译结果列表
     """
     if not tasks:
-        print("No tasks to process")
         return []
-
-    print("="*60)
-    print("BATCH RE-TRANSLATION WITH MULTIPROCESSING")
-    print("="*60)
-    print(f"Total tasks: {len(tasks)}")
-    print(f"Number of processes: {num_processes}")
-    print(f"Model path: {model_path}")
-    print("="*60)
 
     # 创建任务队列和结果队列
     task_queue = Queue()
@@ -305,7 +312,6 @@ def run_batch_retranslation(
         task_queue.put(None)
 
     # 启动结果收集线程
-    start_time = time.time()
     result_list = []
 
     def collect_results():
@@ -333,32 +339,7 @@ def run_batch_retranslation(
     # 等待结果收集线程完成
     collector_thread.join()
 
-    total_time = time.time() - start_time
     all_results = result_list
-
-    # 统计信息
-    print(f"\n{'='*60}")
-    print("STATISTICS")
-    print("="*60)
-    print(f"Total tasks: {len(all_results)}")
-    print(f"Total time: {total_time:.2f}s")
-    if tasks:
-        print(f"Average time per task: {total_time/len(tasks):.2f}s")
-
-    # 按进程统计
-    process_stats = {}
-    for result in all_results:
-        pid = result['process_id']
-        if pid not in process_stats:
-            process_stats[pid] = []
-        process_stats[pid].append(result['time'])
-
-    for pid, times in sorted(process_stats.items()):
-        avg_time = sum(times)/len(times) if times else 0
-        print(f"Process {pid}: {len(times)} tasks, avg {avg_time:.2f}s per task")
-
-    print("="*60)
-
     return all_results
 
 
@@ -392,6 +373,8 @@ def retranslate_from_config(config_file: str) -> List[Dict[str, Any]]:
 if __name__ == "__main__":
     import sys
 
+    print("[batch_retranslate.py] 脚本启动", flush=True)
+
     # 设置multiprocessing启动方法
     mp.set_start_method('spawn', force=True)
 
@@ -414,7 +397,9 @@ if __name__ == "__main__":
         sys.exit(1)
 
     config_file = sys.argv[1]
+    print(f"[batch_retranslate.py] 读取配置文件: {config_file}", flush=True)
     results = retranslate_from_config(config_file)
+    print(f"[batch_retranslate.py] 翻译完成，结果数量: {len(results)}", flush=True)
 
     # 输出结果（JSON格式）
     print("\n" + "="*60)
