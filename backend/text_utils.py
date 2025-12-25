@@ -52,6 +52,43 @@ def normalize_english(text: str) -> str:
     return text
 
 
+def normalize_korean(text: str) -> str:
+    """
+    规范化韩文文本，移除符号和空格
+
+    Args:
+        text: 原始韩文文本
+
+    Returns:
+        str: 只包含韩文字符的文本
+    """
+    # 韩文字符 Unicode 范围:
+    # - 0xAC00-0xD7AF: 谚文音节 (완성형 한글)
+    # - 0x1100-0x11FF: 谚文字母 (자모)
+    # - 0x3130-0x318F: 谚文兼容字母
+    normalized = re.sub(r'[^\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]', '', text)
+    return normalized
+
+
+def normalize_japanese(text: str) -> str:
+    """
+    规范化日文文本，移除符号和空格
+
+    Args:
+        text: 原始日文文本
+
+    Returns:
+        str: 只包含日文字符的文本
+    """
+    # 日文字符 Unicode 范围:
+    # - 0x3040-0x309F: 平假名 (ひらがな)
+    # - 0x30A0-0x30FF: 片假名 (カタカナ)
+    # - 0x4E00-0x9FFF: CJK统一汉字 (日文中使用的汉字)
+    # - 0x3400-0x4DBF: CJK扩展A (罕用汉字)
+    normalized = re.sub(r'[^\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF\u3400-\u4DBF]', '', text)
+    return normalized
+
+
 def count_chinese_length(text: str) -> int:
     """
     计算中文文本的长度（只统计汉字）
@@ -82,22 +119,54 @@ def count_english_length(text: str) -> int:
     return len(normalized.split())
 
 
+def count_korean_length(text: str) -> int:
+    """
+    计算韩文文本的长度（统计字符数）
+
+    Args:
+        text: 韩文文本
+
+    Returns:
+        int: 韩文字符数量
+    """
+    normalized = normalize_korean(text)
+    return len(normalized)
+
+
+def count_japanese_length(text: str) -> int:
+    """
+    计算日文文本的长度（统计字符数）
+
+    Args:
+        text: 日文文本
+
+    Returns:
+        int: 日文字符数量
+    """
+    normalized = normalize_japanese(text)
+    return len(normalized)
+
+
 def count_text_length(text: str, language: str) -> int:
     """
     根据语言类型计算文本长度
 
     Args:
         text: 文本内容
-        language: 语言类型 ("中文", "英文", "英语", "English", "Chinese" 等)
+        language: 语言类型 ("中文", "英文", "韩文", "日文", "English", "Korean", "Japanese" 等)
 
     Returns:
-        int: 文本长度（中文为字数，英文为词数）
+        int: 文本长度（中文/韩文/日文为字符数，英文为单词数）
     """
     language_lower = language.lower()
 
-    # 判断是否为英文
+    # 判断语言类型
     if any(keyword in language_lower for keyword in ['英', 'english', 'en']):
         return count_english_length(text)
+    elif any(keyword in language_lower for keyword in ['韩', 'korean', 'ko', '한국']):
+        return count_korean_length(text)
+    elif any(keyword in language_lower for keyword in ['日', 'japanese', 'ja', '日本']):
+        return count_japanese_length(text)
     else:
         # 默认按中文处理
         return count_chinese_length(text)

@@ -320,37 +320,60 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
             })}
           </div>
 
-          {/* 播放头指示器 - 贯穿所有轨道 */}
+          {/* 播放头指示器 - 现代化设计 */}
           <div
             className="absolute top-0 bottom-0 z-30 pointer-events-none"
             style={{
               left: `${(currentTime / duration) * 100}%`
             }}
           >
-            {/* 发光效果背景 */}
-            <div className="absolute top-0 bottom-0 w-1 -translate-x-1/2 bg-red-500/30 blur-sm"></div>
+            {/* 多层发光效果 */}
+            <div className="absolute top-0 bottom-0 w-3 -translate-x-1/2 bg-cyan-400/20 blur-xl"></div>
+            <div className="absolute top-0 bottom-0 w-2 -translate-x-1/2 bg-cyan-400/30 blur-md"></div>
 
-            {/* 主线条 */}
-            <div className="absolute top-0 bottom-0 w-0.5 -translate-x-1/2 bg-gradient-to-b from-red-400 via-red-500 to-red-600 shadow-lg shadow-red-500/50"></div>
+            {/* 主线条 - 渐变色带 */}
+            <div className="absolute top-0 bottom-0 w-1 -translate-x-1/2 bg-gradient-to-b from-cyan-300 via-cyan-400 to-blue-500 shadow-2xl shadow-cyan-400/60"></div>
+
+            {/* 内部高光线 */}
+            <div className="absolute top-0 bottom-0 w-px -translate-x-1/2 left-[-1px] bg-gradient-to-b from-white/80 via-white/40 to-transparent"></div>
 
             {/* 顶部装饰和时间显示 */}
-            <div className="absolute -top-10 left-1/2 -translate-x-1/2 flex flex-col items-center">
-              {/* 时间标签 */}
-              <div className="bg-gradient-to-br from-red-600 to-red-700 backdrop-blur-sm border border-red-400/50 rounded-md px-2.5 py-1 shadow-xl shadow-red-500/30 mb-1.5">
-                <span className="text-xs font-mono text-white font-bold whitespace-nowrap drop-shadow-sm">
-                  {new Date(currentTime * 1000).toISOString().substr(14, 5)}
-                </span>
+            <div className="absolute -top-12 left-1/2 -translate-x-1/2 flex flex-col items-center">
+              {/* 时间标签 - 玻璃态设计 */}
+              <div className="relative group">
+                <div className="absolute inset-0 bg-gradient-to-r from-cyan-500 to-blue-500 rounded-lg blur-md opacity-60 group-hover:opacity-80 transition-opacity"></div>
+                <div className="relative bg-gradient-to-br from-slate-800/95 to-slate-900/95 backdrop-blur-xl border border-cyan-400/40 rounded-lg px-3 py-1.5 shadow-2xl">
+                  <span className="text-xs font-mono text-cyan-100 font-bold whitespace-nowrap tracking-wide">
+                    {new Date(currentTime * 1000).toISOString().substr(14, 5)}
+                  </span>
+                  {/* 内部光晕 */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-cyan-400/10 to-transparent rounded-lg"></div>
+                </div>
               </div>
 
-              {/* 装饰性三角形箭头 */}
-              <div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-red-600 mb-0.5"></div>
+              {/* 连接线装饰 */}
+              <div className="w-px h-3 bg-gradient-to-b from-cyan-400 to-transparent my-0.5"></div>
 
-              {/* 顶部圆点 */}
+              {/* 顶部指示器 - 菱形设计 */}
               <div className="relative">
-                <div className="w-4 h-4 bg-gradient-to-br from-red-400 to-red-600 rounded-full shadow-lg shadow-red-500/50 border-2 border-white"></div>
-                <div className="absolute inset-0 w-4 h-4 bg-red-300 rounded-full animate-ping opacity-20"></div>
+                {/* 外圈脉动光环 */}
+                <div className="absolute inset-0 w-5 h-5 -translate-x-1/2 left-1/2 -translate-y-1/2 top-1/2">
+                  <div className="absolute inset-0 bg-cyan-400/40 rounded-full animate-ping"></div>
+                  <div className="absolute inset-0 bg-cyan-400/30 rounded-full animate-pulse"></div>
+                </div>
+
+                {/* 菱形主体 */}
+                <div className="relative w-4 h-4 rotate-45 bg-gradient-to-br from-cyan-300 via-cyan-400 to-blue-500 rounded-sm shadow-lg shadow-cyan-400/50 border border-white/30">
+                  {/* 内部光泽 */}
+                  <div className="absolute inset-0 bg-gradient-to-br from-white/50 via-transparent to-transparent rounded-sm"></div>
+                  {/* 中心高光点 */}
+                  <div className="absolute top-1 left-1 w-1 h-1 bg-white/90 rounded-full"></div>
+                </div>
               </div>
             </div>
+
+            {/* 底部投影效果 */}
+            <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-8 h-1 bg-gradient-to-r from-transparent via-cyan-400/30 to-transparent blur-sm"></div>
           </div>
         </div>
 

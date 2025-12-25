@@ -17,10 +17,133 @@ import torch
 import json
 import multiprocessing as mp
 from multiprocessing import Process, Queue
+import queue
 import time
 import threading
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 import re
+
+
+def get_gpu_memory_gb() -> float:
+    """
+    获取GPU可用显存（GB）
+
+    Returns:
+        float: 可用显存大小（GB），如果没有GPU返回0
+    """
+    if not torch.cuda.is_available():
+        print("[GPU检测] 没有检测到可用的CUDA设备", flush=True)
+        return 0.0
+
+    try:
+        # 获取第一个GPU的总显存
+        gpu_memory = torch.cuda.get_device_properties(0).total_memory
+        gpu_memory_gb = gpu_memory / (1024 ** 3)
+
+        # 获取已用显存
+        allocated = torch.cuda.memory_allocated(0) / (1024 ** 3)
+        reserved = torch.cuda.memory_reserved(0) / (1024 ** 3)
+
+        available_gb = gpu_memory_gb - reserved
+
+        print(f"[GPU检测] GPU显存信息:", flush=True)
+        print(f"  总显存: {gpu_memory_gb:.2f} GB", flush=True)
+        print(f"  已分配: {allocated:.2f} GB", flush=True)
+        print(f"  已保留: {reserved:.2f} GB", flush=True)
+        print(f"  可用: {available_gb:.2f} GB", flush=True)
+
+        return available_gb
+    except Exception as e:
+        print(f"[GPU检测] 获取GPU信息失败: {e}", flush=True)
+        return 0.0
+
+
+def check_model_files(model_path: str) -> bool:
+    """
+    检查模型文件是否完整
+
+    Args:
+        model_path: 模型目录路径
+
+    Returns:
+        bool: 文件完整返回True，否则返回False
+    """
+    required_files = ["config.json", "tokenizer_config.json"]
+
+    for file in required_files:
+        file_path = os.path.join(model_path, file)
+        if not os.path.exists(file_path):
+            return False
+
+        # 检查文件大小（至少应该大于0）
+        if os.path.getsize(file_path) == 0:
+            return False
+
+    # 检查是否有模型权重文件
+    has_weights = False
+    for file in os.listdir(model_path):
+        if file.endswith('.safetensors') or file.endswith('.bin'):
+            # 检查文件大小（至少10MB）
+            file_path = os.path.join(model_path, file)
+            if os.path.getsize(file_path) > 10 * 1024 * 1024:
+                has_weights = True
+                break
+
+    return has_weights
+
+
+def select_model_by_gpu(models_dir: str) -> str:
+    """
+    根据GPU显存自动选择合适的模型
+
+    优先级：
+    1. Qwen3-1.7B (稳定，需要约4GB显存) - 优先使用
+    2. Qwen3-4B-FP8 (需要约6GB显存)
+    3. Qwen3-4B (需要约8GB显存)
+
+    Args:
+        models_dir: 模型根目录
+
+    Returns:
+        str: 选择的模型路径
+    """
+    available_memory = get_gpu_memory_gb()
+
+    # 定义模型及其显存需求（GB）
+    # 优先使用 4B FP8 模型以获得最佳翻译质量
+    models = [
+        ("Qwen3-4B-FP8", 6.0),      # 4B FP8模型，翻译质量最优
+        ("Qwen3-4B", 8.0),          # 4B FP16模型
+        ("Qwen3-1.7B", 4.0),        # 1.7B模型，显存不足时的回退选项
+    ]
+
+    print(f"\n[模型选择] 可用显存: {available_memory:.2f} GB", flush=True)
+
+    # 按优先级选择
+    for model_name, required_memory in models:
+        model_path = os.path.join(models_dir, model_name)
+
+        # 检查模型是否存在
+        if not os.path.exists(model_path):
+            print(f"[模型选择] ✗ {model_name} 不存在 (路径: {model_path})", flush=True)
+            continue
+
+        # 检查模型文件完整性
+        if not check_model_files(model_path):
+            print(f"[模型选择] ✗ {model_name} 文件不完整或损坏", flush=True)
+            continue
+
+        # 检查显存是否足够
+        if available_memory >= required_memory:
+            print(f"[模型选择] ✓ 选择 {model_name} (需要 {required_memory:.1f} GB, 可用 {available_memory:.2f} GB)", flush=True)
+            return model_path
+        else:
+            print(f"[模型选择] ✗ {model_name} 显存不足 (需要 {required_memory:.1f} GB, 可用 {available_memory:.2f} GB)", flush=True)
+
+    # 如果所有模型都不满足，使用最小的模型作为回退
+    fallback_model = os.path.join(models_dir, "Qwen3-1.7B")
+    print(f"[模型选择] ⚠ 没有可用模型，尝试使用: Qwen3-1.7B", flush=True)
+    return fallback_model
 
 
 def load_model(model_path: str):
@@ -125,8 +248,8 @@ def translate_task(
     target_language_lower = target_language.lower()
     language_name = language_map.get(target_language_lower, target_language)
 
-    # 简洁的 prompt - 直接要求翻译，不要思考过程
-    prompt = f"请将以下中文翻译成{language_name}，要求字数极少且口语化，直接输出翻译结果，不要解释和思考过程：\n\n{source_text}"
+    # JSON格式 prompt - 强制JSON输出避免思考过程
+    prompt = f'请将以下中文翻译成{language_name}（口语化、极简），以 JSON 格式输出，Key 为 "tr"：\n\n{source_text}'
     messages = [{"role": "user", "content": prompt}]
 
     print(f"\n[Task {task_id}] Prompt: {prompt}", flush=True)
@@ -149,12 +272,12 @@ def translate_task(
         temperature=0.7
     )
     output_ids = generated_ids[0][len(model_inputs.input_ids[0]):].tolist()
-    raw_translation = tokenizer.decode(output_ids, skip_special_tokens=True).strip("\n")
+    raw_translation = tokenizer.decode(output_ids, skip_special_tokens=True).strip()
 
     print(f"[Task {task_id}] 模型输出: '{raw_translation}'", flush=True)
 
-    # 后处理：移除思考过程
-    translation = remove_thinking_process(raw_translation)
+    # 后处理：从JSON中提取翻译结果
+    translation = extract_translation_from_json(raw_translation, source_text)
 
     print(f"[Task {task_id}] 最终输出: '{translation}'", flush=True)
 
@@ -171,29 +294,63 @@ def translate_task(
     }
 
 
-def remove_thinking_process(text: str) -> str:
+def extract_translation_from_json(text: str, fallback: str = "") -> str:
     """
-    移除模型输出中的思考过程
-    处理 <think>...</think> 或 <thinking>...</thinking> 标签
+    从JSON格式的模型输出中提取翻译结果
+
+    支持多种格式：
+    - {"tr": "翻译结果"}
+    - {"tr":"翻译结果"}
+    - { "tr" : "翻译结果" }
+    - 带有其他内容的JSON
 
     Args:
-        text: 原始文本
+        text: 模型输出的文本
+        fallback: 解析失败时的备用文本
 
     Returns:
-        str: 清理后的文本
+        str: 提取的翻译结果，失败时返回fallback
     """
-    # 移除 <think>...</think> 标签及其内容
-    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r'<thinking>.*?</thinking>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    try:
+        # 首先尝试直接解析整个文本为JSON
+        data = json.loads(text)
+        if isinstance(data, dict) and "tr" in data:
+            return data["tr"].strip()
+    except:
+        pass
 
-    # 移除未闭合的 <think> 或 <thinking> 标签及其后面的所有内容
-    text = re.sub(r'<think>.*', '', text, flags=re.DOTALL | re.IGNORECASE)
-    text = re.sub(r'<thinking>.*', '', text, flags=re.DOTALL | re.IGNORECASE)
+    # 尝试从文本中提取JSON对象
+    # 查找 {"tr": "..."} 或 {'tr': '...'} 格式
+    json_patterns = [
+        r'\{["\']tr["\']\s*:\s*["\']([^"\']+)["\']\s*\}',  # {"tr": "xxx"} 或 {'tr': 'xxx'}
+        r'\{\s*"tr"\s*:\s*"([^"]+)"\s*\}',                  # { "tr" : "xxx" }
+        r'\{["\']tr["\']\s*:\s*["\']([^"\']*?)["\']\s*[,\}]',  # 带逗号的情况
+    ]
 
-    # 清理多余的空白
-    text = text.strip()
+    for pattern in json_patterns:
+        match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
+        if match:
+            result = match.group(1).strip()
+            if result:
+                return result
 
-    return text
+    # 如果找到 "tr": 但没有完整JSON，尝试提取引号内的内容
+    tr_match = re.search(r'"tr"\s*:\s*"([^"]+)"', text, re.DOTALL)
+    if tr_match:
+        return tr_match.group(1).strip()
+
+    # 移除可能的思考标签作为最后的尝试
+    cleaned = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL | re.IGNORECASE)
+    cleaned = re.sub(r'<thinking>.*?</thinking>', '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+    cleaned = cleaned.strip()
+
+    # 如果清理后有内容且不像是错误信息，返回清理后的文本
+    if cleaned and not cleaned.startswith('{') and len(cleaned) < 200:
+        return cleaned
+
+    # 所有方法都失败，返回备用文本
+    print(f"⚠️  无法从输出中提取翻译: {text[:100]}...", flush=True)
+    return fallback
 
 
 def worker_process(
@@ -224,6 +381,7 @@ def worker_process(
         try:
             task = task_queue.get(timeout=1)
             if task is None:  # 结束信号
+                print(f"[Worker {process_id}] 收到结束信号，退出", flush=True)
                 break
 
             task_id = task["task_id"]
@@ -233,6 +391,7 @@ def worker_process(
             task_count += 1
             start_time = time.time()
 
+            print(f"[Worker {process_id}] 开始处理任务 {task_id}: {source_text[:20]}...", flush=True)
             result = translate_task(tokenizer, model, source_text, target_language, task_id)
             elapsed = time.time() - start_time
 
@@ -242,12 +401,17 @@ def worker_process(
 
             # 立即将结果放入队列
             result_queue.put(result)
+            print(f"[Worker {process_id}] 完成任务 {task_id}，耗时 {elapsed:.2f}秒", flush=True)
 
+        except queue.Empty:
+            # 队列超时，继续等待
+            continue
         except Exception as e:
-            print(f"[Process {process_id}] Error: {e}")
+            print(f"[Worker {process_id}] 任务处理出错: {e}", flush=True)
             import traceback
             traceback.print_exc()
-            break
+            # 不要break，继续处理下一个任务
+            continue
 
 
 def result_collector(result_queue: Queue, total_tasks: int) -> List[Dict[str, Any]]:
@@ -265,18 +429,25 @@ def result_collector(result_queue: Queue, total_tasks: int) -> List[Dict[str, An
     all_results = []
     collected_count = 0
 
+    print(f"\n[结果收集] 开始收集 {total_tasks} 个翻译结果...", flush=True)
+
     while collected_count < total_tasks:
         try:
-            result = result_queue.get(timeout=1)
+            result = result_queue.get(timeout=30)  # 增加超时时间
             all_results.append(result)
             collected_count += 1
 
-            # 简化打印
-            print(f"[{result['task_id']}] {result['source']} -> {result['translation']}")
+            # 实时打印每一条翻译结果
+            print(f"[{collected_count}/{total_tasks}] {result['task_id']}: {result['source']} -> {result['translation']}", flush=True)
 
-        except:
+        except queue.Empty:
+            print(f"[结果收集] 等待中... 已收集 {collected_count}/{total_tasks}", flush=True)
+            continue
+        except Exception as e:
+            print(f"[结果收集] 错误: {e}", flush=True)
             continue
 
+    print(f"[结果收集] 完成！共收集 {len(all_results)} 个结果\n", flush=True)
     return all_results
 
 
@@ -297,15 +468,24 @@ def run_batch_retranslation(
         list: 翻译结果列表
     """
     if not tasks:
+        print("[批量翻译] 没有任务需要处理", flush=True)
         return []
+
+    print(f"\n{'='*60}", flush=True)
+    print(f"[批量翻译] 开始批量翻译", flush=True)
+    print(f"  任务数量: {len(tasks)}", flush=True)
+    print(f"  进程数量: {num_processes}", flush=True)
+    print(f"  模型路径: {model_path}", flush=True)
+    print(f"{'='*60}\n", flush=True)
 
     # 创建任务队列和结果队列
     task_queue = Queue()
     result_queue = Queue()
 
     # 将任务放入队列
-    for task in tasks:
+    for i, task in enumerate(tasks, 1):
         task_queue.put(task)
+        print(f"[任务队列] 添加任务 {i}: {task.get('task_id', 'unknown')}", flush=True)
 
     # 为每个进程添加结束信号
     for _ in range(num_processes):
@@ -319,10 +499,12 @@ def run_batch_retranslation(
         result_list = result_collector(result_queue, len(tasks))
 
     collector_thread = threading.Thread(target=collect_results)
+    collector_thread.daemon = False
     collector_thread.start()
 
     # 启动工作进程
     processes = []
+    print(f"\n[进程管理] 启动 {num_processes} 个工作进程...", flush=True)
 
     for i in range(num_processes):
         p = Process(
@@ -331,15 +513,23 @@ def run_batch_retranslation(
         )
         p.start()
         processes.append(p)
+        print(f"[进程管理] Worker {i+1} 已启动 (PID: {p.pid})", flush=True)
 
     # 等待所有进程完成
-    for p in processes:
+    print(f"\n[进程管理] 等待所有工作进程完成...", flush=True)
+    for i, p in enumerate(processes, 1):
         p.join()
+        print(f"[进程管理] Worker {i} 已结束", flush=True)
 
     # 等待结果收集线程完成
+    print(f"[进程管理] 等待结果收集线程完成...", flush=True)
     collector_thread.join()
 
     all_results = result_list
+    print(f"\n{'='*60}", flush=True)
+    print(f"[批量翻译] 全部完成！共处理 {len(all_results)} 个任务", flush=True)
+    print(f"{'='*60}\n", flush=True)
+
     return all_results
 
 
@@ -361,11 +551,15 @@ def retranslate_from_config(config_file: str) -> List[Dict[str, Any]]:
     model_path = config.get("model_path")
     num_processes = config.get("num_processes", 1)
 
-    # 如果没有指定模型路径，使用默认路径
+    # 如果没有指定模型路径，根据GPU显存自动选择
     if not model_path:
-        script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        models_dir = os.path.join(script_dir, "models")
-        model_path = os.path.join(models_dir, "Qwen3-1.7B")
+        # 路径: backend -> LocalClip-Editor -> workspace -> ai_editing
+        backend_dir = os.path.dirname(os.path.abspath(__file__))  # backend
+        localclip_dir = os.path.dirname(backend_dir)  # LocalClip-Editor
+        workspace_dir = os.path.dirname(localclip_dir)  # workspace
+        ai_editing_dir = os.path.dirname(workspace_dir)  # ai_editing
+        models_dir = os.path.join(ai_editing_dir, "models")
+        model_path = select_model_by_gpu(models_dir)
 
     return run_batch_retranslation(tasks, model_path, num_processes)
 

@@ -929,11 +929,11 @@ const App: React.FC = () => {
           onSubtitleUpload={handleSubtitleUpload}
         />
 
-        {/* 中央区域（新布局：上方播放器+信息，下方时间轴） */}
+        {/* 中央区域（新布局：上方播放器+信息，下方时间轴） - 始终显示占位 */}
         <div className="flex-1 flex flex-col overflow-hidden gap-3">
           {/* 上层：字幕详情 + 播放器 */}
           <div className="flex gap-3 flex-1 overflow-hidden">
-            {/* 左侧：字幕详细信息列表 (增加宽度比例) */}
+            {/* 左侧：字幕详细信息列表 (增加宽度比例) - 始终显示 */}
             <SubtitleDetails
                 subtitles={subtitles}
                 currentTime={currentTime}
@@ -1041,16 +1041,18 @@ const App: React.FC = () => {
             </div>
           </div>
 
-          {/* 下层：时间轴 */}
-          {subtitles.length > 0 && (
-            <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl shadow-xl border border-slate-700 p-4 flex-shrink-0">
-              <div className="flex items-center space-x-2 mb-3">
-                <Zap size={14} className="text-yellow-400" />
-                <h3 className="text-sm font-semibold text-slate-100">字幕时间轴</h3>
+          {/* 下层：时间轴 - 始终显示占位 */}
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl shadow-xl border border-slate-700 p-4 flex-shrink-0">
+            <div className="flex items-center space-x-2 mb-3">
+              <Zap size={14} className="text-yellow-400" />
+              <h3 className="text-sm font-semibold text-slate-100">字幕时间轴</h3>
+              {subtitles.length > 0 && (
                 <span className="ml-auto text-xs text-slate-400 bg-slate-700/50 px-2 py-0.5 rounded">
                   {subtitles.length} 条
                 </span>
-              </div>
+              )}
+            </div>
+            {subtitles.length > 0 ? (
               <SubtitleTimeline
                 subtitles={subtitles}
                 currentTime={currentTime}
@@ -1060,8 +1062,14 @@ const App: React.FC = () => {
                 stitching={isStitchingAudio}
                 isRegeneratingVoices={isRegeneratingVoices}
               />
-            </div>
-          )}
+            ) : (
+              <div className="flex items-center justify-center h-32 text-slate-500 text-sm">
+                <div className="text-center">
+                  <p>上传字幕文件后，时间轴将显示在这里</p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* 右侧属性面板 - 不变 */}

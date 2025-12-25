@@ -928,18 +928,10 @@ async def run_voice_cloning_process(
             # 写入配置文件
             config_file = os.path.join(audio_dir, "retranslate_config.json")
 
-            # 获取模型路径
-            # 模型在 C:\workspace\ai_editing\models\Qwen3-1.7B
-            # 从 backend 目录向上 4 级到达 ai_editing 目录
-            backend_dir = os.path.dirname(os.path.abspath(__file__))  # backend
-            localclip_dir = os.path.dirname(backend_dir)  # LocalClip-Editor
-            workspace_dir = os.path.dirname(localclip_dir)  # workspace
-            ai_editing_dir = os.path.dirname(workspace_dir)  # ai_editing
-            model_path = os.path.join(ai_editing_dir, "models", "Qwen3-1.7B")
-
+            # 不指定模型路径，让 batch_retranslate.py 根据 GPU 显存自动选择
+            # 会在 Qwen3-4B-FP8, Qwen3-4B, Qwen3-1.7B 中选择
             retranslate_config = {
                 "tasks": retranslate_tasks,
-                "model_path": model_path,
                 "num_processes": 1  # 使用单进程，避免显存冲突
             }
 
@@ -947,74 +939,99 @@ async def run_voice_cloning_process(
                 json.dump(retranslate_config, f, ensure_ascii=False, indent=2)
 
             # 调用批量重新翻译脚本
-            # 使用 qwen_inference conda 环境
-            qwen_env_python = os.environ.get("QWEN_INFERENCE_PYTHON")
-            if not qwen_env_python:
+            # 使用 ui conda 环境（Ollama 方案）
+            ui_env_python = os.environ.get("UI_PYTHON")
+            if not ui_env_python:
                 # 默认路径
                 import platform
                 if platform.system() == "Windows":
-                    qwen_env_python = r"C:\Users\7\miniconda3\envs\qwen_inference\python.exe"
+                    ui_env_python = r"C:\Users\7\miniconda3\envs\ui\python.exe"
                 else:
-                    qwen_env_python = os.path.expanduser("~/miniconda3/envs/qwen_inference/bin/python")
+                    ui_env_python = os.path.expanduser("~/miniconda3/envs/ui/bin/python")
 
             batch_retranslate_script = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)),
-                "batch_retranslate.py"
+                "batch_retranslate_ollama.py"
             )
 
-            print(f"[Retranslate] 使用 Python: {qwen_env_python}")
+            print(f"[Retranslate] 使用 Python: {ui_env_python}")
             print(f"[Retranslate] 脚本: {batch_retranslate_script}")
             print(f"[Retranslate] 配置: {config_file}")
-            print(f"[Retranslate] 模型路径: {model_path}")
+            print(f"[Retranslate] 模型: Ollama qwen3:4b（异步并发）")
 
-            # 检查 Python 环境和模型是否存在
-            if not os.path.exists(qwen_env_python):
-                print(f"⚠️  Qwen Python 环境不存在: {qwen_env_python}")
-                print(f"使用原译文继续...")
-            elif not os.path.exists(model_path):
-                print(f"⚠️  模型路径不存在: {model_path}")
+            # 检查 Python 环境是否存在
+            if not os.path.exists(ui_env_python):
+                print(f"⚠️  UI Python 环境不存在: {ui_env_python}")
                 print(f"使用原译文继续...")
             else:
                 try:
-                    print(f"[Retranslate] 启动批量重新翻译进程...")
+                    print(f"[Retranslate] 启动批量重新翻译进程...\n")
+                    print(f"[Retranslate] 命令: {ui_env_python} {batch_retranslate_script} {config_file}\n")
 
-                    # 使用 Popen，不指定编码以避免 UnicodeDecodeError
-                    process = subprocess.Popen(
-                        [qwen_env_python, batch_retranslate_script, config_file],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
-                        # 使用 bytes 模式，手动解码
-                    )
-
-                    # 读取输出（带超时）
+                    # 使用 Popen 实时读取输出
                     try:
-                        stdout_bytes, stderr_bytes = process.communicate(timeout=600)
-                        returncode = process.returncode
+                        process = subprocess.Popen(
+                            [ui_env_python, batch_retranslate_script, config_file],
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,  # 合并 stderr 到 stdout
+                            text=True,  # 文本模式
+                            encoding='utf-8',
+                            errors='replace',  # 忽略解码错误
+                            bufsize=1,  # 行缓冲
+                            universal_newlines=True
+                        )
+                        print(f"[Retranslate] 进程已启动，PID: {process.pid}\n")
+                    except Exception as e:
+                        print(f"❌ 启动进程失败: {e}")
+                        raise
 
-                        # 手动解码，使用 errors='replace' 避免解码错误
-                        stdout = stdout_bytes.decode('utf-8', errors='replace') if stdout_bytes else ""
-                        stderr = stderr_bytes.decode('utf-8', errors='replace') if stderr_bytes else ""
+                    # 实时读取输出
+                    stdout_lines = []
+                    print("[Retranslate] ===== 开始实时输出 =====")
 
-                    except subprocess.TimeoutExpired:
+                    try:
+                        import time
+                        start_time = time.time()
+                        timeout = 600  # 10分钟超时
+
+                        while True:
+                            # 检查超时
+                            if time.time() - start_time > timeout:
+                                process.kill()
+                                print("\n⚠️  重新翻译超时（10分钟），使用原译文继续...")
+                                break
+
+                            # 读取一行
+                            line = process.stdout.readline()
+
+                            if line:
+                                # 实时打印
+                                print(line, end='', flush=True)
+                                stdout_lines.append(line)
+                            else:
+                                # 检查进程是否结束
+                                if process.poll() is not None:
+                                    break
+                                time.sleep(0.1)
+
+                        # 读取剩余输出
+                        remaining = process.stdout.read()
+                        if remaining:
+                            print(remaining, end='', flush=True)
+                            stdout_lines.append(remaining)
+
+                        returncode = process.wait()
+                        stdout = ''.join(stdout_lines)
+
+                    except Exception as e:
                         process.kill()
-                        print("⚠️  重新翻译超时，使用原译文继续...")
-                        stdout, stderr = "", ""
+                        print(f"\n⚠️  读取输出时出错: {e}")
+                        stdout = ''.join(stdout_lines)
                         returncode = -1
 
-                    # 打印 stderr（如果有，忽略空白）
-                    if stderr and stderr.strip():
-                        # 过滤掉 UnicodeDecodeError 相关的无关警告
-                        stderr_lines = stderr.strip().split('\n')
-                        filtered_stderr = '\n'.join([line for line in stderr_lines if 'UnicodeDecodeError' not in line and '_readerthread' not in line])
-                        if filtered_stderr:
-                            print(f"[Retranslate] stderr:\n{filtered_stderr}")
+                    print("[Retranslate] ===== 实时输出结束 =====\n")
 
                     if returncode == 0 and stdout:
-                        # 打印完整的stdout用于调试
-                        print(f"\n[Retranslate] ===== 完整stdout输出 =====")
-                        print(stdout)
-                        print(f"[Retranslate] ===== stdout输出结束 =====\n")
-
                         # 解析输出中的 JSON 结果
                         output_lines = stdout.strip().split('\n')
                         # 查找最后一个 JSON 块
@@ -1600,17 +1617,14 @@ async def translate_text(request: TranslateTextRequest):
         backend_dir = os.path.dirname(os.path.abspath(__file__))
         localclip_dir = os.path.dirname(backend_dir)
         workspace_dir = os.path.dirname(localclip_dir)
-        ai_editing_dir = os.path.dirname(workspace_dir)
-        model_path = os.path.join(ai_editing_dir, "models", "Qwen3-1.7B")
-
         # 创建临时配置文件
+        # 不指定模型路径，让 batch_retranslate.py 根据 GPU 显存自动选择
         config_data = {
             "tasks": [{
                 "task_id": "translate-1",
                 "source": request.text,
                 "target_language": request.target_language
             }],
-            "model_path": model_path,
             "num_processes": 1
         }
 
