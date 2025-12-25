@@ -121,9 +121,8 @@ class AudioOptimizer:
             if not speech_timestamps:
                 return None
 
-            # 拼接语音段（在两段之间保留 0.05 秒间隙以保证自然度）
+            # 拼接语音段（在语音段前后各保留5%的间隙，中间非语音段去掉90%）
             speech_segments = []
-            gap_samples = int(0.05 * original_sr)  # 0.05 秒的间隙
 
             for i, segment in enumerate(speech_timestamps):
                 start_sample = int(segment['start'] * original_sr)
@@ -132,17 +131,29 @@ class AudioOptimizer:
                 end_sample = min(end_sample, len(audio_data))
 
                 if start_sample < end_sample:
-                    speech_segment = audio_data[start_sample:end_sample]
-                    speech_segments.append(speech_segment)
+                    # 计算当前语音段的5%时长
+                    segment_duration_samples = end_sample - start_sample
+                    five_percent_samples = int(segment_duration_samples * 0.05)
 
-                    # 在非最后一段后添加间隙
-                    if i < len(speech_timestamps) - 1:
-                        gap_silence = np.zeros(gap_samples, dtype=audio_data.dtype)
-                        speech_segments.append(gap_silence)
+                    # 语音段前扩展5%（但不超过音频开头）
+                    extended_start = max(0, start_sample - five_percent_samples)
+                    # 语音段后扩展5%（但不超过音频结尾）
+                    extended_end = min(len(audio_data), end_sample + five_percent_samples)
+
+                    # 如果是第一段，不向前扩展（从语音开始处开始）
+                    if i == 0:
+                        extended_start = start_sample
+
+                    # 如果是最后一段，不向后扩展（到语音结束处结束）
+                    if i == len(speech_timestamps) - 1:
+                        extended_end = end_sample
+
+                    speech_segment = audio_data[extended_start:extended_end]
+                    speech_segments.append(speech_segment)
 
             if speech_segments:
                 concatenated = np.concatenate(speech_segments)
-                print(f"  [VAD] 拼接 {len(speech_timestamps)} 个语音段，段间间隙: 0.05s")
+                print(f"  [VAD] 拼接 {len(speech_timestamps)} 个语音段，每段前后保留5%，中间去除90%非语音")
                 return concatenated
             return None
 

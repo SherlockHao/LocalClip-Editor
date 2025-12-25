@@ -8,7 +8,7 @@ import io
 if sys.stdout.encoding != 'utf-8':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
-from batch_retranslate import extract_translation_from_json
+from batch_retranslate_ollama import extract_translation_from_json
 
 
 def test_json_extraction():
@@ -41,6 +41,16 @@ def test_json_extraction():
         # 失败案例（使用fallback）
         ('完全不是JSON格式的很长的文本' * 20, "原文", "过长文本使用fallback"),
         ('', "原文", "空字符串使用fallback"),
+
+        # 特殊问题：返回 "translation" 关键词的情况（应该被过滤）
+        ('{"tr": "translation"}', "原文", "错误：JSON中只有关键词translation（应回退）"),
+        ('"translation"', "原文", "错误：只返回关键词translation（应回退）"),
+        ('The result is "translation"', "原文", "错误：描述中包含关键词（应回退）"),
+        ('{"key": "tr", "value": "translation"}', "原文", "错误：其他格式的关键词（应回退）"),
+
+        # 正常情况：包含"translation"但不是单独的关键词
+        ('{"tr": "translation guide"}', "translation guide", "正常：translation作为词组的一部分"),
+        ('{"tr": "机器翻译"}', "机器翻译", "正常：中文包含翻译字样"),
     ]
 
     passed = 0

@@ -29,6 +29,24 @@ import re
 from video_processor import VideoProcessor
 from srt_parser import SRTParser
 
+# 语言代码到中文名称的映射
+def get_language_name(language_code: str) -> str:
+    """
+    将语言代码转换为中文名称（用于LLM prompt）
+
+    Args:
+        language_code: 语言代码 (en, ko, ja 等)
+
+    Returns:
+        str: 语言的中文名称
+    """
+    language_map = {
+        'en': '英语',
+        'ko': '韩语',
+        'ja': '日语'
+    }
+    return language_map.get(language_code.lower(), language_code)
+
 # 添加对说话人识别功能的支持
 import sys
 import os
@@ -879,19 +897,39 @@ async def run_voice_cloning_process(
         }
         await asyncio.sleep(0.5)
 
-        from text_utils import check_translation_length
+        from text_utils import check_translation_length, contains_chinese_characters
 
         # 检查每句译文长度
+        # 日语、韩语因为使用假名/谚文，字符数会比汉字多，所以放宽限制
+        target_language_lower = target_language.lower()
+        is_japanese = ('日' in target_language or 'ja' in target_language_lower)
+        is_korean = ('韩' in target_language or 'ko' in target_language_lower or '한국' in target_language)
+
+        # 日语和韩语使用2.5倍，其他语言使用1.2倍
+        if is_japanese or is_korean:
+            max_ratio = 1.8
+        else:
+            max_ratio = 1.2
+
         too_long_items = []
         for idx, (source_sub, target_sub) in enumerate(zip(source_subtitles, target_subtitles)):
             source_text = source_sub["text"]
             target_text = target_sub["text"]
 
             is_too_long, source_len, target_len, ratio = check_translation_length(
-                source_text, target_text, target_language, max_ratio=1.2
+                source_text, target_text, target_language, max_ratio=max_ratio
             )
 
-            if is_too_long:
+            # 检查是否需要重新翻译
+            needs_retranslation = is_too_long
+
+            # 日语特殊规则：如果译文中包含汉字，需要重新翻译（要求使用假名）
+            if not needs_retranslation and is_japanese:
+                if contains_chinese_characters(target_text):
+                    needs_retranslation = True
+                    print(f"  [日语检查] 第 {idx} 条译文包含汉字，需要重新翻译: '{target_text}'")
+
+            if needs_retranslation:
                 too_long_items.append({
                     "index": idx,
                     "source": source_text,
@@ -917,12 +955,15 @@ async def run_voice_cloning_process(
             import json
             import subprocess
 
+            # 将语言代码转换为中文名称（用于LLM prompt）
+            target_language_name = get_language_name(target_language)
+
             retranslate_tasks = []
             for item in too_long_items:
                 retranslate_tasks.append({
                     "task_id": f"retrans-{item['index']}",
                     "source": item["source"],
-                    "target_language": target_language
+                    "target_language": target_language_name
                 })
 
             # 写入配置文件
@@ -1122,9 +1163,31 @@ async def run_voice_cloning_process(
         tasks = []
         cloned_results = []
 
-        print(f"\n[DEBUG] 准备任务列表，target_subtitles 中前3条文本:")
+        print(f"\n[DEBUG] 准备任务列表")
+        print(f"  speaker_labels 长度: {len(speaker_labels)}")
+        print(f"  target_subtitles 长度: {len(target_subtitles)}")
+        print(f"  target_subtitles 中前3条文本:")
         for i in range(min(3, len(target_subtitles))):
-            print(f"  [{i}] {target_subtitles[i]['text']}")
+            print(f"    [{i}] {target_subtitles[i]['text']}")
+
+        # 检查长度不一致的情况
+        if len(speaker_labels) != len(target_subtitles):
+            error_msg = (
+                f"❌ 字幕文件行数不匹配！\n"
+                f"   原语言字幕: {len(speaker_labels)} 条\n"
+                f"   目标语言字幕: {len(target_subtitles)} 条\n"
+                f"   💡 请确保两个字幕文件的行数完全一致（每一行原文对应一行译文）"
+            )
+            print(f"\n{error_msg}")
+
+            # 更新状态为失败
+            voice_cloning_status[task_id] = {
+                "status": "failed",
+                "message": f"字幕文件行数不匹配: 原文{len(speaker_labels)}条 vs 译文{len(target_subtitles)}条",
+                "progress": 0
+            }
+
+            raise ValueError(error_msg)
 
         for idx, (speaker_id, target_sub) in enumerate(zip(speaker_labels, target_subtitles)):
             target_text = target_sub["text"]
@@ -1613,19 +1676,18 @@ async def translate_text(request: TranslateTextRequest):
         import tempfile
         import os
 
-        # 获取正确的模型路径
-        backend_dir = os.path.dirname(os.path.abspath(__file__))
-        localclip_dir = os.path.dirname(backend_dir)
-        workspace_dir = os.path.dirname(localclip_dir)
-        # 创建临时配置文件
-        # 不指定模型路径，让 batch_retranslate.py 根据 GPU 显存自动选择
+        # 将语言代码转换为中文名称（用于LLM prompt）
+        target_language_name = get_language_name(request.target_language)
+        print(f"[翻译API] 语言代码: {request.target_language} -> {target_language_name}")
+
+        # 创建临时配置文件（使用 Ollama）
         config_data = {
             "tasks": [{
                 "task_id": "translate-1",
                 "source": request.text,
-                "target_language": request.target_language
+                "target_language": target_language_name
             }],
-            "num_processes": 1
+            "model": "qwen3:4b"
         }
 
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
@@ -1635,18 +1697,24 @@ async def translate_text(request: TranslateTextRequest):
         print(f"[翻译API] 创建临时配置文件: {config_file}")
 
         try:
-            # 使用 qwen_inference conda 环境
-            qwen_env_python = os.environ.get("QWEN_INFERENCE_PYTHON")
-            if not qwen_env_python:
+            # 使用 ui conda 环境（Ollama 方案）
+            ui_env_python = os.environ.get("UI_PYTHON")
+            if not ui_env_python:
                 import platform
                 if platform.system() == "Windows":
-                    qwen_env_python = r"C:\Users\7\miniconda3\envs\qwen_inference\python.exe"
+                    ui_env_python = r"C:\Users\7\miniconda3\envs\ui\python.exe"
                 else:
-                    qwen_env_python = os.path.expanduser("~/miniconda3/envs/qwen_inference/bin/python")
+                    ui_env_python = os.path.expanduser("~/miniconda3/envs/ui/bin/python")
 
-            # 调用批量翻译脚本
+            # 调用 Ollama 批量翻译脚本
+            batch_retranslate_script = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "batch_retranslate_ollama.py"
+            )
+
             print(f"[翻译API] 调用翻译脚本...")
-            print(f"[翻译API] Python可执行文件: {qwen_env_python}")
+            print(f"[翻译API] Python可执行文件: {ui_env_python}")
+            print(f"[翻译API] 翻译脚本: {batch_retranslate_script}")
             print(f"[翻译API] 工作目录: {os.path.dirname(__file__)}")
 
             # 使用 Popen 以实时获取输出
@@ -1655,7 +1723,7 @@ async def translate_text(request: TranslateTextRequest):
             import time as time_module
 
             process = subprocess.Popen(
-                [qwen_env_python, "batch_retranslate.py", config_file],
+                [ui_env_python, batch_retranslate_script, config_file],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -2027,8 +2095,8 @@ def _replan_audio_timeline(
 
         idx = seg['index']
 
-        # 计算最大可借用时间（原字幕时长的20%）
-        max_borrow = seg['target_duration'] * 0.2
+        # 计算最大可借用时间（原字幕时长的30%）
+        max_borrow = seg['target_duration'] * 0.5
 
         # 计算前后的可用空闲时间
         gap_before = 0

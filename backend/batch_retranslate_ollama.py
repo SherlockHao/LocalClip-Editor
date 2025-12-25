@@ -150,7 +150,11 @@ async def translate_sentence(
         dict: 翻译结果
     """
     # 构建 prompt - 使用 JSON 格式输出
-    prompt = f'请将以下中文翻译成{target_language}（口语化、极简），以 JSON 格式输出，Key 为 "tr"：\n\n{sentence}'
+    # 针对日语添加特殊要求：使用假名
+    if '日' in target_language or 'ja' in target_language.lower():
+        prompt = f'请将以下中文翻译成{target_language}（极简、字数极少、使用假名），以 JSON 格式输出，Key 为 "tr"：\n\n{sentence}'
+    else:
+        prompt = f'请将以下中文翻译成{target_language}（极简、字数极少），以 JSON 格式输出，Key 为 "tr"：\n\n{sentence}'
 
     try:
         start_time = time.time()
@@ -168,6 +172,10 @@ async def translate_sentence(
 
         # 提取 JSON 中的翻译结果
         translation = extract_translation_from_json(result, sentence)
+
+        # 调试：如果翻译结果是 "translation"，记录原始输出
+        if translation == "translation":
+            print(f"[调试] {task_id} 提取失败，原始模型输出: {result}", flush=True)
 
         return {
             "task_id": task_id,
@@ -203,7 +211,10 @@ def extract_translation_from_json(text: str, fallback: str = "") -> str:
         # 首先尝试直接解析整个文本为JSON
         data = json.loads(text)
         if isinstance(data, dict) and "tr" in data:
-            return data["tr"].strip()
+            result = data["tr"].strip()
+            # 过滤掉无效的关键词（如 "translation", "tr" 等）
+            if result.lower() not in ['translation', 'tr', 'key', 'value', '']:
+                return result
     except:
         pass
 
@@ -218,7 +229,8 @@ def extract_translation_from_json(text: str, fallback: str = "") -> str:
         match = re.search(pattern, text, re.DOTALL | re.IGNORECASE)
         if match:
             result = match.group(1).strip()
-            if result:
+            # 过滤掉无效的关键词
+            if result and result.lower() not in ['translation', 'tr', 'key', 'value']:
                 return result
 
     # 如果没有找到JSON格式，尝试查找引号中的内容
@@ -230,16 +242,19 @@ def extract_translation_from_json(text: str, fallback: str = "") -> str:
     for pattern in quote_patterns:
         matches = re.findall(pattern, text)
         if matches:
-            # 返回最长的匹配（通常是翻译结果）
-            longest = max(matches, key=len)
-            if len(longest) > len(fallback) / 2:
-                return longest.strip()
+            # 过滤掉 "tr", "translation" 等关键词
+            filtered_matches = [
+                m for m in matches
+                if m.lower() not in ['tr', 'translation', 'key', 'value']
+            ]
+            if filtered_matches:
+                # 返回最长的匹配（通常是翻译结果）
+                longest = max(filtered_matches, key=len)
+                if len(longest) > len(fallback) / 2:
+                    return longest.strip()
 
-    # 最后的回退：返回整个文本（去除可能的前缀）
-    cleaned = text.replace("翻译:", "").replace("译文:", "").strip()
-    if cleaned:
-        return cleaned
-
+    # 最后的回退：如果什么都没提取到，使用 fallback
+    # 不要盲目返回原始文本，因为可能包含无效内容（如JSON结构、关键词等）
     return fallback
 
 

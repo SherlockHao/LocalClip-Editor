@@ -89,6 +89,24 @@ def normalize_japanese(text: str) -> str:
     return normalized
 
 
+def contains_chinese_characters(text: str) -> bool:
+    """
+    检测文本中是否包含中文字（汉字）
+
+    注意：此函数检测CJK统一汉字，日文中也使用汉字，但比例较低。
+    主要用于检测日文翻译中是否有过多汉字（应该用假名代替）。
+
+    Args:
+        text: 待检测文本
+
+    Returns:
+        bool: 如果包含汉字返回 True，否则返回 False
+    """
+    # CJK统一汉字 Unicode 范围: 0x4E00-0x9FFF
+    # 这个范围包括了中文、日文、韩文中使用的汉字
+    return bool(re.search(r'[\u4e00-\u9fff]', text))
+
+
 def count_chinese_length(text: str) -> int:
     """
     计算中文文本的长度（只统计汉字）

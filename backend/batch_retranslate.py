@@ -249,7 +249,7 @@ def translate_task(
     language_name = language_map.get(target_language_lower, target_language)
 
     # JSON格式 prompt - 强制JSON输出避免思考过程
-    prompt = f'请将以下中文翻译成{language_name}（口语化、极简），以 JSON 格式输出，Key 为 "tr"：\n\n{source_text}'
+    prompt = f'请将以下中文翻译成{language_name}（极简、字数极少），以 JSON 格式输出，Key 为 "tr"：\n\n{source_text}'
     messages = [{"role": "user", "content": prompt}]
 
     print(f"\n[Task {task_id}] Prompt: {prompt}", flush=True)
