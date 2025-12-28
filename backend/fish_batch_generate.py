@@ -82,6 +82,8 @@ def main():
 
     # 逐个说话人批量处理
     all_results = {}
+    completed_tasks = 0  # 总体已完成任务数
+    total_tasks_count = len(tasks)  # 总任务数
 
     for speaker_idx, (speaker_id, speaker_tasks) in enumerate(tasks_by_speaker.items()):
         print(f"\n{'='*70}", file=sys.stderr)
@@ -153,6 +155,10 @@ def main():
 
                 all_results[segment_index] = output_file  # 使用整数作为键
 
+                # 更新总体进度
+                completed_tasks += 1
+                print(f"[BatchGen] 进度: {completed_tasks}/{total_tasks_count}", file=sys.stderr, flush=True)
+
                 # 清理显存
                 del codes, fake_audios, fake_audio
                 if torch.cuda.is_available():
@@ -162,6 +168,9 @@ def main():
                 print(f"[BatchGen] ❌ Error: {e}", file=sys.stderr)
                 import traceback
                 traceback.print_exc(file=sys.stderr)
+                # 即使失败也更新进度计数
+                completed_tasks += 1
+                print(f"[BatchGen] 进度: {completed_tasks}/{total_tasks_count}", file=sys.stderr, flush=True)
                 continue
 
         # 清理该说话人的 prompt tokens

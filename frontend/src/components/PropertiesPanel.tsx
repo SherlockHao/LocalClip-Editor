@@ -32,9 +32,12 @@ interface PropertiesPanelProps {
   targetLanguage: string;
   onTargetLanguageChange: (language: string) => void;
   targetSrtFilename: string | null;
-  onTargetSrtUpload: (file: File) => void;
+  onTranslateSubtitles: () => void;
+  isTranslating: boolean;
+  translationProgress: { message: string; progress: number } | null;
   onRunVoiceCloning: () => void;
   isProcessingVoiceCloning: boolean;
+  voiceCloningProgress: { message: string; progress: number } | null;
   speakerDiarizationCompleted: boolean;
 }
 
@@ -49,17 +52,14 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   targetLanguage,
   onTargetLanguageChange,
   targetSrtFilename,
-  onTargetSrtUpload,
+  onTranslateSubtitles,
+  isTranslating,
+  translationProgress,
   onRunVoiceCloning,
   isProcessingVoiceCloning,
+  voiceCloningProgress,
   speakerDiarizationCompleted
 }) => {
-  const handleTargetSrtFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      onTargetSrtUpload(e.target.files[0]);
-      e.target.value = '';
-    }
-  };
 
   // 判断语音克隆按钮是否可用
   const isVoiceCloningEnabled = speakerDiarizationCompleted &&
@@ -255,6 +255,9 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 <option value="en">英语</option>
                 <option value="ko">韩语</option>
                 <option value="ja">日语</option>
+                <option value="fr">法语</option>
+                <option value="de">德语</option>
+                <option value="es">西班牙语</option>
               </select>
               {!speakerDiarizationCompleted && (
                 <p className="text-xs text-slate-500 mt-1.5">
@@ -263,35 +266,60 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               )}
             </div>
 
-            {/* 上传目标语言SRT */}
+            {/* 翻译字幕按钮 */}
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-2">
                 目标语言字幕
               </label>
-              <label
-                className={`flex items-center justify-center w-full px-4 py-2.5 rounded-lg font-medium transition-all duration-200 cursor-pointer ${
-                  speakerDiarizationCompleted && targetLanguage
-                    ? 'bg-gradient-to-r from-slate-700 to-slate-600 text-slate-100 hover:bg-slate-600 hover:shadow-lg hover:shadow-slate-600/50'
+              <button
+                onClick={onTranslateSubtitles}
+                disabled={!speakerDiarizationCompleted || !targetLanguage || isTranslating}
+                className={`flex items-center justify-center w-full px-4 py-2.5 rounded-lg font-medium transition-all duration-200 ${
+                  speakerDiarizationCompleted && targetLanguage && !isTranslating
+                    ? 'bg-gradient-to-r from-purple-600 to-purple-500 text-white hover:shadow-lg hover:shadow-purple-500/50'
                     : 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-60'
                 }`}
               >
-                <FileText size={16} className="mr-2" />
-                <span>{targetSrtFilename ? '已上传 SRT' : '上传目标语言 SRT'}</span>
-                <input
-                  type="file"
-                  accept=".srt"
-                  onChange={handleTargetSrtFileSelect}
-                  disabled={!speakerDiarizationCompleted || !targetLanguage}
-                  className="hidden"
-                />
-              </label>
-              {targetSrtFilename && (
+                {isTranslating ? (
+                  <>
+                    <div className="spinner mr-2"></div>
+                    <span>翻译中...</span>
+                  </>
+                ) : targetSrtFilename ? (
+                  <>
+                    <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                    </svg>
+                    <span>翻译完成</span>
+                  </>
+                ) : (
+                  <>
+                    <FileText size={16} className="mr-2" />
+                    <span>翻译字幕</span>
+                  </>
+                )}
+              </button>
+              {targetSrtFilename && !isTranslating && (
                 <p className="text-xs text-green-400 mt-1.5 flex items-center gap-1">
                   <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                   </svg>
-                  目标字幕文件已上传
+                  已翻译为{targetLanguage === 'en' ? '英语' : targetLanguage === 'ko' ? '韩语' : targetLanguage === 'ja' ? '日语' : '法语'}
                 </p>
+              )}
+              {isTranslating && translationProgress && (
+                <div className="mt-2">
+                  <div className="flex justify-between text-xs text-slate-400 mb-1">
+                    <span>{translationProgress.message}</span>
+                    <span>{translationProgress.progress}%</span>
+                  </div>
+                  <div className="w-full bg-slate-700 rounded-full h-1.5">
+                    <div
+                      className="bg-gradient-to-r from-purple-600 to-purple-400 h-1.5 rounded-full transition-all duration-300"
+                      style={{ width: `${translationProgress.progress}%` }}
+                    ></div>
+                  </div>
+                </div>
               )}
             </div>
 
@@ -318,10 +346,19 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               )}
             </button>
 
-            {isProcessingVoiceCloning && (
+            {voiceCloningProgress && (
               <div className="mt-2.5 p-2.5 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-                <p className="text-xs text-blue-300 text-center font-medium">
-                  正在进行语音克隆，请稍候...
+                <p className="text-xs text-blue-300 text-center font-medium mb-2">
+                  {voiceCloningProgress.message}
+                </p>
+                <div className="w-full bg-slate-700 rounded-full h-1.5">
+                  <div
+                    className="bg-gradient-to-r from-blue-500 to-blue-400 h-1.5 rounded-full transition-all duration-300"
+                    style={{ width: `${voiceCloningProgress.progress}%` }}
+                  ></div>
+                </div>
+                <p className="text-xs text-blue-300 text-center mt-1">
+                  {voiceCloningProgress.progress}%
                 </p>
               </div>
             )}
@@ -339,7 +376,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                     {targetLanguage ? '✓' : '○'} 选择克隆语言
                   </li>
                   <li className={targetSrtFilename ? 'text-green-400' : ''}>
-                    {targetSrtFilename ? '✓' : '○'} 上传目标语言字幕
+                    {targetSrtFilename ? '✓' : '○'} 翻译任务
                   </li>
                 </ul>
               </div>

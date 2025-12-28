@@ -16,7 +16,7 @@ if dotenv_path.exists():
 else:
     print(f"[WARNING] 未找到 .env 文件: {dotenv_path}")
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Request
+from fastapi import FastAPI, File, UploadFile, HTTPException, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse, FileResponse
@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Optional, List, Dict
 import json
 import re
+import time
 
 from video_processor import VideoProcessor
 from srt_parser import SRTParser
@@ -43,7 +44,10 @@ def get_language_name(language_code: str) -> str:
     language_map = {
         'en': '英语',
         'ko': '韩语',
-        'ja': '日语'
+        'ja': '日语',
+        'fr': '法语',
+        'de': '德语',
+        'es': '西班牙语'
     }
     return language_map.get(language_code.lower(), language_code)
 
@@ -215,6 +219,9 @@ speaker_processing_status = {}
 
 # 全局变量用于存储语音克隆处理状态
 voice_cloning_status = {}
+
+# 全局变量用于存储翻译处理状态
+translation_status = {}
 
 # 全局缓存：存储已提取的音频片段信息，避免重复提取
 # key: (video_filename, subtitle_filename), value: {"audio_paths": [...], "speaker_labels": [...], "audio_dir": "..."}
@@ -692,7 +699,7 @@ async def run_voice_cloning_process(
             voice_cloning_status[task_id] = {
                 "status": "processing",
                 "message": "正在复用已提取的音频、说话人识别、MOS评分和性别识别结果...",
-                "progress": 35
+                "progress": 3
             }
         else:
             # 需要重新提取音频
@@ -702,7 +709,7 @@ async def run_voice_cloning_process(
             voice_cloning_status[task_id] = {
                 "status": "processing",
                 "message": "正在提取音频片段...",
-                "progress": 5
+                "progress": 2
             }
 
             # 1. 提取音频片段
@@ -714,7 +721,7 @@ async def run_voice_cloning_process(
             voice_cloning_status[task_id] = {
                 "status": "processing",
                 "message": "正在提取说话人嵌入...",
-                "progress": 15
+                "progress": 4
             }
 
             # 2. 提取嵌入
@@ -725,7 +732,7 @@ async def run_voice_cloning_process(
             voice_cloning_status[task_id] = {
                 "status": "processing",
                 "message": "正在识别说话人...",
-                "progress": 25
+                "progress": 7
             }
 
             # 3. 聚类识别说话人
@@ -746,7 +753,7 @@ async def run_voice_cloning_process(
             voice_cloning_status[task_id] = {
                 "status": "processing",
                 "message": "正在对音频片段进行质量评分...",
-                "progress": 35
+                "progress": 9
             }
 
             # 5. MOS打分（使用 NISQA）
@@ -756,11 +763,12 @@ async def run_voice_cloning_process(
         else:
             print(f"使用缓存的MOS评分结果")
 
-        # 更新状态：筛选和拼接音频
+        # 更新状态：筛选和拼接音频（无缓存：11%，有缓存：7%）
+        current_progress = 11 if not has_cached_mos else 7
         voice_cloning_status[task_id] = {
             "status": "processing",
             "message": "正在筛选和拼接说话人音频...",
-            "progress": 50
+            "progress": current_progress
         }
 
         # 6. 筛选、排序、拼接音频
@@ -771,11 +779,12 @@ async def run_voice_cloning_process(
             scored_segments, reference_output_dir
         )
 
-        # 更新状态：提取字幕文本
+        # 更新状态：提取字幕文本（无缓存：13%，有缓存：10%）
+        current_progress = 13 if not has_cached_mos else 10
         voice_cloning_status[task_id] = {
             "status": "processing",
             "message": "正在提取参考字幕文本...",
-            "progress": 65
+            "progress": current_progress
         }
 
         # 7. 提取字幕文本
@@ -813,15 +822,17 @@ async def run_voice_cloning_process(
         await asyncio.sleep(1)  # 给前端时间轮询
 
         # 使用新的简单批量克隆器（参照 batch_inference.py）
-        print("[Voice Clone] Using simple batch cloner (based on batch_inference.py)")
+        # 使用单进程模式以获得准确的进度信息
+        print("[Voice Clone] Using simple batch cloner (single-process mode for accurate progress)")
         from fish_simple_cloner import SimpleFishCloner
-        batch_cloner = SimpleFishCloner()
+        batch_cloner = SimpleFishCloner(use_multiprocess=False)
 
-        # 9. 批量编码所有说话人的参考音频
+        # 9. 批量编码所有说话人的参考音频（无缓存：15%，有缓存：13%）
+        current_progress = 15 if not has_cached_mos else 13
         voice_cloning_status[task_id] = {
             "status": "processing",
             "message": "正在批量编码说话人参考音频...",
-            "progress": 70
+            "progress": current_progress
         }
         await asyncio.sleep(0.5)
 
@@ -876,11 +887,12 @@ async def run_voice_cloning_process(
         else:
             print(f"  所有说话人都使用默认音色，无需编码")
 
-        # 10. 读取目标语言字幕
+        # 10. 读取目标语言字幕（无缓存：18%，有缓存：17%）
+        current_progress = 18 if not has_cached_mos else 17
         voice_cloning_status[task_id] = {
             "status": "processing",
             "message": "正在读取目标语言字幕...",
-            "progress": 75
+            "progress": current_progress
         }
         await asyncio.sleep(0.5)
 
@@ -889,27 +901,30 @@ async def run_voice_cloning_process(
         target_subtitles = srt_parser.parse_srt(target_subtitle_path)
         source_subtitles = srt_parser.parse_srt(source_subtitle_path)
 
-        # 10.5 验证译文长度并批量重新翻译超长文本
-        voice_cloning_status[task_id] = {
-            "status": "processing",
-            "message": "正在验证译文长度...",
-            "progress": 76
-        }
+        # 10.5 验证译文长度并批量重新翻译超长文本（保持在同一进度）
+        # current_progress 已在上一步设置，这里不再更新进度
+        voice_cloning_status[task_id]["message"] = "正在验证译文长度..."
         await asyncio.sleep(0.5)
 
         from text_utils import check_translation_length, contains_chinese_characters
 
         # 检查每句译文长度
         # 日语、韩语因为使用假名/谚文，字符数会比汉字多，所以放宽限制
+        # 法语、德语、西班牙语等欧洲语言也需要适当放宽，因为拉丁字母表达相同意思需要更多字符
         target_language_lower = target_language.lower()
         is_japanese = ('日' in target_language or 'ja' in target_language_lower)
         is_korean = ('韩' in target_language or 'ko' in target_language_lower or '한국' in target_language)
+        is_french = ('法' in target_language or 'fr' in target_language_lower or 'français' in target_language_lower)
+        is_german = ('德' in target_language or 'de' in target_language_lower or 'deutsch' in target_language_lower)
+        is_spanish = ('西班牙' in target_language or 'es' in target_language_lower or 'español' in target_language_lower or 'spanish' in target_language_lower)
 
-        # 日语和韩语使用2.5倍，其他语言使用1.2倍
+        # 不同语言使用不同的长度比例限制
         if is_japanese or is_korean:
-            max_ratio = 1.8
+            max_ratio = 3  # 日语/韩语：假名/谚文字符多
+        elif is_french or is_german or is_spanish:
+            max_ratio = 1.5  # 法语/德语/西班牙语：拉丁字母比英语略长
         else:
-            max_ratio = 1.2
+            max_ratio = 1.2  # 英语等其他语言
 
         too_long_items = []
         for idx, (source_sub, target_sub) in enumerate(zip(source_subtitles, target_subtitles)):
@@ -923,11 +938,13 @@ async def run_voice_cloning_process(
             # 检查是否需要重新翻译
             needs_retranslation = is_too_long
 
-            # 日语特殊规则：如果译文中包含汉字，需要重新翻译（要求使用假名）
-            if not needs_retranslation and is_japanese:
+            # 汉字检测规则：所有非中文语言的译文都不应包含汉字
+            # 这对于语音克隆非常重要，因为汉字会影响发音准确性
+            if not needs_retranslation:
                 if contains_chinese_characters(target_text):
                     needs_retranslation = True
-                    print(f"  [日语检查] 第 {idx} 条译文包含汉字，需要重新翻译: '{target_text}'")
+                    language_display = target_language if target_language else "目标语言"
+                    print(f"  [汉字检查] 第 {idx} 条 {language_display} 译文包含汉字，需要重新翻译: '{target_text}'")
 
             if needs_retranslation:
                 too_long_items.append({
@@ -943,10 +960,12 @@ async def run_voice_cloning_process(
         if too_long_items:
             print(f"\n⚠️  发现 {len(too_long_items)} 条超长译文，准备批量重新翻译...")
 
+            # 无缓存：19%，有缓存：18%
+            current_progress = 19 if not has_cached_mos else 18
             voice_cloning_status[task_id] = {
                 "status": "processing",
                 "message": f"正在批量重新翻译 {len(too_long_items)} 条超长文本...",
-                "progress": 77
+                "progress": current_progress
             }
             await asyncio.sleep(0.5)
 
@@ -1009,68 +1028,80 @@ async def run_voice_cloning_process(
                     print(f"[Retranslate] 启动批量重新翻译进程...\n")
                     print(f"[Retranslate] 命令: {ui_env_python} {batch_retranslate_script} {config_file}\n")
 
-                    # 使用 Popen 实时读取输出
-                    try:
-                        process = subprocess.Popen(
-                            [ui_env_python, batch_retranslate_script, config_file],
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT,  # 合并 stderr 到 stdout
-                            text=True,  # 文本模式
-                            encoding='utf-8',
-                            errors='replace',  # 忽略解码错误
-                            bufsize=1,  # 行缓冲
-                            universal_newlines=True
-                        )
-                        print(f"[Retranslate] 进程已启动，PID: {process.pid}\n")
-                    except Exception as e:
-                        print(f"❌ 启动进程失败: {e}")
-                        raise
-
-                    # 实时读取输出
-                    stdout_lines = []
-                    print("[Retranslate] ===== 开始实时输出 =====")
-
-                    try:
+                    # 在线程池中运行重新翻译subprocess（避免阻塞事件循环）
+                    def run_retranslation_subprocess():
+                        """在线程中运行重新翻译子进程"""
+                        import subprocess
                         import time
-                        start_time = time.time()
-                        timeout = 600  # 10分钟超时
 
-                        while True:
-                            # 检查超时
-                            if time.time() - start_time > timeout:
-                                process.kill()
-                                print("\n⚠️  重新翻译超时（10分钟），使用原译文继续...")
-                                break
+                        try:
+                            process = subprocess.Popen(
+                                [ui_env_python, batch_retranslate_script, config_file],
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT,  # 合并 stderr 到 stdout
+                                text=True,  # 文本模式
+                                encoding='utf-8',
+                                errors='replace',  # 忽略解码错误
+                                bufsize=1,  # 行缓冲
+                                universal_newlines=True
+                            )
+                            print(f"[Retranslate] 进程已启动，PID: {process.pid}\n")
+                        except Exception as e:
+                            print(f"❌ 启动进程失败: {e}")
+                            raise
 
-                            # 读取一行
-                            line = process.stdout.readline()
+                        # 实时读取输出
+                        stdout_lines = []
+                        print("[Retranslate] ===== 开始实时输出 =====")
 
-                            if line:
-                                # 实时打印
-                                print(line, end='', flush=True)
-                                stdout_lines.append(line)
-                            else:
-                                # 检查进程是否结束
-                                if process.poll() is not None:
+                        try:
+                            start_time = time.time()
+                            timeout = 600  # 10分钟超时
+
+                            while True:
+                                # 检查超时
+                                if time.time() - start_time > timeout:
+                                    process.kill()
+                                    print("\n⚠️  重新翻译超时（10分钟），使用原译文继续...")
                                     break
-                                time.sleep(0.1)
 
-                        # 读取剩余输出
-                        remaining = process.stdout.read()
-                        if remaining:
-                            print(remaining, end='', flush=True)
-                            stdout_lines.append(remaining)
+                                # 读取一行
+                                line = process.stdout.readline()
 
-                        returncode = process.wait()
-                        stdout = ''.join(stdout_lines)
+                                if line:
+                                    # 实时打印
+                                    print(line, end='', flush=True)
+                                    stdout_lines.append(line)
+                                else:
+                                    # 检查进程是否结束
+                                    if process.poll() is not None:
+                                        break
+                                    time.sleep(0.1)
 
-                    except Exception as e:
-                        process.kill()
-                        print(f"\n⚠️  读取输出时出错: {e}")
-                        stdout = ''.join(stdout_lines)
-                        returncode = -1
+                            # 读取剩余输出
+                            remaining = process.stdout.read()
+                            if remaining:
+                                print(remaining, end='', flush=True)
+                                stdout_lines.append(remaining)
 
-                    print("[Retranslate] ===== 实时输出结束 =====\n")
+                            returncode = process.wait()
+                            stdout = ''.join(stdout_lines)
+
+                        except Exception as e:
+                            process.kill()
+                            print(f"\n⚠️  读取输出时出错: {e}")
+                            stdout = ''.join(stdout_lines)
+                            returncode = -1
+
+                        print("[Retranslate] ===== 实时输出结束 =====\n")
+                        return returncode, stdout
+
+                    # 在线程池中执行
+                    loop = asyncio.get_event_loop()
+                    returncode, stdout = await loop.run_in_executor(
+                        None,  # 使用默认线程池
+                        run_retranslation_subprocess
+                    )
 
                     if returncode == 0 and stdout:
                         # 解析输出中的 JSON 结果
@@ -1148,11 +1179,46 @@ async def run_voice_cloning_process(
                     traceback.print_exc()
                     print("使用原译文继续...")
 
+        # 10.5. 数字替换：将阿拉伯数字转换为目标语言的发音
+        print(f"\n[数字替换] 开始检测并替换译文中的阿拉伯数字...")
+        from text_utils import replace_digits_in_text
+
+        # 获取目标语言代码（从语言名称映射回代码）
+        language_code_map = {
+            '英语': 'en',
+            '韩语': 'ko',
+            '日语': 'ja',
+            '法语': 'fr',
+            '德语': 'de',
+            '西班牙语': 'es'
+        }
+        target_lang_code = language_code_map.get(target_language, target_language.lower())
+
+        # 遍历所有译文，检测并替换数字
+        digits_replaced_count = 0
+        for idx, subtitle in enumerate(target_subtitles):
+            original_text = subtitle["text"]
+            replaced_text = replace_digits_in_text(original_text, target_lang_code)
+
+            if replaced_text != original_text:
+                subtitle["text"] = replaced_text
+                digits_replaced_count += 1
+                print(f"  [{idx}] '{original_text}' -> '{replaced_text}'")
+
+        if digits_replaced_count > 0:
+            print(f"\n✅ 成功替换 {digits_replaced_count} 条译文中的数字")
+            # 保存更新后的字幕文件
+            print(f"[数字替换] 保存更新后的字幕到: {target_subtitle_path}")
+            srt_parser.save_srt(target_subtitles, target_subtitle_path)
+            print(f"✅ 字幕文件已更新")
+        else:
+            print(f"ℹ️  未发现需要替换的数字")
+
         # 11. 准备批量生成任务
         voice_cloning_status[task_id] = {
             "status": "processing",
             "message": "正在批量生成克隆语音...",
-            "progress": 80
+            "progress": 20
         }
         await asyncio.sleep(0.5)
 
@@ -1214,14 +1280,33 @@ async def run_voice_cloning_process(
 
         # 批量生成所有语音
         print(f"\n🚀 批量生成 {len(tasks)} 个语音片段...")
+
+        # 定义进度回调函数
+        def voice_cloning_progress_callback(current, total):
+            # 20-95% 的进度用于语音生成（前20%给前置操作，后80%给克隆）
+            progress = 20 + int((current / total) * 75)
+            voice_cloning_status[task_id]["progress"] = progress
+            voice_cloning_status[task_id]["message"] = f"正在生成语音... ({current}/{total})"
+            # 调试日志已移除 - 减少日志输出
+
         # 将生成脚本保存到audio_dir下的scripts目录，避免触发uvicorn reload
         script_dir = os.path.join(audio_dir, "scripts")
-        generated_audio_files = batch_cloner.batch_generate_audio(
-            tasks,
-            speaker_npy_files,
-            speaker_references,
-            cloned_audio_dir,
-            script_dir=script_dir
+
+        # 在线程池中运行语音生成（避免阻塞事件循环）
+        def run_batch_generation():
+            return batch_cloner.batch_generate_audio(
+                tasks,
+                speaker_npy_files,
+                speaker_references,
+                cloned_audio_dir,
+                script_dir=script_dir,
+                progress_callback=voice_cloning_progress_callback
+            )
+
+        loop = asyncio.get_event_loop()
+        generated_audio_files = await loop.run_in_executor(
+            None,  # 使用默认线程池
+            run_batch_generation
         )
 
         # 调试：打印生成结果
@@ -1348,7 +1433,9 @@ async def get_voice_cloning_status(task_id: str):
     if task_id not in voice_cloning_status:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    return voice_cloning_status[task_id]
+    status = voice_cloning_status[task_id]
+    # 调试日志已移除 - 减少日志输出
+    return status
 
 
 @app.get("/voice-cloning/default-voices")
@@ -1463,6 +1550,11 @@ class RegenerateSegmentRequest(BaseModel):
 
 class TranslateTextRequest(BaseModel):
     text: str
+    target_language: str
+
+
+class BatchTranslateRequest(BaseModel):
+    source_subtitle_filename: str
     target_language: str
 
 
@@ -1687,7 +1779,7 @@ async def translate_text(request: TranslateTextRequest):
                 "source": request.text,
                 "target_language": target_language_name
             }],
-            "model": "qwen3:4b"
+            "model": "qwen2.5:7b"  # 使用 qwen2.5:7b 避免 qwen3 的思考延迟
         }
 
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
@@ -1846,6 +1938,308 @@ async def translate_text(request: TranslateTextRequest):
         traceback.print_exc()
         # 异常时返回原文，不抛出HTTP异常
         return {"translation": request.text, "error": str(e)}
+
+
+@app.post("/translate/batch")
+async def batch_translate_subtitles(request: BatchTranslateRequest, background_tasks: BackgroundTasks):
+    """批量翻译字幕文件"""
+    print(f"\n[批量翻译] 收到请求")
+    print(f"[批量翻译] 原文字幕: {request.source_subtitle_filename}")
+    print(f"[批量翻译] 目标语言: {request.target_language}")
+
+    try:
+        import uuid
+
+        # 生成唯一任务ID
+        task_id = str(uuid.uuid4())
+
+        # 初始化翻译状态
+        translation_status[task_id] = {
+            "status": "processing",
+            "message": "正在准备翻译...",
+            "progress": 0,
+            "source_subtitle_filename": request.source_subtitle_filename,
+            "target_language": request.target_language
+        }
+
+        # 在后台执行翻译任务
+        print(f"[批量翻译] 添加后台任务: {task_id}", flush=True)
+        background_tasks.add_task(
+            run_batch_translation,
+            task_id,
+            request.source_subtitle_filename,
+            request.target_language
+        )
+
+        print(f"[批量翻译] 返回响应给前端: {task_id}", flush=True)
+        return {"task_id": task_id, "message": "翻译任务已启动"}
+
+    except Exception as e:
+        print(f"[批量翻译] 启动失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/translate/status/{task_id}")
+async def get_translation_status(task_id: str):
+    """获取翻译状态"""
+    if task_id not in translation_status:
+        raise HTTPException(status_code=404, detail="翻译任务不存在")
+
+    status = translation_status[task_id]
+    # 调试日志已移除 - 减少日志输出
+    return status
+
+
+async def run_batch_translation(task_id: str, source_subtitle_filename: str, target_language: str):
+    """执行批量翻译任务（后台任务）"""
+    try:
+        import json
+        import subprocess
+        import tempfile
+        import os
+        import re
+
+        print(f"\n[批量翻译-{task_id}] 开始翻译任务")
+
+        # 更新状态
+        translation_status[task_id]["message"] = "正在读取原文字幕..."
+        translation_status[task_id]["progress"] = 5
+
+        # 读取原文字幕
+        source_srt_path = UPLOADS_DIR / source_subtitle_filename
+
+        if not os.path.exists(source_srt_path):
+            raise FileNotFoundError(f"原文字幕文件不存在: {source_srt_path}")
+
+        # 解析SRT文件
+        with open(source_srt_path, 'r', encoding='utf-8') as f:
+            source_content = f.read()
+
+        # 提取所有字幕文本
+        subtitle_pattern = r'(\d+)\n(\d{2}:\d{2}:\d{2},\d{3}) --> (\d{2}:\d{2}:\d{2},\d{3})\n((?:.*\n?)+?)(?=\n\d+\n|\n*$)'
+        matches = re.findall(subtitle_pattern, source_content)
+
+        if not matches:
+            raise ValueError("无法解析SRT文件")
+
+        subtitles = []
+        for index, start_time, end_time, text in matches:
+            text = text.strip()
+            subtitles.append({
+                "index": int(index) - 1,  # 转为0基索引
+                "start_time": start_time,
+                "end_time": end_time,
+                "text": text
+            })
+
+        print(f"[批量翻译-{task_id}] 共 {len(subtitles)} 条字幕需要翻译")
+
+        # 记录开始时间
+        translation_start_time = time.time()
+
+        # 更新状态
+        translation_status[task_id]["message"] = f"正在翻译 {len(subtitles)} 条字幕..."
+        translation_status[task_id]["progress"] = 10
+
+        # 将语言代码转换为中文名称
+        target_language_name = get_language_name(target_language)
+        print(f"[批量翻译-{task_id}] 目标语言: {target_language} -> {target_language_name}")
+
+        # 创建翻译任务列表
+        translate_tasks = []
+        for sub in subtitles:
+            translate_tasks.append({
+                "task_id": f"tr-{sub['index']}",
+                "source": sub["text"],
+                "target_language": target_language_name
+            })
+
+        # 创建临时配置文件
+        config_data = {
+            "tasks": translate_tasks,
+            "model": "qwen2.5:7b"  # 使用 qwen2.5:7b 避免 qwen3 的思考延迟
+        }
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
+            json.dump(config_data, f, ensure_ascii=False)
+            config_file = f.name
+
+        print(f"[批量翻译-{task_id}] 配置文件: {config_file}")
+
+        try:
+            # 获取Python可执行文件路径
+            ui_env_python = os.environ.get("UI_PYTHON")
+            if not ui_env_python:
+                import platform
+                if platform.system() == "Windows":
+                    ui_env_python = r"C:\Users\7\miniconda3\envs\ui\python.exe"
+                else:
+                    ui_env_python = os.path.expanduser("~/miniconda3/envs/ui/bin/python")
+
+            # 调用翻译脚本
+            batch_translate_script = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "batch_translate_ollama.py"
+            )
+
+            print(f"[批量翻译-{task_id}] 调用翻译脚本...")
+            print(f"[批量翻译-{task_id}] Python: {ui_env_python}")
+            print(f"[批量翻译-{task_id}] 脚本: {batch_translate_script}")
+
+            # 启动翻译进程（使用线程池避免阻塞）
+            import asyncio
+            from concurrent.futures import ThreadPoolExecutor
+            env = os.environ.copy()
+            env['PYTHONUNBUFFERED'] = '1'
+
+            def run_translation_subprocess():
+                """在线程中运行翻译子进程"""
+                import subprocess
+                process = subprocess.Popen(
+                    [ui_env_python, batch_translate_script, config_file],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding='utf-8',
+                    cwd=os.path.dirname(__file__),
+                    bufsize=1,
+                    env=env
+                )
+
+                stdout_lines = []
+                stderr_lines = []
+
+                # 实时读取输出并更新进度
+                for line in process.stdout:
+                    line = line.rstrip('\n')
+                    print(f"[翻译脚本-{task_id}] {line}", flush=True)
+                    stdout_lines.append(line)
+
+                    # 解析进度 - 匹配格式: [1/46] ✓ tr-0: ...
+                    if line.startswith('[') and '/' in line and ']' in line:
+                        try:
+                            # 例如: [5/30] ✓ tr-4: ...
+                            parts = line.split(']')[0].strip('[').split('/')
+                            current = int(parts[0])
+                            total = int(parts[1])
+                            progress = 10 + int((current / total) * 80)  # 10-90%
+                            translation_status[task_id]["progress"] = progress
+                            translation_status[task_id]["message"] = f"正在翻译... ({current}/{total})"
+                            print(f"[批量翻译-{task_id}] 更新进度: {current}/{total} -> {progress}%")
+                        except Exception as e:
+                            print(f"[批量翻译-{task_id}] 解析进度失败: {e}, 行内容: {line}")
+
+                # 等待进程结束并获取返回码
+                return_code = process.wait()
+
+                # 如果有错误，读取stderr
+                if return_code != 0:
+                    stderr_output = process.stderr.read()
+                    stderr_lines.append(stderr_output)
+
+                return return_code, stdout_lines, stderr_lines
+
+            # 在线程池中运行子进程（避免阻塞事件循环）
+            loop = asyncio.get_event_loop()
+            return_code, stdout_lines, stderr_lines = await loop.run_in_executor(
+                None,  # 使用默认线程池
+                run_translation_subprocess
+            )
+
+            if return_code != 0:
+                stderr_output = '\n'.join(stderr_lines)
+                print(f"[批量翻译-{task_id}] 错误: {stderr_output}")
+                raise Exception(f"翻译脚本失败: {stderr_output}")
+
+            # 更新状态
+            translation_status[task_id]["message"] = "正在保存翻译结果..."
+            translation_status[task_id]["progress"] = 90
+
+            # 解析翻译结果
+            output_text = '\n'.join(stdout_lines)
+
+            # 查找JSON结果
+            json_started = False
+            json_lines = []
+
+            for line in stdout_lines:
+                if '翻译结果（JSON）' in line or 'FINAL RESULTS' in line:
+                    json_started = True
+                    continue
+                if json_started:
+                    if line.strip().startswith('='):
+                        continue
+                    if line.strip().startswith('['):
+                        json_lines.append(line)
+                    elif len(json_lines) > 0:
+                        json_lines.append(line)
+                        if line.strip().endswith(']'):
+                            break
+
+            json_text = '\n'.join(json_lines).strip()
+            results = json.loads(json_text)
+
+            print(f"[批量翻译-{task_id}] 解析到 {len(results)} 条翻译结果")
+
+            # 创建翻译后的SRT文件
+            translated_subtitles = []
+            for result in results:
+                task_index = int(result["task_id"].split('-')[-1])
+                original_sub = subtitles[task_index]
+
+                translated_subtitles.append({
+                    "index": original_sub["index"],
+                    "start_time": original_sub["start_time"],
+                    "end_time": original_sub["end_time"],
+                    "text": result["translation"]
+                })
+
+            # 按索引排序
+            translated_subtitles.sort(key=lambda x: x["index"])
+
+            # 生成SRT内容
+            srt_content = ""
+            for sub in translated_subtitles:
+                srt_content += f"{sub['index'] + 1}\n"
+                srt_content += f"{sub['start_time']} --> {sub['end_time']}\n"
+                srt_content += f"{sub['text']}\n\n"
+
+            # 保存翻译后的SRT文件
+            target_srt_filename = f"translated_{target_language}_{os.path.splitext(source_subtitle_filename)[0]}.srt"
+            target_srt_path = UPLOADS_DIR / target_srt_filename
+
+            with open(target_srt_path, 'w', encoding='utf-8') as f:
+                f.write(srt_content)
+
+            print(f"[批量翻译-{task_id}] 翻译完成，保存到: {target_srt_path}")
+
+            # 计算总耗时
+            translation_elapsed = time.time() - translation_start_time
+            print(f"[批量翻译-{task_id}] ✓ 翻译完成！总耗时: {translation_elapsed:.2f}秒")
+
+            # 更新状态为完成
+            translation_status[task_id]["status"] = "completed"
+            translation_status[task_id]["message"] = "翻译完成"
+            translation_status[task_id]["progress"] = 100
+            translation_status[task_id]["target_srt_filename"] = target_srt_filename
+            translation_status[task_id]["total_items"] = len(subtitles)
+            translation_status[task_id]["elapsed_time"] = round(translation_elapsed, 2)
+            translation_status[task_id]["avg_time"] = round(translation_elapsed / len(subtitles), 2) if len(subtitles) > 0 else 0
+
+        finally:
+            # 删除临时配置文件
+            if os.path.exists(config_file):
+                os.remove(config_file)
+
+    except Exception as e:
+        print(f"[批量翻译-{task_id}] 失败: {str(e)}")
+        import traceback
+        traceback.print_exc()
+
+        translation_status[task_id]["status"] = "failed"
+        translation_status[task_id]["message"] = f"翻译失败: {str(e)}"
 
 
 @app.post("/voice-cloning/regenerate-segment")

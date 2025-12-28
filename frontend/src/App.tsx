@@ -51,6 +51,8 @@ const App: React.FC = () => {
   const [isProcessingSpeakerDiarization, setIsProcessingSpeakerDiarization] = useState(false);
   const [speakerDiarizationTaskId, setSpeakerDiarizationTaskId] = useState<string | null>(null);
   const [speakerDiarizationProgress, setSpeakerDiarizationProgress] = useState({ message: '', progress: 0 });
+  const speakerDiarizationProgressTimer = useRef<NodeJS.Timeout | null>(null);
+  const lastRealProgress = useRef<number>(0);
   const [showNotification, setShowNotification] = useState(false);
   const [notificationData, setNotificationData] = useState({
     title: '',
@@ -63,7 +65,14 @@ const App: React.FC = () => {
   // 语音克隆相关状态
   const [targetLanguage, setTargetLanguage] = useState<string>('');
   const [targetSrtFilename, setTargetSrtFilename] = useState<string | null>(null);
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [translationProgress, setTranslationProgress] = useState<{message: string, progress: number} | null>(null);
+  const translationProgressTimer = useRef<NodeJS.Timeout | null>(null);
+  const lastTranslationProgress = useRef<number>(0);
   const [isProcessingVoiceCloning, setIsProcessingVoiceCloning] = useState(false);
+  const [voiceCloningProgress, setVoiceCloningProgress] = useState<{message: string, progress: number} | null>(null);
+  const voiceCloningProgressTimer = useRef<NodeJS.Timeout | null>(null);
+  const lastVoiceCloningProgress = useRef<number>(0);
   const [voiceCloningTaskId, setVoiceCloningTaskId] = useState<string | null>(null);
   const [isStitchingAudio, setIsStitchingAudio] = useState(false);
   const [stitchedAudioPath, setStitchedAudioPath] = useState<string | null>(null);
@@ -126,6 +135,36 @@ const App: React.FC = () => {
       document.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isDraggingProgress, duration]);
+
+  // 清理说话人识别进度定时器
+  useEffect(() => {
+    return () => {
+      if (speakerDiarizationProgressTimer.current) {
+        clearInterval(speakerDiarizationProgressTimer.current);
+        speakerDiarizationProgressTimer.current = null;
+      }
+    };
+  }, []);
+
+  // 清理翻译进度定时器
+  useEffect(() => {
+    return () => {
+      if (translationProgressTimer.current) {
+        clearInterval(translationProgressTimer.current);
+        translationProgressTimer.current = null;
+      }
+    };
+  }, []);
+
+  // 清理语音克隆进度定时器
+  useEffect(() => {
+    return () => {
+      if (voiceCloningProgressTimer.current) {
+        clearInterval(voiceCloningProgressTimer.current);
+        voiceCloningProgressTimer.current = null;
+      }
+    };
+  }, []);
 
   const handleProgressBarMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     setIsDraggingProgress(true);
@@ -340,6 +379,13 @@ const App: React.FC = () => {
     }
 
     try {
+      // 清理之前的定时器
+      if (speakerDiarizationProgressTimer.current) {
+        clearInterval(speakerDiarizationProgressTimer.current);
+        speakerDiarizationProgressTimer.current = null;
+      }
+      lastRealProgress.current = 0;
+
       setIsProcessingSpeakerDiarization(true);
       setSpeakerDiarizationProgress({ message: '初始化中...', progress: 0 });
 
@@ -381,13 +427,52 @@ const App: React.FC = () => {
       const status = await response.json();
       console.log('收到状态:', status);
 
-      // 更新进度信息
-      setSpeakerDiarizationProgress({
-        message: status.message || '处理中...',
-        progress: status.progress || 0
-      });
+      const realProgress = status.progress || 0;
+
+      // 如果真实进度大于上次的真实进度，更新并停止模拟
+      if (realProgress > lastRealProgress.current) {
+        lastRealProgress.current = realProgress;
+
+        // 清除之前的模拟定时器
+        if (speakerDiarizationProgressTimer.current) {
+          clearInterval(speakerDiarizationProgressTimer.current);
+          speakerDiarizationProgressTimer.current = null;
+        }
+
+        // 立即更新到真实进度
+        setSpeakerDiarizationProgress({
+          message: status.message || '处理中...',
+          progress: realProgress
+        });
+
+        // 如果还没有完成，启动新的模拟进度增长
+        if (status.status === 'processing') {
+          speakerDiarizationProgressTimer.current = setInterval(() => {
+            setSpeakerDiarizationProgress(prev => {
+              // 每2秒增加1%，但不超过真实进度的下一个阶段
+              const nextProgress = Math.min(prev.progress + 1, 99);
+              return {
+                ...prev,
+                progress: nextProgress
+              };
+            });
+          }, 2000);
+        }
+      } else {
+        // 真实进度没有变化，只更新消息
+        setSpeakerDiarizationProgress(prev => ({
+          message: status.message || prev.message,
+          progress: prev.progress
+        }));
+      }
 
       if (status.status === 'completed') {
+        // 清除模拟定时器
+        if (speakerDiarizationProgressTimer.current) {
+          clearInterval(speakerDiarizationProgressTimer.current);
+          speakerDiarizationProgressTimer.current = null;
+        }
+        lastRealProgress.current = 0;
         if (status.speaker_labels) {
           const updatedSubtitles = subtitles.map((subtitle, index) => {
             const speakerId = status.speaker_labels[index];
@@ -416,6 +501,13 @@ const App: React.FC = () => {
         });
         setShowNotification(true);
       } else if (status.status === 'failed') {
+        // 清除模拟定时器
+        if (speakerDiarizationProgressTimer.current) {
+          clearInterval(speakerDiarizationProgressTimer.current);
+          speakerDiarizationProgressTimer.current = null;
+        }
+        lastRealProgress.current = 0;
+
         // 显示失败通知，包含失败前的耗时
         const durationInfo = status.duration_str ? ` (失败前耗时: ${status.duration_str})` : '';
         const errorMessage = status.message || '处理过程中发生错误，请重试。';
@@ -432,13 +524,20 @@ const App: React.FC = () => {
         setTimeout(() => pollSpeakerDiarizationStatus(taskId), 2000);
       }
     } catch (error) {
+      // 清除模拟定时器
+      if (speakerDiarizationProgressTimer.current) {
+        clearInterval(speakerDiarizationProgressTimer.current);
+        speakerDiarizationProgressTimer.current = null;
+      }
+      lastRealProgress.current = 0;
+
       alert('获取说话人识别状态失败: ' + (error as Error).message);
       setIsProcessingSpeakerDiarization(false);
       setSpeakerDiarizationTaskId(null);
     }
   };
 
-  // 处理目标语言srt文件上传
+  // 处理目标语言srt文件上传（已废弃，保留以防需要）
   const handleTargetSrtUpload = async (file: File) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -457,6 +556,142 @@ const App: React.FC = () => {
       setTargetSrtFilename(result.filename);
     } catch (error) {
       alert('上传目标语言字幕失败: ' + (error as Error).message);
+    }
+  };
+
+  // 翻译字幕
+  const handleTranslateSubtitles = async () => {
+    if (!subtitleFilename) {
+      alert('请先上传原始SRT字幕文件');
+      return;
+    }
+
+    if (!targetLanguage) {
+      alert('请选择目标语言');
+      return;
+    }
+
+    try {
+      // 清理之前的定时器
+      if (translationProgressTimer.current) {
+        clearInterval(translationProgressTimer.current);
+        translationProgressTimer.current = null;
+      }
+      lastTranslationProgress.current = 0;
+
+      console.log('[启动翻译] 开始调用API');
+      setIsTranslating(true);
+      setTranslationProgress({ message: '正在准备翻译...', progress: 0 });
+
+      console.log('[启动翻译] 发送请求到 /api/translate/batch');
+      const response = await fetch('/api/translate/batch', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          source_subtitle_filename: subtitleFilename,
+          target_language: targetLanguage,
+        }),
+      });
+
+      console.log('[启动翻译] 收到HTTP响应, status:', response.status);
+
+      if (!response.ok) {
+        throw new Error(`翻译失败: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      console.log('[启动翻译] 解析JSON完成, 收到响应:', result);
+
+      // 开始轮询翻译状态
+      console.log('[启动翻译] 开始轮询, taskId:', result.task_id);
+      pollTranslationStatus(result.task_id);
+    } catch (error) {
+      alert('启动翻译失败: ' + (error as Error).message);
+      setIsTranslating(false);
+      setTranslationProgress(null);
+    }
+  };
+
+  // 轮询翻译状态
+  const pollTranslationStatus = async (taskId: string) => {
+    console.log('[翻译轮询] 开始轮询, taskId:', taskId);
+    try {
+      const response = await fetch(`/api/translate/status/${taskId}`);
+
+      if (!response.ok) {
+        console.error('[翻译轮询] HTTP错误:', response.status, response.statusText);
+        throw new Error(`获取翻译状态失败: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      const realProgress = result.progress || 0;
+
+      console.log('[翻译轮询]', {
+        status: result.status,
+        progress: realProgress,
+        message: result.message
+      });
+
+      if (result.status === 'processing') {
+        // 直接使用真实进度，不再使用模拟增长
+        setTranslationProgress({
+          message: result.message || '翻译中...',
+          progress: realProgress
+        });
+        console.log('[翻译轮询] 设置进度:', realProgress);
+
+        setTimeout(() => pollTranslationStatus(taskId), 1000);
+      } else if (result.status === 'completed') {
+        // 清除模拟定时器
+        if (translationProgressTimer.current) {
+          clearInterval(translationProgressTimer.current);
+          translationProgressTimer.current = null;
+        }
+        lastTranslationProgress.current = 0;
+
+        setTranslationProgress({ message: '翻译完成', progress: 100 });
+        setTargetSrtFilename(result.target_srt_filename);
+        setIsTranslating(false);
+
+        // 显示完成通知
+        const totalItems = result.total_items || 0;
+        const elapsedTime = result.elapsed_time || 0;
+        const avgTime = result.avg_time || 0;
+
+        setNotificationData({
+          title: '翻译完成',
+          message: `已成功翻译 ${totalItems} 条字幕\n总耗时: ${elapsedTime}秒\n平均耗时: ${avgTime}秒/条`,
+          uniqueSpeakers: undefined
+        });
+        setShowNotification(true);
+
+        setTimeout(() => setTranslationProgress(null), 2000);
+      } else if (result.status === 'failed') {
+        // 清除模拟定时器
+        if (translationProgressTimer.current) {
+          clearInterval(translationProgressTimer.current);
+          translationProgressTimer.current = null;
+        }
+        lastTranslationProgress.current = 0;
+
+        throw new Error(result.message || '翻译失败');
+      }
+    } catch (error) {
+      console.error('[翻译轮询] 捕获到错误:', error);
+      // 清除模拟定时器
+      if (translationProgressTimer.current) {
+        clearInterval(translationProgressTimer.current);
+        translationProgressTimer.current = null;
+      }
+      lastTranslationProgress.current = 0;
+
+      alert('翻译失败: ' + (error as Error).message);
+      setIsTranslating(false);
+      setTranslationProgress(null);
     }
   };
 
@@ -484,6 +719,14 @@ const App: React.FC = () => {
 
     try {
       setIsProcessingVoiceCloning(true);
+
+      // 清除旧的进度定时器并重置进度
+      if (voiceCloningProgressTimer.current) {
+        clearInterval(voiceCloningProgressTimer.current);
+        voiceCloningProgressTimer.current = null;
+      }
+      lastVoiceCloningProgress.current = 0;
+      setVoiceCloningProgress({ message: '正在启动语音克隆...', progress: 0 });
 
       const response = await fetch('/api/voice-cloning/process', {
         method: 'POST',
@@ -778,8 +1021,32 @@ const App: React.FC = () => {
       }
 
       const status = await response.json();
+      const realProgress = status.progress || 0;
 
-      if (status.status === 'completed') {
+      console.log('[语音克隆轮询]', {
+        status: status.status,
+        progress: realProgress,
+        message: status.message
+      });
+
+      if (status.status === 'processing') {
+        // 直接使用真实进度，不再使用模拟增长
+        setVoiceCloningProgress({
+          message: status.message || '语音克隆中...',
+          progress: realProgress
+        });
+        console.log('[语音克隆轮询] 设置进度:', realProgress);
+
+        setTimeout(() => pollVoiceCloningStatus(taskId), 1000);
+      } else if (status.status === 'completed') {
+        // 清除定时器并重置
+        if (voiceCloningProgressTimer.current) {
+          clearInterval(voiceCloningProgressTimer.current);
+          voiceCloningProgressTimer.current = null;
+        }
+        lastVoiceCloningProgress.current = 0;
+
+        setVoiceCloningProgress({ message: '语音克隆完成', progress: 100 });
         setIsProcessingVoiceCloning(false);
 
         // 更新字幕数据，添加目标语言文本和克隆音频路径
@@ -811,7 +1078,17 @@ const App: React.FC = () => {
           uniqueSpeakers: undefined
         });
         setShowNotification(true);
+
+        // 2秒后清除进度条
+        setTimeout(() => setVoiceCloningProgress(null), 2000);
       } else if (status.status === 'failed') {
+        // 清除定时器并重置
+        if (voiceCloningProgressTimer.current) {
+          clearInterval(voiceCloningProgressTimer.current);
+          voiceCloningProgressTimer.current = null;
+        }
+        lastVoiceCloningProgress.current = 0;
+
         // 显示失败通知，包含失败前的耗时
         const durationInfo = status.duration_str ? ` (失败前耗时: ${status.duration_str})` : '';
         const errorMessage = status.message || '处理过程中发生错误，请重试。';
@@ -823,13 +1100,22 @@ const App: React.FC = () => {
         setShowNotification(true);
 
         setIsProcessingVoiceCloning(false);
+        setVoiceCloningProgress(null);
         setVoiceCloningTaskId(null);
       } else {
-        setTimeout(() => pollVoiceCloningStatus(taskId), 2000);
+        setTimeout(() => pollVoiceCloningStatus(taskId), 1000);
       }
     } catch (error) {
+      // 清除定时器并重置
+      if (voiceCloningProgressTimer.current) {
+        clearInterval(voiceCloningProgressTimer.current);
+        voiceCloningProgressTimer.current = null;
+      }
+      lastVoiceCloningProgress.current = 0;
+
       alert('获取语音克隆状态失败: ' + (error as Error).message);
       setIsProcessingVoiceCloning(false);
+      setVoiceCloningProgress(null);
       setVoiceCloningTaskId(null);
     }
   };
@@ -1084,9 +1370,12 @@ const App: React.FC = () => {
           targetLanguage={targetLanguage}
           onTargetLanguageChange={setTargetLanguage}
           targetSrtFilename={targetSrtFilename}
-          onTargetSrtUpload={handleTargetSrtUpload}
+          onTranslateSubtitles={handleTranslateSubtitles}
+          isTranslating={isTranslating}
+          translationProgress={translationProgress}
           onRunVoiceCloning={handleRunVoiceCloning}
           isProcessingVoiceCloning={isProcessingVoiceCloning}
+          voiceCloningProgress={voiceCloningProgress}
           speakerDiarizationCompleted={subtitles.some(s => s.speaker_id !== undefined)}
         />
       </div>

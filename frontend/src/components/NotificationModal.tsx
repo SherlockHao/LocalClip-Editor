@@ -40,7 +40,7 @@ const NotificationModal: React.FC<NotificationModalProps> = ({
 
         {/* 内容 */}
         <div className="p-6 space-y-4">
-          <p className="text-slate-300 text-sm leading-relaxed">
+          <p className="text-slate-300 text-sm leading-relaxed whitespace-pre-line">
             {message}
           </p>
 

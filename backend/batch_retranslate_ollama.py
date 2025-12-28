@@ -92,7 +92,7 @@ def ensure_ollama_running():
         return True
 
 
-def unload_ollama_model(model: str = "qwen3:4b"):
+def unload_ollama_model(model: str = "qwen2.5:7b"):
     """
     卸载 Ollama 模型，释放 GPU 显存
 
@@ -134,7 +134,7 @@ async def translate_sentence(
     sentence: str,
     target_language: str,
     task_id: str,
-    model: str = "qwen3:4b"
+    model: str = "qwen2.5:7b"
 ) -> Dict[str, Any]:
     """
     单个翻译任务（异步）
@@ -152,9 +152,11 @@ async def translate_sentence(
     # 构建 prompt - 使用 JSON 格式输出
     # 针对日语添加特殊要求：使用假名
     if '日' in target_language or 'ja' in target_language.lower():
-        prompt = f'请将以下中文翻译成{target_language}（极简、字数极少、使用假名），以 JSON 格式输出，Key 为 "tr"：\n\n{sentence}'
+        prompt = f'将中文翻译成{target_language}。要求：汉字强制用假名、语义尽量保证、输出极简、字数极少。返回 JSON 对象，Key 为 "tr"：\n\n{sentence}'
+    elif '韩' in target_language or 'ko' in target_language.lower():
+        prompt = f'将中文翻译成{target_language}。要求：不含汉字、语义尽量保证、输出极简、字数极少。返回 JSON 对象，Key 为 "tr"：\n\n{sentence}'
     else:
-        prompt = f'请将以下中文翻译成{target_language}（极简、字数极少），以 JSON 格式输出，Key 为 "tr"：\n\n{sentence}'
+        prompt = f'将中文翻译成{target_language}。要求：语义尽量保证、输出极简、字数极少。返回 JSON 对象，Key 为 "tr"：\n\n{sentence}'
 
     try:
         start_time = time.time()
@@ -260,7 +262,7 @@ def extract_translation_from_json(text: str, fallback: str = "") -> str:
 
 async def batch_translate(
     tasks: List[Dict[str, str]],
-    model: str = "qwen3:4b"
+    model: str = "qwen2.5:7b"
 ) -> List[Dict[str, Any]]:
     """
     批量翻译（异步并发）
@@ -356,7 +358,7 @@ def retranslate_from_config(config_file: str) -> List[Dict[str, Any]]:
         config = json.load(f)
 
     tasks = config["tasks"]
-    model = config.get("model", "qwen3:4b")
+    model = config.get("model", "qwen2.5:7b")
 
     # 执行异步批量翻译
     results = asyncio.run(batch_translate(tasks, model))
@@ -385,7 +387,7 @@ if __name__ == "__main__":
             "target_language": "韩文"
         }
     ],
-    "model": "qwen3:4b"
+    "model": "qwen2.5:7b"
 }
         """, flush=True)
         sys.exit(1)

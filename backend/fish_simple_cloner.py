@@ -204,7 +204,8 @@ class SimpleFishCloner:
         speaker_npy_files: Dict[int, str],
         speaker_references: Dict[int, Dict],
         output_dir: str,
-        script_dir: str = None  # 兼容参数
+        script_dir: str = None,  # 兼容参数
+        progress_callback = None  # 进度回调函数
     ) -> Dict[str, str]:
         """
         批量生成音频
@@ -214,11 +215,14 @@ class SimpleFishCloner:
             speaker_npy_files: {speaker_id: npy_file_path}
             speaker_references: {speaker_id: {reference_text, ...}}
             output_dir: 输出目录
+            progress_callback: 进度回调函数 callback(current, total)
 
         Returns:
             {"segment_0": "path/to/segment_0.wav", ...}
         """
         logger.info(f"\n🎵 批量生成 {len(tasks)} 个语音片段...")
+
+        total_tasks = len(tasks)
 
         # 确保输出目录存在
         os.makedirs(output_dir, exist_ok=True)
@@ -309,6 +313,57 @@ class SimpleFishCloner:
                     # 显示进度信息（支持两种模式的标记）
                     if any(keyword in line for keyword in ['[BatchGen]', '[Worker', '[Main]', '[GPU', 'tokens/sec', 'INFO']):
                         print(line, flush=True)
+
+                    # 解析进度：支持两种模式
+                    # 1. 单进程模式: "[BatchGen] 进度: 5/30"
+                    # 2. 多进程模式: "[Worker X] Completed Speaker Y: 23 segments" 或 "[Main] Generated 23/46"
+                    import re
+                    try:
+                        # 模式1：单进程批量生成
+                        # 支持两种格式: "[BatchGen] 进度: 44/46" 或 "[BatchGen] : 44/46"
+                        if '[BatchGen]' in line and ':' in line:
+                            # 先尝试匹配带"进度"的格式
+                            match = re.search(r'进度:\s*(\d+)/(\d+)', line)
+                            if not match:
+                                # 如果没有"进度"，尝试匹配只有冒号的格式
+                                match = re.search(r'\[BatchGen\]\s*(?:进度)?\s*:\s*(\d+)/(\d+)', line)
+                            if match:
+                                current = int(match.group(1))
+                                total = int(match.group(2))
+                                if progress_callback:
+                                    progress_callback(current, total)
+                                    # 调试日志已移除 - 减少日志输出
+
+                        # 模式2a：Worker进行中的进度 "[Worker 1] Speaker 3 progress: 5/20"
+                        elif 'Speaker' in line and 'progress:' in line:
+                            # 多进程模式下的说话人进度，暂不处理（无全局总数）
+                            pass
+
+                        # 模式2b：Worker完成某个说话人 "[Worker 1] ✅ Completed Speaker 3: 23 segments"
+                        elif 'Completed Speaker' in line and 'segments' in line:
+                            # 多进程模式下的说话人完成，暂不处理（无全局总数）
+                            pass
+
+                        # 模式2c：Worker整体进度 "[Worker 1] ✅ All done! Processed 23/23 segments"
+                        elif 'All done!' in line and 'Processed' in line and 'segments' in line:
+                            match = re.search(r'Processed\s+(\d+)/(\d+)\s+segments', line)
+                            if match:
+                                current = int(match.group(1))
+                                total = int(match.group(2))
+                                if progress_callback:
+                                    progress_callback(current, total)
+
+                        # 模式2d：Main总进度 "[Main] All done! Generated 23/46 segments"
+                        elif '[Main]' in line and 'Generated' in line and 'segments' in line:
+                            match = re.search(r'Generated\s+(\d+)/(\d+)\s+segments', line)
+                            if match:
+                                current = int(match.group(1))
+                                total = int(match.group(2))
+                                if progress_callback:
+                                    progress_callback(current, total)
+                    except Exception as e:
+                        print(f"[进度解析失败] {e}, 行: {line}", flush=True)
+
                     output_lines.append(line)
 
             # 等待进程结束

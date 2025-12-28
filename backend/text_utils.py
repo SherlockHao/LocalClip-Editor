@@ -3,6 +3,8 @@
 提供文本规范化、长度计算等功能
 """
 import re
+import json
+import os
 from typing import Tuple
 
 
@@ -171,16 +173,22 @@ def count_text_length(text: str, language: str) -> int:
 
     Args:
         text: 文本内容
-        language: 语言类型 ("中文", "英文", "韩文", "日文", "English", "Korean", "Japanese" 等)
+        language: 语言类型 ("中文", "英文", "韩文", "日文", "法文", "德文", "西班牙文", "English", "Korean", "Japanese", "French", "German", "Spanish" 等)
 
     Returns:
-        int: 文本长度（中文/韩文/日文为字符数，英文为单词数）
+        int: 文本长度（中文/韩文/日文为字符数，英文/法文/德文/西班牙文为单词数）
     """
     language_lower = language.lower()
 
     # 判断语言类型
     if any(keyword in language_lower for keyword in ['英', 'english', 'en']):
         return count_english_length(text)
+    elif any(keyword in language_lower for keyword in ['法', 'french', 'français', 'fr']):
+        return count_english_length(text)  # 法语和英语一样，按单词计数
+    elif any(keyword in language_lower for keyword in ['德', 'german', 'deutsch', 'de']):
+        return count_english_length(text)  # 德语和英语一样，按单词计数
+    elif any(keyword in language_lower for keyword in ['西班牙', 'spanish', 'español', 'es']):
+        return count_english_length(text)  # 西班牙语和英语一样，按单词计数
     elif any(keyword in language_lower for keyword in ['韩', 'korean', 'ko', '한국']):
         return count_korean_length(text)
     elif any(keyword in language_lower for keyword in ['日', 'japanese', 'ja', '日本']):
@@ -267,3 +275,101 @@ def validate_translations(
             valid_translations.append(translation_info)
 
     return valid_translations, too_long_translations
+
+
+def load_digits_mapping() -> dict:
+    """
+    加载数字映射配置文件
+
+    Returns:
+        dict: 数字映射字典
+    """
+    try:
+        mapping_file = os.path.join(os.path.dirname(__file__), 'digits_mapping.json')
+        with open(mapping_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return data.get('data', {})
+    except Exception as e:
+        print(f"[警告] 加载数字映射文件失败: {e}")
+        return {}
+
+
+def replace_digits_in_text(text: str, language_code: str) -> str:
+    """
+    将文本中的阿拉伯数字替换为指定语言的发音
+
+    Args:
+        text: 原始文本
+        language_code: 语言代码 (en, ko, ja, fr, de, es)
+
+    Returns:
+        str: 替换后的文本
+
+    Examples:
+        >>> replace_digits_in_text("I have 3 apples", "en")
+        "I have three apples"
+        >>> replace_digits_in_text("나는 5개를 가지고 있다", "ko")
+        "나는 오개를 가지고 있다"
+    """
+    # 加载映射
+    digits_mapping = load_digits_mapping()
+
+    # 检查语言代码是否存在
+    lang_code = language_code.lower()
+    if lang_code not in digits_mapping:
+        print(f"[警告] 不支持的语言代码: {language_code}，跳过数字替换")
+        return text
+
+    language_map = digits_mapping[lang_code]
+
+    # 查找所有单独的阿拉伯数字（0-9）
+    # 使用正则表达式匹配独立的数字字符
+    def replace_digit(match):
+        digit = match.group(0)
+        return language_map.get(digit, digit)
+
+    # 替换所有单独的数字
+    result = re.sub(r'\d', replace_digit, text)
+
+    return result
+
+
+def process_translations_digits(translations: list, language_code: str) -> list:
+    """
+    批量处理翻译中的数字替换
+
+    Args:
+        translations: 翻译列表，每个元素是字典，包含译文
+        language_code: 目标语言代码
+
+    Returns:
+        list: 处理后的翻译列表
+    """
+    processed = []
+
+    for item in translations:
+        # 复制原始数据
+        processed_item = item.copy()
+
+        # 获取译文（可能在不同的键中）
+        target_text = item.get('target_text') or item.get('translation') or item.get('text', '')
+
+        if target_text:
+            # 替换数字
+            new_text = replace_digits_in_text(target_text, language_code)
+
+            # 如果发生了替换，记录日志
+            if new_text != target_text:
+                print(f"[数字替换] '{target_text}' -> '{new_text}'")
+
+            # 更新所有可能的字段
+            if 'target_text' in processed_item:
+                processed_item['target_text'] = new_text
+            if 'translation' in processed_item:
+                processed_item['translation'] = new_text
+            if 'text' in processed_item:
+                processed_item['text'] = new_text
+
+        processed.append(processed_item)
+
+    return processed
