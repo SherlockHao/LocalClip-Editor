@@ -373,3 +373,631 @@ def process_translations_digits(translations: list, language_code: str) -> list:
         processed.append(processed_item)
 
     return processed
+
+
+def extract_and_replace_chinese(text: str, target_language: str, to_kana: bool = False) -> str:
+    """
+    提取文本中的中文部分并替换为目标语言
+
+    优化：批量处理所有中文片段，只加载一次模型
+
+    Args:
+        text: 原始文本
+        target_language: 目标语言名称
+        to_kana: 如果为True且目标语言是日语，将中文转换为假名
+
+    Returns:
+        str: 替换后的文本
+
+    Examples:
+        >>> extract_and_replace_chinese("Hello 你好 World", "English")
+        "Hello ni hao World"
+        >>> extract_and_replace_chinese("こんにちは世界", "日语", to_kana=True)
+        "こんにちはせかい"
+    """
+    import requests
+
+    # 查找所有中文字符段落
+    chinese_pattern = r'[\u4e00-\u9fff]+'
+    chinese_segments = re.findall(chinese_pattern, text)
+
+    if not chinese_segments:
+        return text
+
+    # 去重中文片段（同样的中文只翻译一次）
+    unique_chinese = list(dict.fromkeys(chinese_segments))  # 保持顺序去重
+
+    print(f"[中文替换] 找到 {len(chinese_segments)} 个中文片段，去重后 {len(unique_chinese)} 个")
+
+    # 批量翻译所有中文片段（一次性加载模型）
+    translation_map = {}
+
+    if to_kana:
+        # 日语：批量转换为假名
+        translation_map = batch_translate_chinese_to_kana(unique_chinese)
+    else:
+        # 其他语言：批量翻译
+        translation_map = batch_translate_chinese_to_target(unique_chinese, target_language)
+
+    # 替换所有中文片段
+    result_text = text
+    for chinese_text in chinese_segments:
+        replacement = translation_map.get(chinese_text, chinese_text)
+        # 只替换第一个匹配的（按出现顺序）
+        result_text = result_text.replace(chinese_text, replacement, 1)
+
+    return result_text
+
+
+def translate_chinese_to_kana(chinese_text: str) -> str:
+    """
+    将中文文本转换为日语假名
+
+    Args:
+        chinese_text: 中文文本
+
+    Returns:
+        str: 日语假名
+    """
+    import requests
+
+    try:
+        # 使用 Ollama API 将中文转换为日语假名（平假名）
+        # 使用更严格的prompt
+        response = requests.post(
+            'http://127.0.0.1:11434/api/generate',
+            json={
+                'model': 'qwen2.5:7b',
+                'prompt': f'Convert this Chinese word to Japanese hiragana only. Return ONLY hiragana characters, no explanations, no kanji, no other text.\n\nChinese: {chinese_text}\nHiragana:',
+                'stream': False,
+                'options': {
+                    'temperature': 0.1,  # 降低温度，减少随机性
+                    'num_predict': 20,   # 减少生成长度
+                    'stop': ['\n', '注', '：', 'Note', '。', '、']  # 遇到这些字符就停止
+                },
+                'keep_alive': 0  # 立即释放GPU
+            },
+            timeout=30
+        )
+
+        if response.status_code == 200:
+            result = response.json()
+            kana = result.get('response', '').strip()
+
+            # 只保留平假名和片假名字符
+            # 平假名: \u3040-\u309F
+            # 片假名: \u30A0-\u30FF
+            kana = re.sub(r'[^\u3040-\u309F\u30A0-\u30FF]', '', kana)
+
+            # 如果清理后为空或太短，返回原文
+            if not kana or len(kana) < len(chinese_text) * 0.5:
+                print(f"[警告] 转换假名结果异常，保留原文: '{chinese_text}'")
+                return chinese_text
+
+            return kana
+        else:
+            return chinese_text
+
+    except Exception as e:
+        print(f"[警告] Ollama转换假名失败: {e}")
+        return chinese_text
+
+
+def translate_chinese_to_target(chinese_text: str, target_language: str) -> str:
+    """
+    将中文文本翻译为目标语言
+
+    Args:
+        chinese_text: 中文文本
+        target_language: 目标语言名称
+
+    Returns:
+        str: 翻译后的文本
+    """
+    import requests
+
+    try:
+        # 使用 Ollama API 翻译，使用英文prompt提高准确性
+        response = requests.post(
+            'http://127.0.0.1:11434/api/generate',
+            json={
+                'model': 'qwen2.5:7b',
+                'prompt': f'Translate this Chinese word to {target_language}. Return ONLY the translation, no explanations.\n\nChinese: {chinese_text}\n{target_language}:',
+                'stream': False,
+                'options': {
+                    'temperature': 0.1,  # 降低温度
+                    'num_predict': 30,   # 减少生成长度
+                    'stop': ['\n', '注', '：', 'Note', '。']  # 停止标记
+                },
+                'keep_alive': 0  # 立即释放GPU
+            },
+            timeout=30
+        )
+
+        if response.status_code == 200:
+            result = response.json()
+            translation = result.get('response', '').strip()
+
+            # 移除可能的引号、句号等
+            translation = re.sub(r'^["\']|["\']$', '', translation)
+            translation = re.sub(r'[。、\.\,]$', '', translation)
+            translation = translation.strip()
+
+            # 如果翻译结果为空，返回原文
+            if not translation:
+                print(f"[警告] 翻译结果为空，保留原文: '{chinese_text}'")
+                return chinese_text
+
+            return translation
+        else:
+            return chinese_text
+
+    except Exception as e:
+        print(f"[警告] Ollama翻译失败: {e}")
+        return chinese_text
+
+
+def batch_translate_chinese_to_kana(chinese_texts: list) -> dict:
+    """
+    批量将中文文本转换为日语假名（只加载一次模型）
+
+    Args:
+        chinese_texts: 中文文本列表
+
+    Returns:
+        dict: {中文: 假名} 的映射字典
+    """
+    import requests
+
+    if not chinese_texts:
+        return {}
+
+    translation_map = {}
+
+    try:
+        # 构建批量翻译的prompt
+        # 格式：中文1\t假名1\n中文2\t假名2
+        examples = "\n".join([f"{i+1}. {text}" for i, text in enumerate(chinese_texts)])
+
+        prompt = f"""Convert these Chinese words to Japanese hiragana. Return ONLY the results in this format:
+1. [hiragana]
+2. [hiragana]
+...
+
+Chinese words:
+{examples}
+
+Hiragana:"""
+
+        response = requests.post(
+            'http://127.0.0.1:11434/api/generate',
+            json={
+                'model': 'qwen2.5:7b',
+                'prompt': prompt,
+                'stream': False,
+                'options': {
+                    'temperature': 0.1,
+                    'num_predict': len(chinese_texts) * 30,  # 根据数量调整
+                    'stop': ['\n\n', 'Note', '注']
+                },
+                'keep_alive': 0  # 完成后立即释放GPU
+            },
+            timeout=60
+        )
+
+        if response.status_code == 200:
+            result = response.json()
+            output = result.get('response', '').strip()
+
+            # 解析输出，按行分割
+            lines = output.split('\n')
+            for i, line in enumerate(lines):
+                if i >= len(chinese_texts):
+                    break
+
+                # 移除行号和点号 "1. "
+                line = re.sub(r'^\d+\.\s*', '', line.strip())
+
+                # 只保留假名字符
+                kana = re.sub(r'[^\u3040-\u309F\u30A0-\u30FF]', '', line)
+
+                if kana and len(kana) >= len(chinese_texts[i]) * 0.5:
+                    translation_map[chinese_texts[i]] = kana
+                else:
+                    # 如果转换失败，保留原文
+                    translation_map[chinese_texts[i]] = chinese_texts[i]
+                    print(f"[警告] 假名转换失败，保留原文: '{chinese_texts[i]}'")
+
+        # 对于没有成功转换的，保留原文
+        for text in chinese_texts:
+            if text not in translation_map:
+                translation_map[text] = text
+
+    except Exception as e:
+        print(f"[警告] 批量假名转换失败: {e}")
+        # 失败时所有都保留原文
+        for text in chinese_texts:
+            translation_map[text] = text
+
+    return translation_map
+
+
+def batch_translate_chinese_to_target(chinese_texts: list, target_language: str) -> dict:
+    """
+    批量将中文文本翻译为目标语言（只加载一次模型）
+
+    Args:
+        chinese_texts: 中文文本列表
+        target_language: 目标语言名称
+
+    Returns:
+        dict: {中文: 译文} 的映射字典
+    """
+    import requests
+
+    if not chinese_texts:
+        return {}
+
+    translation_map = {}
+
+    try:
+        # 构建批量翻译的prompt
+        examples = "\n".join([f"{i+1}. {text}" for i, text in enumerate(chinese_texts)])
+
+        prompt = f"""Translate these Chinese words to {target_language}. Return ONLY the translations in this format:
+1. [translation]
+2. [translation]
+...
+
+Chinese:
+{examples}
+
+{target_language}:"""
+
+        response = requests.post(
+            'http://127.0.0.1:11434/api/generate',
+            json={
+                'model': 'qwen2.5:7b',
+                'prompt': prompt,
+                'stream': False,
+                'options': {
+                    'temperature': 0.1,
+                    'num_predict': len(chinese_texts) * 40,
+                    'stop': ['\n\n', 'Note', '注']
+                },
+                'keep_alive': 0  # 完成后立即释放GPU
+            },
+            timeout=60
+        )
+
+        if response.status_code == 200:
+            result = response.json()
+            output = result.get('response', '').strip()
+
+            # 解析输出
+            lines = output.split('\n')
+            for i, line in enumerate(lines):
+                if i >= len(chinese_texts):
+                    break
+
+                # 移除行号和点号
+                line = re.sub(r'^\d+\.\s*', '', line.strip())
+
+                # 清理引号和句号
+                line = re.sub(r'^["\']|["\']$', '', line)
+                line = re.sub(r'[。、\.\,]$', '', line)
+                line = line.strip()
+
+                if line:
+                    translation_map[chinese_texts[i]] = line
+                else:
+                    translation_map[chinese_texts[i]] = chinese_texts[i]
+                    print(f"[警告] 翻译失败，保留原文: '{chinese_texts[i]}'")
+
+        # 对于没有成功翻译的，保留原文
+        for text in chinese_texts:
+            if text not in translation_map:
+                translation_map[text] = text
+
+    except Exception as e:
+        print(f"[警告] 批量翻译失败: {e}")
+        for text in chinese_texts:
+            translation_map[text] = text
+
+    return translation_map
+
+
+def is_english_text(text: str) -> bool:
+    """
+    检查文本是否完全是英文（包括字母、数字、标点、空格）
+
+    Args:
+        text: 要检查的文本
+
+    Returns:
+        bool: 如果完全是英文返回True，否则返回False
+    """
+    if not text:
+        return False
+
+    # 允许的字符：英文字母、数字、常见标点、空格
+    pattern = r'^[a-zA-Z0-9\s\.,!?\'";\:\-\(\)\[\]]+$'
+    return bool(re.match(pattern, text.strip()))
+
+
+def batch_translate_english_to_kana(english_texts: list) -> dict:
+    """
+    批量将英文文本转换为日语假名（只加载一次模型）
+
+    Args:
+        english_texts: 英文文本列表
+
+    Returns:
+        dict: {英文: 假名} 的映射字典
+    """
+    import requests
+
+    if not english_texts:
+        return {}
+
+    translation_map = {}
+
+    try:
+        # 构建批量转换的prompt - 强制要求输出假名
+        examples = "\n".join([f"{i+1}. {text}" for i, text in enumerate(english_texts)])
+
+        prompt = f"""Translate these English sentences to Japanese. You MUST output ONLY Japanese hiragana or katakana characters. Do NOT output English, romaji, or any other characters.
+
+Return in this format:
+1. [Japanese hiragana/katakana only]
+2. [Japanese hiragana/katakana only]
+...
+
+English sentences:
+{examples}
+
+Japanese (hiragana/katakana ONLY):"""
+
+        response = requests.post(
+            'http://127.0.0.1:11434/api/generate',
+            json={
+                'model': 'qwen2.5:7b',
+                'prompt': prompt,
+                'stream': False,
+                'options': {
+                    'temperature': 0.1,
+                    'num_predict': len(english_texts) * 50,
+                    'stop': ['\n\n', 'Note', '注', 'English']
+                },
+                'keep_alive': 0  # 完成后立即释放GPU
+            },
+            timeout=60
+        )
+
+        if response.status_code == 200:
+            result = response.json()
+            output = result.get('response', '').strip()
+
+            # 解析输出
+            lines = output.split('\n')
+            for i, line in enumerate(lines):
+                if i >= len(english_texts):
+                    break
+
+                # 移除行号和点号
+                line = re.sub(r'^\d+\.\s*', '', line.strip())
+
+                # 清理引号
+                line = re.sub(r'^["\']|["\']$', '', line)
+                line = line.strip()
+
+                # 只保留假名字符（平假名和片假名）
+                kana = re.sub(r'[^\u3040-\u309F\u30A0-\u30FF]', '', line)
+
+                if kana:
+                    translation_map[english_texts[i]] = kana
+                else:
+                    # 如果没有假名，说明翻译失败，标记为需要重试
+                    translation_map[english_texts[i]] = None
+                    print(f"[警告] 英文转假名失败: '{english_texts[i]}'")
+
+        # 对于翻译失败的文本（值为None），使用单独的翻译请求
+        failed_texts = [text for text, result in translation_map.items() if result is None]
+
+        if failed_texts:
+            print(f"[英文转假名] 对 {len(failed_texts)} 条失败文本进行第二次翻译...")
+            for text in failed_texts:
+                try:
+                    retry_prompt = f"""Translate this English text to Japanese. You MUST use ONLY hiragana or katakana characters in your response. Do NOT use English letters or romaji.
+
+English: {text}
+
+Japanese (hiragana/katakana ONLY):"""
+
+                    retry_response = requests.post(
+                        'http://127.0.0.1:11434/api/generate',
+                        json={
+                            'model': 'qwen2.5:7b',
+                            'prompt': retry_prompt,
+                            'stream': False,
+                            'options': {
+                                'temperature': 0.2,
+                                'num_predict': 100,
+                                'stop': ['\n\n', 'Note', 'English']
+                            },
+                            'keep_alive': 0
+                        },
+                        timeout=30
+                    )
+
+                    if retry_response.status_code == 200:
+                        retry_result = retry_response.json()
+                        retry_output = retry_result.get('response', '').strip()
+
+                        # 清理并提取假名
+                        retry_output = re.sub(r'^["\']|["\']$', '', retry_output)
+                        kana = re.sub(r'[^\u3040-\u309F\u30A0-\u30FF]', '', retry_output)
+
+                        if kana:
+                            translation_map[text] = kana
+                            print(f"  ✓ 重试成功: '{text}' -> '{kana}'")
+                        else:
+                            translation_map[text] = text
+                            print(f"  ✗ 重试仍失败，保留原文: '{text}'")
+                    else:
+                        translation_map[text] = text
+                except Exception as e:
+                    print(f"  ✗ 重试出错: {e}")
+                    translation_map[text] = text
+
+        # 对于没有成功转换的，保留原文
+        for text in english_texts:
+            if text not in translation_map or translation_map[text] is None:
+                translation_map[text] = text
+
+    except Exception as e:
+        print(f"[警告] 批量英文转假名失败: {e}")
+        for text in english_texts:
+            translation_map[text] = text
+
+    return translation_map
+
+
+def batch_translate_english_to_korean(english_texts: list) -> dict:
+    """
+    批量将英文文本翻译为韩语（只加载一次模型）
+
+    Args:
+        english_texts: 英文文本列表
+
+    Returns:
+        dict: {英文: 韩文} 的映射字典
+    """
+    import requests
+
+    if not english_texts:
+        return {}
+
+    translation_map = {}
+
+    try:
+        # 构建批量翻译的prompt - 强制要求输出韩文
+        examples = "\n".join([f"{i+1}. {text}" for i, text in enumerate(english_texts)])
+
+        prompt = f"""Translate these English sentences to Korean. You MUST output ONLY Korean Hangul characters (한글). Do NOT output English, romanization, or any other characters.
+
+Return in this format:
+1. [Korean Hangul only]
+2. [Korean Hangul only]
+...
+
+English sentences:
+{examples}
+
+Korean (Hangul ONLY):"""
+
+        response = requests.post(
+            'http://127.0.0.1:11434/api/generate',
+            json={
+                'model': 'qwen2.5:7b',
+                'prompt': prompt,
+                'stream': False,
+                'options': {
+                    'temperature': 0.1,
+                    'num_predict': len(english_texts) * 50,
+                    'stop': ['\n\n', 'Note', '注', 'English']
+                },
+                'keep_alive': 0  # 完成后立即释放GPU
+            },
+            timeout=60
+        )
+
+        if response.status_code == 200:
+            result = response.json()
+            output = result.get('response', '').strip()
+
+            # 解析输出
+            lines = output.split('\n')
+            for i, line in enumerate(lines):
+                if i >= len(english_texts):
+                    break
+
+                # 移除行号和点号
+                line = re.sub(r'^\d+\.\s*', '', line.strip())
+
+                # 清理引号和句号
+                line = re.sub(r'^["\']|["\']$', '', line)
+                line = re.sub(r'[。、\.\,]$', '', line)
+                line = line.strip()
+
+                # 只保留韩文字符（Hangul）
+                korean = re.sub(r'[^\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]', '', line)
+
+                if korean:
+                    translation_map[english_texts[i]] = korean
+                else:
+                    # 如果没有韩文，说明翻译失败，标记为需要重试
+                    translation_map[english_texts[i]] = None
+                    print(f"[警告] 英文转韩文失败: '{english_texts[i]}'")
+
+        # 对于翻译失败的文本（值为None），使用单独的翻译请求
+        failed_texts = [text for text, result in translation_map.items() if result is None]
+
+        if failed_texts:
+            print(f"[英文转韩文] 对 {len(failed_texts)} 条失败文本进行第二次翻译...")
+            for text in failed_texts:
+                try:
+                    retry_prompt = f"""Translate this English text to Korean. You MUST use ONLY Korean Hangul characters (한글) in your response. Do NOT use English letters or romanization.
+
+English: {text}
+
+Korean (Hangul ONLY):"""
+
+                    retry_response = requests.post(
+                        'http://127.0.0.1:11434/api/generate',
+                        json={
+                            'model': 'qwen2.5:7b',
+                            'prompt': retry_prompt,
+                            'stream': False,
+                            'options': {
+                                'temperature': 0.2,
+                                'num_predict': 100,
+                                'stop': ['\n\n', 'Note', 'English']
+                            },
+                            'keep_alive': 0
+                        },
+                        timeout=30
+                    )
+
+                    if retry_response.status_code == 200:
+                        retry_result = retry_response.json()
+                        retry_output = retry_result.get('response', '').strip()
+
+                        # 清理并提取韩文
+                        retry_output = re.sub(r'^["\']|["\']$', '', retry_output)
+                        retry_output = re.sub(r'[。、\.\,]$', '', retry_output)
+                        korean = re.sub(r'[^\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]', '', retry_output)
+
+                        if korean:
+                            translation_map[text] = korean
+                            print(f"  ✓ 重试成功: '{text}' -> '{korean}'")
+                        else:
+                            translation_map[text] = text
+                            print(f"  ✗ 重试仍失败，保留原文: '{text}'")
+                    else:
+                        translation_map[text] = text
+                except Exception as e:
+                    print(f"  ✗ 重试出错: {e}")
+                    translation_map[text] = text
+
+        # 对于没有成功翻译的，保留原文
+        for text in english_texts:
+            if text not in translation_map or translation_map[text] is None:
+                translation_map[text] = text
+
+    except Exception as e:
+        print(f"[警告] 批量英文转韩文失败: {e}")
+        for text in english_texts:
+            translation_map[text] = text
+
+    return translation_map

@@ -927,6 +927,8 @@ async def run_voice_cloning_process(
             max_ratio = 1.2  # 英语等其他语言
 
         too_long_items = []
+        chinese_replacement_items = []
+
         for idx, (source_sub, target_sub) in enumerate(zip(source_subtitles, target_subtitles)):
             source_text = source_sub["text"]
             target_text = target_sub["text"]
@@ -935,26 +937,31 @@ async def run_voice_cloning_process(
                 source_text, target_text, target_language, max_ratio=max_ratio
             )
 
-            # 检查是否需要重新翻译
-            needs_retranslation = is_too_long
-
             # 汉字检测规则：所有非中文语言的译文都不应包含汉字
             # 这对于语音克隆非常重要，因为汉字会影响发音准确性
-            if not needs_retranslation:
-                if contains_chinese_characters(target_text):
-                    needs_retranslation = True
-                    language_display = target_language if target_language else "目标语言"
-                    print(f"  [汉字检查] 第 {idx} 条 {language_display} 译文包含汉字，需要重新翻译: '{target_text}'")
+            has_chinese = contains_chinese_characters(target_text)
 
-            if needs_retranslation:
+            if is_too_long:
+                # 如果过长，需要完全重新翻译
                 too_long_items.append({
                     "index": idx,
                     "source": source_text,
                     "target": target_text,
                     "source_length": source_len,
                     "target_length": target_len,
-                    "ratio": ratio
+                    "ratio": ratio,
+                    "reason": "too_long"
                 })
+                language_display = target_language if target_language else "目标语言"
+                print(f"  [长度检查] 第 {idx} 条 {language_display} 译文过长，需要重新翻译: {target_len}/{source_len} = {ratio:.1f}x")
+            elif has_chinese:
+                # 如果只是包含中文，只需要替换中文部分
+                chinese_replacement_items.append({
+                    "index": idx,
+                    "target": target_text
+                })
+                language_display = target_language if target_language else "目标语言"
+                print(f"  [汉字检查] 第 {idx} 条 {language_display} 译文包含汉字，将替换中文部分: '{target_text}'")
 
         # 如果有超长译文，进行批量重新翻译
         if too_long_items:
@@ -1178,6 +1185,98 @@ async def run_voice_cloning_process(
                     import traceback
                     traceback.print_exc()
                     print("使用原译文继续...")
+
+        # 10.4. 中文替换：将译文中的中文部分替换为目标语言
+        if chinese_replacement_items:
+            print(f"\n[中文替换] 发现 {len(chinese_replacement_items)} 条包含中文的译文，准备替换...")
+
+            from text_utils import extract_and_replace_chinese
+
+            # 判断是否是日语
+            is_japanese = ('日' in target_language or 'ja' in target_language.lower())
+
+            replaced_count = 0
+            for item in chinese_replacement_items:
+                idx = item["index"]
+                original_text = item["target"]
+
+                # 提取并替换中文部分
+                replaced_text = extract_and_replace_chinese(
+                    original_text,
+                    target_language,
+                    to_kana=is_japanese  # 如果是日语，转换为假名
+                )
+
+                if replaced_text != original_text:
+                    target_subtitles[idx]["text"] = replaced_text
+                    replaced_count += 1
+                    print(f"  [{idx}] '{original_text}' -> '{replaced_text}'")
+
+            if replaced_count > 0:
+                print(f"\n✅ 成功替换 {replaced_count} 条译文中的中文")
+                # 保存更新后的字幕文件
+                print(f"[中文替换] 保存更新后的字幕到: {target_subtitle_path}")
+                srt_parser.save_srt(target_subtitles, target_subtitle_path)
+                print(f"✅ 字幕文件已更新")
+            else:
+                print(f"ℹ️  所有中文都已成功替换")
+
+        # 10.4.5. 英文检测：如果目标语言是日语或韩语，检测纯英文句子并转换
+        is_japanese = ('日' in target_language or 'ja' in target_language.lower())
+        is_korean = ('韩' in target_language or 'ko' in target_language.lower())
+
+        if is_japanese or is_korean:
+            print(f"\n[英文检测] 检查译文中的纯英文句子...")
+            from text_utils import is_english_text, batch_translate_english_to_kana, batch_translate_english_to_korean
+
+            # 收集所有纯英文句子
+            english_items = []
+            for idx, target_sub in enumerate(target_subtitles):
+                target_text = target_sub.get("text", "").strip()
+                if is_english_text(target_text):
+                    english_items.append({
+                        "index": idx,
+                        "text": target_text
+                    })
+
+            if english_items:
+                print(f"[英文检测] 发现 {len(english_items)} 条纯英文句子，准备转换...")
+
+                # 提取所有英文文本并去重
+                english_texts = [item["text"] for item in english_items]
+                unique_english = list(dict.fromkeys(english_texts))  # 保持顺序的去重
+
+                # 批量转换
+                if is_japanese:
+                    print(f"[英文检测] 批量转换为日语假名...")
+                    translation_map = batch_translate_english_to_kana(unique_english)
+                else:  # is_korean
+                    print(f"[英文检测] 批量转换为韩文...")
+                    translation_map = batch_translate_english_to_korean(unique_english)
+
+                # 替换所有英文句子
+                converted_count = 0
+                for item in english_items:
+                    idx = item["index"]
+                    original_text = item["text"]
+
+                    converted_text = translation_map.get(original_text, original_text)
+
+                    if converted_text != original_text:
+                        target_subtitles[idx]["text"] = converted_text
+                        converted_count += 1
+                        print(f"  [{idx}] '{original_text}' -> '{converted_text}'")
+
+                if converted_count > 0:
+                    print(f"\n✅ 成功转换 {converted_count} 条纯英文句子")
+                    # 保存更新后的字幕文件
+                    print(f"[英文检测] 保存更新后的字幕到: {target_subtitle_path}")
+                    srt_parser.save_srt(target_subtitles, target_subtitle_path)
+                    print(f"✅ 字幕文件已更新")
+                else:
+                    print(f"ℹ️  所有英文句子都已成功转换")
+            else:
+                print(f"[英文检测] 未发现纯英文句子")
 
         # 10.5. 数字替换：将阿拉伯数字转换为目标语言的发音
         print(f"\n[数字替换] 开始检测并替换译文中的阿拉伯数字...")
@@ -2124,7 +2223,7 @@ async def run_batch_translation(task_id: str, source_subtitle_filename: str, tar
                             parts = line.split(']')[0].strip('[').split('/')
                             current = int(parts[0])
                             total = int(parts[1])
-                            progress = 10 + int((current / total) * 80)  # 10-90%
+                            progress = 10 + int((current / total) * 70)  # 10-80%，为质量检查预留20%
                             translation_status[task_id]["progress"] = progress
                             translation_status[task_id]["message"] = f"正在翻译... ({current}/{total})"
                             print(f"[批量翻译-{task_id}] 更新进度: {current}/{total} -> {progress}%")
@@ -2155,7 +2254,7 @@ async def run_batch_translation(task_id: str, source_subtitle_filename: str, tar
 
             # 更新状态
             translation_status[task_id]["message"] = "正在保存翻译结果..."
-            translation_status[task_id]["progress"] = 90
+            translation_status[task_id]["progress"] = 80
 
             # 解析翻译结果
             output_text = '\n'.join(stdout_lines)
@@ -2214,6 +2313,200 @@ async def run_batch_translation(task_id: str, source_subtitle_filename: str, tar
                 f.write(srt_content)
 
             print(f"[批量翻译-{task_id}] 翻译完成，保存到: {target_srt_path}")
+
+            # ===== 第一遍翻译后的质量检查和优化 =====
+            print(f"\n[批量翻译-{task_id}] ===== 开始质量检查和优化 =====")
+            translation_status[task_id]["message"] = "正在进行质量检查..."
+            translation_status[task_id]["progress"] = 82
+
+            from srt_parser import SRTParser
+            from text_utils import check_translation_length, contains_chinese_characters, is_english_text
+            from text_utils import extract_and_replace_chinese, batch_translate_english_to_kana, batch_translate_english_to_korean
+
+            srt_parser = SRTParser()
+            target_subtitles = srt_parser.parse_srt(target_srt_path)
+            source_subtitles = srt_parser.parse_srt(source_srt_path)
+
+            # 1. 检查译文长度和中文字符
+            target_language_lower = target_language.lower()
+            is_japanese = ('日' in target_language or 'ja' in target_language_lower)
+            is_korean = ('韩' in target_language or 'ko' in target_language_lower or '한국' in target_language)
+            is_french = ('法' in target_language or 'fr' in target_language_lower or 'français' in target_language_lower)
+            is_german = ('德' in target_language or 'de' in target_language_lower or 'deutsch' in target_language_lower)
+            is_spanish = ('西班牙' in target_language or 'es' in target_language_lower or 'español' in target_language_lower or 'spanish' in target_language_lower)
+
+            if is_japanese or is_korean:
+                max_ratio = 3
+            elif is_french or is_german or is_spanish:
+                max_ratio = 1.5
+            else:
+                max_ratio = 1.2
+
+            too_long_items = []
+            chinese_replacement_items = []
+
+            for idx, (source_sub, target_sub) in enumerate(zip(source_subtitles, target_subtitles)):
+                source_text = source_sub["text"]
+                target_text = target_sub["text"]
+
+                is_too_long, source_len, target_len, ratio = check_translation_length(
+                    source_text, target_text, target_language, max_ratio=max_ratio
+                )
+                has_chinese = contains_chinese_characters(target_text)
+
+                if is_too_long:
+                    too_long_items.append({
+                        "index": idx,
+                        "source": source_text,
+                        "target": target_text,
+                        "source_length": source_len,
+                        "target_length": target_len,
+                        "ratio": ratio,
+                        "reason": "too_long"
+                    })
+                    print(f"  [长度检查] 第 {idx} 条译文过长: {target_len}/{source_len} = {ratio:.1f}x")
+                elif has_chinese:
+                    chinese_replacement_items.append({
+                        "index": idx,
+                        "target": target_text
+                    })
+                    print(f"  [汉字检查] 第 {idx} 条译文包含汉字: '{target_text}'")
+
+            # 2. 重新翻译超长文本
+            if too_long_items:
+                print(f"\n[批量翻译-{task_id}] 发现 {len(too_long_items)} 条超长译文，批量重新翻译...")
+                translation_status[task_id]["message"] = f"正在重新翻译 {len(too_long_items)} 条超长文本..."
+                translation_status[task_id]["progress"] = 85
+
+                retranslate_tasks = []
+                for item in too_long_items:
+                    retranslate_tasks.append({
+                        "task_id": f"item-{item['index']}",
+                        "source_text": item["source"],
+                        "target_language": target_language,
+                        "max_length": int(item["source_length"] * max_ratio * 0.8)
+                    })
+
+                retranslate_config = {
+                    "tasks": retranslate_tasks,
+                    "model": "qwen2.5:7b",
+                    "output_file": target_srt_path
+                }
+
+                import tempfile
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
+                    json.dump(retranslate_config, f, ensure_ascii=False, indent=2)
+                    retranslate_config_file = f.name
+
+                try:
+                    retranslate_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "retranslate_ollama.py")
+                    process = subprocess.Popen(
+                        [ui_env_python, retranslate_script, retranslate_config_file],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        encoding='utf-8',
+                        bufsize=1
+                    )
+
+                    stdout_lines = []
+                    for line in process.stdout:
+                        print(line, end='', flush=True)
+                        stdout_lines.append(line)
+
+                    returncode = process.wait()
+                    stdout = ''.join(stdout_lines)
+
+                    if returncode == 0 and stdout:
+                        import re
+                        results_match = re.search(r'\[Results\](.*?)\[/Results\]', stdout, re.DOTALL)
+                        if results_match:
+                            results_json = results_match.group(1).strip()
+                            retranslate_results = json.loads(results_json)
+
+                            for result_item in retranslate_results:
+                                idx = int(result_item["task_id"].split('-')[1])
+                                target_subtitles[idx]["text"] = result_item["translation"]
+
+                            srt_parser.save_srt(target_subtitles, target_srt_path)
+                            print(f"✅ 成功重新翻译 {len(retranslate_results)} 条文本")
+                except Exception as e:
+                    print(f"⚠️ 重新翻译出错: {e}")
+                finally:
+                    if os.path.exists(retranslate_config_file):
+                        os.remove(retranslate_config_file)
+
+            # 3. 替换中文字符
+            if chinese_replacement_items:
+                print(f"\n[批量翻译-{task_id}] 发现 {len(chinese_replacement_items)} 条包含中文的译文，准备替换...")
+                translation_status[task_id]["message"] = f"正在替换 {len(chinese_replacement_items)} 条译文中的中文..."
+                translation_status[task_id]["progress"] = 90
+
+                replaced_count = 0
+                for item in chinese_replacement_items:
+                    idx = item["index"]
+                    original_text = item["target"]
+
+                    replaced_text = extract_and_replace_chinese(
+                        original_text,
+                        target_language,
+                        to_kana=is_japanese
+                    )
+
+                    if replaced_text != original_text:
+                        target_subtitles[idx]["text"] = replaced_text
+                        replaced_count += 1
+                        print(f"  [{idx}] '{original_text}' -> '{replaced_text}'")
+
+                if replaced_count > 0:
+                    srt_parser.save_srt(target_subtitles, target_srt_path)
+                    print(f"✅ 成功替换 {replaced_count} 条译文中的中文")
+
+            # 4. 英文检测和转换（日语/韩语）
+            if is_japanese or is_korean:
+                print(f"\n[批量翻译-{task_id}] 检查纯英文句子...")
+                translation_status[task_id]["message"] = "正在转换英文句子..."
+                translation_status[task_id]["progress"] = 95
+
+                # 重新读取最新的字幕（可能已被上一步修改）
+                target_subtitles = srt_parser.parse_srt(target_srt_path)
+
+                english_items = []
+                for idx, target_sub in enumerate(target_subtitles):
+                    target_text = target_sub.get("text", "").strip()
+                    if is_english_text(target_text):
+                        english_items.append({
+                            "index": idx,
+                            "text": target_text
+                        })
+
+                if english_items:
+                    print(f"[批量翻译-{task_id}] 发现 {len(english_items)} 条纯英文句子，准备转换...")
+
+                    english_texts = [item["text"] for item in english_items]
+                    unique_english = list(dict.fromkeys(english_texts))
+
+                    if is_japanese:
+                        translation_map = batch_translate_english_to_kana(unique_english)
+                    else:
+                        translation_map = batch_translate_english_to_korean(unique_english)
+
+                    converted_count = 0
+                    for item in english_items:
+                        idx = item["index"]
+                        original_text = item["text"]
+                        converted_text = translation_map.get(original_text, original_text)
+
+                        if converted_text != original_text:
+                            target_subtitles[idx]["text"] = converted_text
+                            converted_count += 1
+                            print(f"  [{idx}] '{original_text}' -> '{converted_text}'")
+
+                    if converted_count > 0:
+                        srt_parser.save_srt(target_subtitles, target_srt_path)
+                        print(f"✅ 成功转换 {converted_count} 条纯英文句子")
+
+            print(f"[批量翻译-{task_id}] ===== 质量检查和优化完成 =====\n")
 
             # 计算总耗时
             translation_elapsed = time.time() - translation_start_time
