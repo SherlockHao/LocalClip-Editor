@@ -1221,62 +1221,134 @@ async def run_voice_cloning_process(
             else:
                 print(f"ℹ️  所有中文都已成功替换")
 
-        # 10.4.5. 英文检测：如果目标语言是日语或韩语，检测纯英文句子并转换
+        # 10.4.5. 英文检测和替换：如果目标语言是日语或韩语，替换包含英文的部分
         is_japanese = ('日' in target_language or 'ja' in target_language.lower())
         is_korean = ('韩' in target_language or 'ko' in target_language.lower())
 
         if is_japanese or is_korean:
-            print(f"\n[英文检测] 检查译文中的纯英文句子...")
-            from text_utils import is_english_text, batch_translate_english_to_kana, batch_translate_english_to_korean
+            print(f"\n[英文检测] 检查译文中包含英文的句子...")
+            from text_utils import contains_english, extract_and_replace_english, is_only_symbols
 
-            # 收集所有纯英文句子
+            # 收集所有包含英文的句子
             english_items = []
             for idx, target_sub in enumerate(target_subtitles):
                 target_text = target_sub.get("text", "").strip()
-                if is_english_text(target_text):
+                if contains_english(target_text):  # 改为检查是否包含英文
                     english_items.append({
                         "index": idx,
                         "text": target_text
                     })
 
             if english_items:
-                print(f"[英文检测] 发现 {len(english_items)} 条纯英文句子，准备转换...")
+                print(f"[英文检测] 发现 {len(english_items)} 条包含英文的句子，准备替换英文部分...")
 
-                # 提取所有英文文本并去重
-                english_texts = [item["text"] for item in english_items]
-                unique_english = list(dict.fromkeys(english_texts))  # 保持顺序的去重
+                replaced_count = 0
+                only_symbols_items = []  # 收集替换后只剩符号的条目
 
-                # 批量转换
-                if is_japanese:
-                    print(f"[英文检测] 批量转换为日语假名...")
-                    translation_map = batch_translate_english_to_kana(unique_english)
-                else:  # is_korean
-                    print(f"[英文检测] 批量转换为韩文...")
-                    translation_map = batch_translate_english_to_korean(unique_english)
-
-                # 替换所有英文句子
-                converted_count = 0
                 for item in english_items:
                     idx = item["index"]
                     original_text = item["text"]
 
-                    converted_text = translation_map.get(original_text, original_text)
+                    # 替换英文部分
+                    replaced_text = extract_and_replace_english(
+                        original_text,
+                        to_kana=is_japanese
+                    )
 
-                    if converted_text != original_text:
-                        target_subtitles[idx]["text"] = converted_text
-                        converted_count += 1
-                        print(f"  [{idx}] '{original_text}' -> '{converted_text}'")
+                    if replaced_text != original_text:
+                        # 检查替换后是否只剩符号
+                        if is_only_symbols(replaced_text):
+                            print(f"  [警告] [{idx}] 替换后只剩符号: '{original_text}' -> '{replaced_text}'")
+                            only_symbols_items.append({
+                                "index": idx,
+                                "source": source_subtitles[idx]["text"] if idx < len(source_subtitles) else "",
+                                "target": replaced_text
+                            })
+                        else:
+                            target_subtitles[idx]["text"] = replaced_text
+                            replaced_count += 1
+                            print(f"  [{idx}] '{original_text}' -> '{replaced_text}'")
 
-                if converted_count > 0:
-                    print(f"\n✅ 成功转换 {converted_count} 条纯英文句子")
-                    # 保存更新后的字幕文件
-                    print(f"[英文检测] 保存更新后的字幕到: {target_subtitle_path}")
+                if replaced_count > 0:
+                    print(f"\n✅ 成功替换 {replaced_count} 条译文中的英文")
                     srt_parser.save_srt(target_subtitles, target_subtitle_path)
                     print(f"✅ 字幕文件已更新")
-                else:
-                    print(f"ℹ️  所有英文句子都已成功转换")
+
+                # 处理只剩符号的条目 - 需要重新翻译
+                if only_symbols_items:
+                    print(f"\n[英文检测] 发现 {len(only_symbols_items)} 条替换后只剩符号，需要重新翻译...")
+
+                    # 准备重新翻译任务
+                    retranslate_tasks = []
+                    for item in only_symbols_items:
+                        if item["source"]:
+                            retranslate_tasks.append({
+                                "task_id": f"item-{item['index']}",
+                                "source": item["source"],
+                                "target_language": target_language,
+                                "max_length": int(len(item["source"]) * max_ratio * 0.8)
+                            })
+
+                    if retranslate_tasks:
+                        retranslate_config = {
+                            "tasks": retranslate_tasks,
+                            "model": "qwen2.5:7b",
+                            "output_file": str(target_subtitle_path)
+                        }
+
+                        import tempfile
+                        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
+                            json.dump(retranslate_config, f, ensure_ascii=False, indent=2)
+                            retranslate_config_file = f.name
+
+                        try:
+                            retranslate_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "batch_retranslate_ollama.py")
+
+                            def run_retranslate_subprocess():
+                                import subprocess
+                                process = subprocess.Popen(
+                                    [ui_env_python, retranslate_script, retranslate_config_file],
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT,
+                                    text=True,
+                                    encoding='utf-8',
+                                    bufsize=1
+                                )
+
+                                stdout_lines = []
+                                for line in process.stdout:
+                                    print(line, end='', flush=True)
+                                    stdout_lines.append(line)
+
+                                returncode = process.wait()
+                                return returncode, stdout_lines
+
+                            loop = asyncio.get_event_loop()
+                            returncode, stdout_lines = await loop.run_in_executor(None, run_retranslate_subprocess)
+                            stdout = ''.join(stdout_lines)
+
+                            if returncode == 0 and stdout:
+                                results_match = re.search(r'\[Results\](.*?)\[/Results\]', stdout, re.DOTALL)
+                                if results_match:
+                                    results_json = results_match.group(1).strip()
+                                    retranslate_results = json.loads(results_json)
+
+                                    # 重新读取字幕
+                                    target_subtitles = srt_parser.parse_srt(target_subtitle_path)
+
+                                    for result_item in retranslate_results:
+                                        idx = int(result_item["task_id"].split('-')[1])
+                                        target_subtitles[idx]["text"] = result_item["translation"]
+
+                                    srt_parser.save_srt(target_subtitles, target_subtitle_path)
+                                    print(f"✅ 成功重新翻译 {len(retranslate_results)} 条符号问题")
+                        except Exception as e:
+                            print(f"⚠️ 重新翻译符号问题时出错: {e}")
+                        finally:
+                            if os.path.exists(retranslate_config_file):
+                                os.remove(retranslate_config_file)
             else:
-                print(f"[英文检测] 未发现纯英文句子")
+                print(f"[英文检测] 未发现包含英文的句子")
 
         # 10.5. 数字替换：将阿拉伯数字转换为目标语言的发音
         print(f"\n[数字替换] 开始检测并替换译文中的阿拉伯数字...")
@@ -2320,8 +2392,8 @@ async def run_batch_translation(task_id: str, source_subtitle_filename: str, tar
             translation_status[task_id]["progress"] = 82
 
             from srt_parser import SRTParser
-            from text_utils import check_translation_length, contains_chinese_characters, is_english_text
-            from text_utils import extract_and_replace_chinese, batch_translate_english_to_kana, batch_translate_english_to_korean
+            from text_utils import check_translation_length, contains_chinese_characters
+            from text_utils import extract_and_replace_chinese
 
             srt_parser = SRTParser()
             target_subtitles = srt_parser.parse_srt(target_srt_path)
@@ -2382,7 +2454,7 @@ async def run_batch_translation(task_id: str, source_subtitle_filename: str, tar
                 for item in too_long_items:
                     retranslate_tasks.append({
                         "task_id": f"item-{item['index']}",
-                        "source_text": item["source"],
+                        "source": item["source"],
                         "target_language": target_language,
                         "max_length": int(item["source_length"] * max_ratio * 0.8)
                     })
@@ -2390,7 +2462,7 @@ async def run_batch_translation(task_id: str, source_subtitle_filename: str, tar
                 retranslate_config = {
                     "tasks": retranslate_tasks,
                     "model": "qwen2.5:7b",
-                    "output_file": target_srt_path
+                    "output_file": str(target_srt_path)
                 }
 
                 import tempfile
@@ -2399,7 +2471,7 @@ async def run_batch_translation(task_id: str, source_subtitle_filename: str, tar
                     retranslate_config_file = f.name
 
                 try:
-                    retranslate_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "retranslate_ollama.py")
+                    retranslate_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "batch_retranslate_ollama.py")
                     process = subprocess.Popen(
                         [ui_env_python, retranslate_script, retranslate_config_file],
                         stdout=subprocess.PIPE,
@@ -2462,51 +2534,167 @@ async def run_batch_translation(task_id: str, source_subtitle_filename: str, tar
                     srt_parser.save_srt(target_subtitles, target_srt_path)
                     print(f"✅ 成功替换 {replaced_count} 条译文中的中文")
 
-            # 4. 英文检测和转换（日语/韩语）
+            # 4. 英文检测和替换（日语/韩语）
             if is_japanese or is_korean:
-                print(f"\n[批量翻译-{task_id}] 检查纯英文句子...")
-                translation_status[task_id]["message"] = "正在转换英文句子..."
-                translation_status[task_id]["progress"] = 95
+                print(f"\n[批量翻译-{task_id}] 检查包含英文的句子...")
+                translation_status[task_id]["message"] = "正在替换英文部分..."
+                translation_status[task_id]["progress"] = 93
 
                 # 重新读取最新的字幕（可能已被上一步修改）
                 target_subtitles = srt_parser.parse_srt(target_srt_path)
 
+                from text_utils import contains_english, extract_and_replace_english, is_only_symbols
+
                 english_items = []
                 for idx, target_sub in enumerate(target_subtitles):
                     target_text = target_sub.get("text", "").strip()
-                    if is_english_text(target_text):
+                    if contains_english(target_text):  # 改为检查是否包含英文
                         english_items.append({
                             "index": idx,
                             "text": target_text
                         })
 
                 if english_items:
-                    print(f"[批量翻译-{task_id}] 发现 {len(english_items)} 条纯英文句子，准备转换...")
+                    print(f"[批量翻译-{task_id}] 发现 {len(english_items)} 条包含英文的句子，准备替换英文部分...")
 
-                    english_texts = [item["text"] for item in english_items]
-                    unique_english = list(dict.fromkeys(english_texts))
+                    replaced_count = 0
+                    only_symbols_items = []  # 收集替换后只剩符号的条目
 
-                    if is_japanese:
-                        translation_map = batch_translate_english_to_kana(unique_english)
-                    else:
-                        translation_map = batch_translate_english_to_korean(unique_english)
-
-                    converted_count = 0
                     for item in english_items:
                         idx = item["index"]
                         original_text = item["text"]
-                        converted_text = translation_map.get(original_text, original_text)
 
-                        if converted_text != original_text:
-                            target_subtitles[idx]["text"] = converted_text
-                            converted_count += 1
-                            print(f"  [{idx}] '{original_text}' -> '{converted_text}'")
+                        # 替换英文部分
+                        replaced_text = extract_and_replace_english(
+                            original_text,
+                            to_kana=is_japanese
+                        )
 
-                    if converted_count > 0:
+                        if replaced_text != original_text:
+                            # 检查替换后是否只剩符号
+                            if is_only_symbols(replaced_text):
+                                print(f"  [警告] [{idx}] 替换后只剩符号: '{original_text}' -> '{replaced_text}'")
+                                only_symbols_items.append({
+                                    "index": idx,
+                                    "source": source_subtitles[idx]["text"] if idx < len(source_subtitles) else "",
+                                    "target": replaced_text
+                                })
+                            else:
+                                target_subtitles[idx]["text"] = replaced_text
+                                replaced_count += 1
+                                print(f"  [{idx}] '{original_text}' -> '{replaced_text}'")
+
+                    if replaced_count > 0:
                         srt_parser.save_srt(target_subtitles, target_srt_path)
-                        print(f"✅ 成功转换 {converted_count} 条纯英文句子")
+                        print(f"✅ 成功替换 {replaced_count} 条译文中的英文")
 
-            print(f"[批量翻译-{task_id}] ===== 质量检查和优化完成 =====\n")
+                    # 处理只剩符号的条目 - 需要重新翻译
+                    if only_symbols_items:
+                        print(f"\n[批量翻译-{task_id}] 发现 {len(only_symbols_items)} 条替换后只剩符号，需要重新翻译...")
+                        translation_status[task_id]["message"] = f"正在重新翻译 {len(only_symbols_items)} 条符号问题..."
+                        translation_status[task_id]["progress"] = 96
+
+                        retranslate_tasks = []
+                        for item in only_symbols_items:
+                            if item["source"]:  # 确保有源文本
+                                retranslate_tasks.append({
+                                    "task_id": f"item-{item['index']}",
+                                    "source": item["source"],
+                                    "target_language": target_language,
+                                    "max_length": int(len(item["source"]) * max_ratio * 0.8)
+                                })
+
+                        if retranslate_tasks:
+                            retranslate_config = {
+                                "tasks": retranslate_tasks,
+                                "model": "qwen2.5:7b",
+                                "output_file": str(target_srt_path)
+                            }
+
+                            import tempfile
+                            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
+                                json.dump(retranslate_config, f, ensure_ascii=False, indent=2)
+                                retranslate_config_file = f.name
+
+                            try:
+                                retranslate_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "batch_retranslate_ollama.py")
+                                process = subprocess.Popen(
+                                    [ui_env_python, retranslate_script, retranslate_config_file],
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT,
+                                    text=True,
+                                    encoding='utf-8',
+                                    bufsize=1
+                                )
+
+                                stdout_lines = []
+                                for line in process.stdout:
+                                    print(line, end='', flush=True)
+                                    stdout_lines.append(line)
+
+                                returncode = process.wait()
+                                stdout = ''.join(stdout_lines)
+
+                                if returncode == 0 and stdout:
+                                    results_match = re.search(r'\[Results\](.*?)\[/Results\]', stdout, re.DOTALL)
+                                    if results_match:
+                                        results_json = results_match.group(1).strip()
+                                        retranslate_results = json.loads(results_json)
+
+                                        # 重新读取字幕
+                                        target_subtitles = srt_parser.parse_srt(target_srt_path)
+
+                                        for result_item in retranslate_results:
+                                            idx = int(result_item["task_id"].split('-')[1])
+                                            target_subtitles[idx]["text"] = result_item["translation"]
+
+                                        srt_parser.save_srt(target_subtitles, target_srt_path)
+                                        print(f"✅ 成功重新翻译 {len(retranslate_results)} 条符号问题")
+                            except Exception as e:
+                                print(f"⚠️ 重新翻译符号问题时出错: {e}")
+                            finally:
+                                if os.path.exists(retranslate_config_file):
+                                    os.remove(retranslate_config_file)
+
+            # 5. 数字替换：将阿拉伯数字转换为目标语言的发音
+            print(f"\n[批量翻译-{task_id}] 开始检测并替换译文中的阿拉伯数字...")
+            translation_status[task_id]["message"] = "正在替换数字..."
+            translation_status[task_id]["progress"] = 97
+
+            from text_utils import replace_digits_in_text
+
+            # 获取目标语言代码
+            language_code_map = {
+                '英语': 'en',
+                '韩语': 'ko',
+                '日语': 'ja',
+                '法语': 'fr',
+                '德语': 'de',
+                '西班牙语': 'es'
+            }
+            target_lang_code = language_code_map.get(target_language, target_language.lower())
+
+            # 重新读取最新的字幕
+            target_subtitles = srt_parser.parse_srt(target_srt_path)
+
+            digits_replaced_count = 0
+            for idx, subtitle in enumerate(target_subtitles):
+                original_text = subtitle["text"]
+                replaced_text = replace_digits_in_text(original_text, target_lang_code)
+
+                if replaced_text != original_text:
+                    subtitle["text"] = replaced_text
+                    digits_replaced_count += 1
+                    print(f"  [{idx}] '{original_text}' -> '{replaced_text}'")
+
+            if digits_replaced_count > 0:
+                print(f"\n✅ 成功替换 {digits_replaced_count} 条译文中的数字")
+                srt_parser.save_srt(target_subtitles, target_srt_path)
+                print(f"✅ 字幕文件已更新")
+            else:
+                print(f"ℹ️  未发现需要替换的数字")
+
+            print(f"\n[批量翻译-{task_id}] ===== 质量检查和优化完成 =====\n")
 
             # 计算总耗时
             translation_elapsed = time.time() - translation_start_time

@@ -322,14 +322,23 @@ def replace_digits_in_text(text: str, language_code: str) -> str:
 
     language_map = digits_mapping[lang_code]
 
-    # 查找所有单独的阿拉伯数字（0-9）
-    # 使用正则表达式匹配独立的数字字符
+    # 全角数字到半角数字的映射
+    fullwidth_to_halfwidth = {
+        '０': '0', '１': '1', '２': '2', '３': '3', '４': '4',
+        '５': '5', '６': '6', '７': '7', '８': '8', '９': '9'
+    }
+
+    # 第一步：将全角数字转换为半角数字
+    result = text
+    for fullwidth, halfwidth in fullwidth_to_halfwidth.items():
+        result = result.replace(fullwidth, halfwidth)
+
+    # 第二步：替换所有半角数字
     def replace_digit(match):
         digit = match.group(0)
         return language_map.get(digit, digit)
 
-    # 替换所有单独的数字
-    result = re.sub(r'\d', replace_digit, text)
+    result = re.sub(r'\d', replace_digit, result)
 
     return result
 
@@ -723,6 +732,86 @@ def is_english_text(text: str) -> bool:
     # 允许的字符：英文字母、数字、常见标点、空格
     pattern = r'^[a-zA-Z0-9\s\.,!?\'";\:\-\(\)\[\]]+$'
     return bool(re.match(pattern, text.strip()))
+
+
+def contains_english(text: str) -> bool:
+    """
+    检查文本是否包含英文字母
+
+    Args:
+        text: 要检查的文本
+
+    Returns:
+        bool: 如果包含英文字母返回True，否则返回False
+    """
+    if not text:
+        return False
+
+    # 检查是否包含英文字母
+    return bool(re.search(r'[a-zA-Z]', text))
+
+
+def is_only_symbols(text: str) -> bool:
+    """
+    检查文本是否只包含符号、数字、空格，没有实际文字
+
+    Args:
+        text: 要检查的文本
+
+    Returns:
+        bool: 如果只有符号返回True，否则返回False
+    """
+    if not text:
+        return True
+
+    # 移除所有符号、数字、空格后，如果为空则说明只有符号
+    # 允许的符号：标点、空格、数字
+    text_without_symbols = re.sub(r'[0-9\s\.,!?\'";\:\-\(\)\[\]~`@#$%^&*+=<>{}|/\\]', '', text)
+    return len(text_without_symbols.strip()) == 0
+
+
+def extract_and_replace_english(text: str, to_kana: bool = False) -> str:
+    """
+    提取文本中的英文部分并替换为目标语言
+
+    类似于 extract_and_replace_chinese，但处理英文
+    批量处理所有英文片段，只加载一次模型
+
+    Args:
+        text: 原始文本
+        to_kana: 如果为True则转换为日语假名，否则转换为韩文
+
+    Returns:
+        str: 替换后的文本
+
+    Examples:
+        >>> extract_and_replace_english("こんにちは Hello World です", to_kana=True)
+        "こんにちは はろー わーるど です"
+    """
+    # 提取所有英文单词和短语
+    # 匹配连续的英文字母、数字、空格、连字符
+    english_segments = re.findall(r'[a-zA-Z][a-zA-Z0-9\s\-]*[a-zA-Z0-9]|[a-zA-Z]', text)
+
+    if not english_segments:
+        return text
+
+    # 去重，保持顺序
+    unique_english = list(dict.fromkeys(english_segments))
+
+    # 批量翻译
+    if to_kana:
+        translation_map = batch_translate_english_to_kana(unique_english)
+    else:
+        translation_map = batch_translate_english_to_korean(unique_english)
+
+    # 替换所有英文片段
+    result_text = text
+    for english_text in english_segments:
+        replacement = translation_map.get(english_text, english_text)
+        # 只替换第一次出现（按顺序替换）
+        result_text = result_text.replace(english_text, replacement, 1)
+
+    return result_text
 
 
 def batch_translate_english_to_kana(english_texts: list) -> dict:
