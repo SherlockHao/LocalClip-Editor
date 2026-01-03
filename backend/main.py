@@ -1385,6 +1385,30 @@ async def run_voice_cloning_process(
         else:
             print(f"ℹ️  未发现需要替换的数字")
 
+        # 10.6. 标点符号清理：删除句首和句中的标点，保留句末标点
+        print(f"\n[标点清理] 开始清理译文中的多余标点符号...")
+        from text_utils import clean_punctuation_in_sentence
+
+        # 遍历所有译文，清理标点
+        punctuation_cleaned_count = 0
+        for idx, subtitle in enumerate(target_subtitles):
+            original_text = subtitle["text"]
+            cleaned_text = clean_punctuation_in_sentence(original_text)
+
+            if cleaned_text != original_text:
+                subtitle["text"] = cleaned_text
+                punctuation_cleaned_count += 1
+                print(f"  [{idx}] '{original_text}' -> '{cleaned_text}'")
+
+        if punctuation_cleaned_count > 0:
+            print(f"\n✅ 成功清理 {punctuation_cleaned_count} 条译文中的标点")
+            # 保存更新后的字幕文件
+            print(f"[标点清理] 保存更新后的字幕到: {target_subtitle_path}")
+            srt_parser.save_srt(target_subtitles, target_subtitle_path)
+            print(f"✅ 字幕文件已更新")
+        else:
+            print(f"ℹ️  未发现需要清理的标点")
+
         # 11. 准备批量生成任务
         voice_cloning_status[task_id] = {
             "status": "processing",
@@ -2693,6 +2717,33 @@ async def run_batch_translation(task_id: str, source_subtitle_filename: str, tar
                 print(f"✅ 字幕文件已更新")
             else:
                 print(f"ℹ️  未发现需要替换的数字")
+
+            # 6. 标点符号清理：删除句首和句中的标点，保留句末标点
+            print(f"\n[批量翻译-{task_id}] 开始清理译文中的多余标点符号...")
+            translation_status[task_id]["message"] = "正在清理标点..."
+            translation_status[task_id]["progress"] = 98
+
+            from text_utils import clean_punctuation_in_sentence
+
+            # 重新读取最新的字幕
+            target_subtitles = srt_parser.parse_srt(target_srt_path)
+
+            punctuation_cleaned_count = 0
+            for idx, subtitle in enumerate(target_subtitles):
+                original_text = subtitle["text"]
+                cleaned_text = clean_punctuation_in_sentence(original_text)
+
+                if cleaned_text != original_text:
+                    subtitle["text"] = cleaned_text
+                    punctuation_cleaned_count += 1
+                    print(f"  [{idx}] '{original_text}' -> '{cleaned_text}'")
+
+            if punctuation_cleaned_count > 0:
+                print(f"\n✅ 成功清理 {punctuation_cleaned_count} 条译文中的标点")
+                srt_parser.save_srt(target_subtitles, target_srt_path)
+                print(f"✅ 字幕文件已更新")
+            else:
+                print(f"ℹ️  未发现需要清理的标点")
 
             print(f"\n[批量翻译-{task_id}] ===== 质量检查和优化完成 =====\n")
 

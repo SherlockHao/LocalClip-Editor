@@ -1090,3 +1090,74 @@ Korean (Hangul ONLY):"""
             translation_map[text] = text
 
     return translation_map
+
+
+def clean_punctuation_in_sentence(text: str) -> str:
+    """
+    清理句子中的标点符号：删除句首和句中的标点，保留句末标点
+
+    删除的标点包括：
+    - 半角: , . ? ! ...
+    - 全角: ，。？！…、
+
+    规则：
+    1. 删除句子开头的所有标点符号
+    2. 删除句子中间的所有标点符号
+    3. 保留句子末尾的标点符号
+    4. 保留空格（某些语言如英语需要空格分隔单词）
+
+    Args:
+        text: 待处理文本
+
+    Returns:
+        str: 清理后的文本
+
+    Examples:
+        >>> clean_punctuation_in_sentence("，你好，世界。")
+        "你好世界。"
+
+        >>> clean_punctuation_in_sentence("Hello, world!")
+        "Hello world!"
+
+        >>> clean_punctuation_in_sentence("...测试，文本...")
+        "测试文本..."
+    """
+    if not text or not text.strip():
+        return text
+
+    # 定义要删除的标点符号（半角和全角）
+    # 不包括空格，因为某些语言（如英语）需要空格分隔单词
+    # 包括：逗号、句号、问号、感叹号、省略号、顿号
+    punctuation_to_remove = ',.?!…，。？！、'
+
+    # 去除首尾空白
+    text = text.strip()
+
+    if not text:
+        return text
+
+    # 1. 删除句首的所有标点符号
+    while text and text[0] in punctuation_to_remove:
+        text = text[1:]
+
+    if not text:
+        return text
+
+    # 2. 找到句末的标点符号位置（从后往前找第一个非标点字符）
+    end_punctuation_start = len(text)
+    for i in range(len(text) - 1, -1, -1):
+        if text[i] not in punctuation_to_remove:
+            end_punctuation_start = i + 1
+            break
+
+    # 3. 分离出句末标点
+    main_text = text[:end_punctuation_start]
+    end_punctuation = text[end_punctuation_start:]
+
+    # 4. 删除句中的所有标点符号
+    cleaned_main = ''.join(char for char in main_text if char not in punctuation_to_remove)
+
+    # 5. 重新组合：清理后的主体 + 句末标点
+    result = cleaned_main + end_punctuation
+
+    return result
