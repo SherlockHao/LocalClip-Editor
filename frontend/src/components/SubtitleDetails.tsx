@@ -779,7 +779,19 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
                   >
                     原音色
                   </button>
-                  {defaultVoices.map(voice => (
+                  {defaultVoices
+                    .filter(voice => {
+                      // 如果目标语言是印尼语，只显示印尼语音色
+                      const isIndonesian = targetLanguage === 'id' || targetLanguage === '印尼语' || targetLanguage?.toLowerCase().includes('indonesian');
+                      if (isIndonesian) {
+                        // 只显示以 "indonesian_" 开头的音色
+                        return voice.id.startsWith('indonesian_');
+                      } else {
+                        // 非印尼语时，不显示印尼语音色
+                        return !voice.id.startsWith('indonesian_');
+                      }
+                    })
+                    .map(voice => (
                     <div
                       key={voice.id}
                       className={`w-full px-3 py-2 text-xs hover:bg-slate-700 transition-colors flex items-center justify-between ${

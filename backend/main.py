@@ -47,7 +47,8 @@ def get_language_name(language_code: str) -> str:
         'ja': '日语',
         'fr': '法语',
         'de': '德语',
-        'es': '西班牙语'
+        'es': '西班牙语',
+        'id': '印尼语'
     }
     return language_map.get(language_code.lower(), language_code)
 
@@ -259,6 +260,61 @@ DEFAULT_VOICES = [
         "reference_text": "今天早晨市中心的主要道路因突发事故造成了严重堵塞，请驾驶员朋友们注意绕行并听从现场交警的指挥。"
     }
 ]
+
+# 印尼语默认音色库（VITS-TTS-ID）
+INDONESIAN_VOICES = [
+    {
+        "id": "indonesian_male",
+        "name": "印尼男声",
+        "speaker_name": "ardi",
+        "gender": "male",
+        "reference_text": "Halo, selamat datang di dunia sintesis suara Indonesia."
+    },
+    {
+        "id": "indonesian_female",
+        "name": "印尼女声",
+        "speaker_name": "gadis",
+        "gender": "female",
+        "reference_text": "Suara ini dihasilkan menggunakan model VITS yang canggih."
+    }
+]
+
+
+def map_speakers_to_indonesian_voices(
+    speaker_references: Dict[int, Dict],
+    speaker_diarization_result: Dict
+) -> Dict[int, str]:
+    """
+    将说话人映射到印尼语音色
+
+    映射规则：
+    - 所有女声 → gadis (印尼女声)
+    - 所有男声 → ardi (印尼男声)
+
+    Args:
+        speaker_references: 说话人参考信息 {speaker_id: {...}}
+        speaker_diarization_result: 说话人识别结果（包含性别信息）
+
+    Returns:
+        {speaker_id: indonesian_speaker_name}
+        例如: {0: "ardi", 1: "gadis", 2: "ardi"}
+    """
+    speaker_to_indonesian = {}
+
+    # 获取性别信息
+    gender_dict = speaker_diarization_result.get("gender_dict", {})
+
+    # 遍历所有说话人
+    for speaker_id in sorted(speaker_references.keys()):
+        gender = gender_dict.get(str(speaker_id), "unknown")
+        if gender == "female":
+            # 女声 -> gadis
+            speaker_to_indonesian[speaker_id] = "gadis"
+        else:
+            # 男声（包括unknown）-> ardi
+            speaker_to_indonesian[speaker_id] = "ardi"
+
+    return speaker_to_indonesian
 
 @app.get("/")
 async def root():
@@ -917,12 +973,13 @@ async def run_voice_cloning_process(
         is_french = ('法' in target_language or 'fr' in target_language_lower or 'français' in target_language_lower)
         is_german = ('德' in target_language or 'de' in target_language_lower or 'deutsch' in target_language_lower)
         is_spanish = ('西班牙' in target_language or 'es' in target_language_lower or 'español' in target_language_lower or 'spanish' in target_language_lower)
+        is_indonesian = ('印尼' in target_language or 'id' in target_language_lower or 'indonesian' in target_language_lower or 'indonesia' in target_language_lower)
 
         # 不同语言使用不同的长度比例限制
         if is_japanese or is_korean:
             max_ratio = 3  # 日语/韩语：假名/谚文字符多
-        elif is_french or is_german or is_spanish:
-            max_ratio = 1.5  # 法语/德语/西班牙语：拉丁字母比英语略长
+        elif is_french or is_german or is_spanish or is_indonesian:
+            max_ratio = 1.5  # 法语/德语/西班牙语/印尼语：拉丁字母比英语略长
         else:
             max_ratio = 1.2  # 英语等其他语言
 
@@ -1361,7 +1418,8 @@ async def run_voice_cloning_process(
             '日语': 'ja',
             '法语': 'fr',
             '德语': 'de',
-            '西班牙语': 'es'
+            '西班牙语': 'es',
+            '印尼语': 'id'
         }
         target_lang_code = language_code_map.get(target_language, target_language.lower())
 
@@ -1409,56 +1467,272 @@ async def run_voice_cloning_process(
         else:
             print(f"ℹ️  未发现需要清理的标点")
 
-        # 11. 准备批量生成任务
-        voice_cloning_status[task_id] = {
-            "status": "processing",
-            "message": "正在批量生成克隆语音...",
-            "progress": 20
-        }
-        await asyncio.sleep(0.5)
+        # 10.7. 检测是否为印尼语
+        is_indonesian = ('印尼' in target_language or
+                         'indonesian' in target_language.lower() or
+                         'indonesia' in target_language.lower() or
+                         'id' == target_language.lower())
 
-        cloned_audio_dir = os.path.join("exports", f"cloned_{task_id}")
-        os.makedirs(cloned_audio_dir, exist_ok=True)
+        if is_indonesian:
+            # ========== 印尼语 TTS 分支 ==========
+            print("\n" + "=" * 70)
+            print("[印尼语TTS] 检测到印尼语，使用 VITS-TTS-ID 模型...")
+            print("=" * 70)
 
-        # 准备任务列表
-        tasks = []
-        cloned_results = []
-
-        print(f"\n[DEBUG] 准备任务列表")
-        print(f"  speaker_labels 长度: {len(speaker_labels)}")
-        print(f"  target_subtitles 长度: {len(target_subtitles)}")
-        print(f"  target_subtitles 中前3条文本:")
-        for i in range(min(3, len(target_subtitles))):
-            print(f"    [{i}] {target_subtitles[i]['text']}")
-
-        # 检查长度不一致的情况
-        if len(speaker_labels) != len(target_subtitles):
-            error_msg = (
-                f"❌ 字幕文件行数不匹配！\n"
-                f"   原语言字幕: {len(speaker_labels)} 条\n"
-                f"   目标语言字幕: {len(target_subtitles)} 条\n"
-                f"   💡 请确保两个字幕文件的行数完全一致（每一行原文对应一行译文）"
-            )
-            print(f"\n{error_msg}")
-
-            # 更新状态为失败
-            voice_cloning_status[task_id] = {
-                "status": "failed",
-                "message": f"字幕文件行数不匹配: 原文{len(speaker_labels)}条 vs 译文{len(target_subtitles)}条",
-                "progress": 0
+            # 1. 说话人到印尼语音色的映射
+            speaker_diarization_result = {
+                "gender_dict": gender_dict,
+                "speaker_name_mapping": speaker_name_mapping
             }
 
-            raise ValueError(error_msg)
+            speaker_to_indonesian = map_speakers_to_indonesian_voices(
+                speaker_references,
+                speaker_diarization_result
+            )
 
-        for idx, (speaker_id, target_sub) in enumerate(zip(speaker_labels, target_subtitles)):
-            target_text = target_sub["text"]
+            print(f"\n[印尼语TTS] 说话人音色映射:")
+            for speaker_id, indo_voice in speaker_to_indonesian.items():
+                speaker_name = speaker_name_mapping.get(str(speaker_id), f"说话人{speaker_id}")
+                print(f"  {speaker_name} → {indo_voice}")
 
-            if speaker_id is None or speaker_id not in speaker_npy_files:
-                # 没有分配说话人或说话人编码失败的片段，记录但不生成
-                cloned_results.append({
-                    "index": idx,
-                    "speaker_id": speaker_id,
+            # 2. 准备批量生成任务
+            cloned_audio_dir = os.path.join("exports", f"cloned_{task_id}")
+            os.makedirs(cloned_audio_dir, exist_ok=True)
+
+            # 检查字幕文件行数
+            if len(speaker_labels) != len(target_subtitles):
+                error_msg = (
+                    f"❌ 字幕文件行数不匹配！\n"
+                    f"   原语言字幕: {len(speaker_labels)} 条\n"
+                    f"   目标语言字幕: {len(target_subtitles)} 条\n"
+                    f"   💡 请确保两个字幕文件的行数完全一致（每一行原文对应一行译文）"
+                )
+                print(f"\n{error_msg}")
+                voice_cloning_status[task_id] = {
+                    "status": "failed",
+                    "message": f"字幕文件行数不匹配",
+                    "progress": 0
+                }
+                raise ValueError(error_msg)
+
+            indonesian_tasks = []
+            for idx, (speaker_id, target_sub) in enumerate(zip(speaker_labels, target_subtitles)):
+                # 获取印尼语音色
+                indonesian_speaker = speaker_to_indonesian.get(speaker_id, "ardi")
+                target_text = target_sub["text"]
+                output_file = os.path.join(cloned_audio_dir, f"segment_{idx}.wav")
+
+                indonesian_tasks.append({
+                    "segment_index": idx,
+                    "speaker_name": indonesian_speaker,
                     "target_text": target_text,
+                    "output_file": output_file
+                })
+
+            print(f"\n[印尼语TTS] 准备生成 {len(indonesian_tasks)} 个音频片段")
+
+            # 3. 调用印尼语 TTS 批量生成
+            voice_cloning_status[task_id] = {
+                "status": "processing",
+                "message": "正在使用印尼语TTS生成语音...",
+                "progress": 20
+            }
+            await asyncio.sleep(0.5)
+
+            from indonesian_tts_cloner import IndonesianTTSCloner
+
+            # 获取环境配置
+            tts_id_env_python = os.environ.get("TTS_ID_PYTHON")
+            if not tts_id_env_python:
+                # 默认路径
+                import platform
+                if platform.system() == "Windows":
+                    tts_id_env_python = "C:/Users/7/miniconda3/envs/tts-id-py311/python.exe"
+                else:
+                    tts_id_env_python = os.path.expanduser("~/miniconda3/envs/tts-id-py311/bin/python")
+
+            model_dir = os.environ.get("VITS_TTS_ID_MODEL_DIR")
+            if not model_dir:
+                # 默认路径: backend -> LocalClip-Editor -> workspace -> ai_editing -> models
+                backend_dir = os.path.dirname(os.path.abspath(__file__))
+                model_dir = os.path.join(backend_dir, "..", "..", "..", "models", "vits-tts-id")
+                model_dir = os.path.abspath(model_dir)
+                print(f"[印尼语TTS DEBUG] backend_dir: {backend_dir}")
+                print(f"[印尼语TTS DEBUG] model_dir (resolved): {model_dir}")
+
+            print(f"[印尼语TTS] Python环境: {tts_id_env_python}")
+            print(f"[印尼语TTS] 模型路径: {model_dir}")
+
+            if not os.path.exists(tts_id_env_python):
+                error_msg = f"TTS-ID Python环境不存在: {tts_id_env_python}"
+                print(f"❌ {error_msg}")
+                voice_cloning_status[task_id] = {
+                    "status": "failed",
+                    "message": error_msg,
+                    "progress": 0
+                }
+                raise FileNotFoundError(error_msg)
+
+            if not os.path.exists(model_dir):
+                error_msg = f"印尼语TTS模型不存在: {model_dir}"
+                print(f"❌ {error_msg}")
+                voice_cloning_status[task_id] = {
+                    "status": "failed",
+                    "message": error_msg,
+                    "progress": 0
+                }
+                raise FileNotFoundError(error_msg)
+
+            cloner = IndonesianTTSCloner(model_dir, tts_id_env_python)
+
+            # 进度回调
+            def update_indonesian_progress(current, total):
+                progress = 20 + int((current / total) * 70)  # 20-90%
+                voice_cloning_status[task_id] = {
+                    "status": "processing",
+                    "message": f"正在生成印尼语语音 ({current}/{total})...",
+                    "progress": progress
+                }
+
+            config_file = os.path.join(cloned_audio_dir, "indonesian_tts_config.json")
+
+            segment_files = cloner.batch_generate_audio(
+                indonesian_tasks,
+                config_file,
+                progress_callback=update_indonesian_progress
+            )
+
+            print(f"\n[印尼语TTS] ✅ 成功生成 {len(segment_files)} 个音频片段")
+
+            # 准备 cloned_results（印尼语TTS结果）
+            cloned_results = []
+            for idx, (speaker_id, target_sub) in enumerate(zip(speaker_labels, target_subtitles)):
+                if idx in segment_files:
+                    # 生成API路径
+                    audio_filename = f"segment_{idx}.wav"
+                    api_path = f"/cloned-audio/{task_id}/{audio_filename}"
+
+                    cloned_results.append({
+                        "index": idx,
+                        "speaker_id": speaker_id,
+                        "target_text": target_sub["text"],
+                        "cloned_audio_path": api_path,
+                        "start_time": target_sub.get("start_time", 0),
+                        "end_time": target_sub.get("end_time", 0)
+                    })
+                else:
+                    cloned_results.append({
+                        "index": idx,
+                        "speaker_id": speaker_id,
+                        "target_text": target_sub["text"],
+                        "cloned_audio_path": None,
+                        "error": "生成失败",
+                        "start_time": target_sub.get("start_time", 0),
+                        "end_time": target_sub.get("end_time", 0)
+                    })
+
+            # 计算总耗时
+            end_time = time.time()
+            total_duration = end_time - start_time
+
+            # 格式化时间显示
+            def format_duration(seconds):
+                """将秒数格式化为易读的时间字符串"""
+                if seconds < 60:
+                    return f"{seconds:.1f}秒"
+                elif seconds < 3600:
+                    minutes = int(seconds // 60)
+                    secs = int(seconds % 60)
+                    return f"{minutes}分{secs}秒"
+                else:
+                    hours = int(seconds // 3600)
+                    minutes = int((seconds % 3600) // 60)
+                    return f"{hours}小时{minutes}分钟"
+
+            duration_str = format_duration(total_duration)
+
+            # 创建完整的初始音色映射（印尼语音色映射）
+            complete_initial_mapping = {}
+            for speaker_id in speaker_references.keys():
+                speaker_id_str = str(speaker_id)
+                indonesian_voice = speaker_to_indonesian.get(speaker_id, "ardi")
+                complete_initial_mapping[speaker_id_str] = f"indonesian_{indonesian_voice}"
+
+            # 更新状态：完成
+            voice_cloning_status[task_id] = {
+                "status": "completed",
+                "message": f"印尼语语音克隆完成 (耗时: {duration_str})",
+                "progress": 100,
+                "speaker_references": speaker_references,
+                "unique_speakers": len(speaker_references),
+                "speaker_name_mapping": speaker_name_mapping,
+                "gender_dict": gender_dict,
+                "cloned_results": cloned_results,
+                "audio_dir": audio_dir,
+                "cloned_audio_dir": cloned_audio_dir,
+                "initial_speaker_voice_mapping": complete_initial_mapping,
+                "total_duration": total_duration,
+                "duration_str": duration_str
+            }
+
+            print(f"\n✅ 印尼语语音克隆任务 {task_id} 成功完成！")
+            print(f"⏱️  总耗时: {duration_str}")
+            return  # 显式返回，结束印尼语分支
+
+        else:
+            # ========== Fish-Speech 分支 ==========
+            # 原有的Fish-Speech流程继续...
+
+            # 11. 准备批量生成任务（Fish-Speech分支）
+            voice_cloning_status[task_id] = {
+                "status": "processing",
+                "message": "正在批量生成克隆语音...",
+                "progress": 20
+            }
+            await asyncio.sleep(0.5)
+
+            cloned_audio_dir = os.path.join("exports", f"cloned_{task_id}")
+            os.makedirs(cloned_audio_dir, exist_ok=True)
+
+            # 准备任务列表
+            tasks = []
+            cloned_results = []
+
+            print(f"\n[DEBUG] 准备任务列表")
+            print(f"  speaker_labels 长度: {len(speaker_labels)}")
+            print(f"  target_subtitles 长度: {len(target_subtitles)}")
+            print(f"  target_subtitles 中前3条文本:")
+            for i in range(min(3, len(target_subtitles))):
+                print(f"    [{i}] {target_subtitles[i]['text']}")
+
+            # 检查长度不一致的情况
+            if len(speaker_labels) != len(target_subtitles):
+                error_msg = (
+                    f"❌ 字幕文件行数不匹配！\n"
+                    f"   原语言字幕: {len(speaker_labels)} 条\n"
+                    f"   目标语言字幕: {len(target_subtitles)} 条\n"
+                    f"   💡 请确保两个字幕文件的行数完全一致（每一行原文对应一行译文）"
+                )
+                print(f"\n{error_msg}")
+
+                # 更新状态为失败
+                voice_cloning_status[task_id] = {
+                    "status": "failed",
+                    "message": f"字幕文件行数不匹配: 原文{len(speaker_labels)}条 vs 译文{len(target_subtitles)}条",
+                    "progress": 0
+                }
+
+                raise ValueError(error_msg)
+
+            for idx, (speaker_id, target_sub) in enumerate(zip(speaker_labels, target_subtitles)):
+                target_text = target_sub["text"]
+
+                if speaker_id is None or speaker_id not in speaker_npy_files:
+                    # 没有分配说话人或说话人编码失败的片段，记录但不生成
+                    cloned_results.append({
+                        "index": idx,
+                        "speaker_id": speaker_id,
+                        "target_text": target_text,
                     "cloned_audio_path": None,
                     "start_time": target_sub.get("start_time", 0),
                     "end_time": target_sub.get("end_time", 0)
@@ -1473,134 +1747,134 @@ async def run_voice_cloning_process(
                     "end_time": target_sub.get("end_time", 0)
                 })
 
-        # 批量生成所有语音
-        print(f"\n🚀 批量生成 {len(tasks)} 个语音片段...")
+            # 批量生成所有语音
+            print(f"\n🚀 批量生成 {len(tasks)} 个语音片段...")
 
-        # 定义进度回调函数
-        def voice_cloning_progress_callback(current, total):
-            # 20-95% 的进度用于语音生成（前20%给前置操作，后80%给克隆）
-            progress = 20 + int((current / total) * 75)
-            voice_cloning_status[task_id]["progress"] = progress
-            voice_cloning_status[task_id]["message"] = f"正在生成语音... ({current}/{total})"
+            # 定义进度回调函数
+            def voice_cloning_progress_callback(current, total):
+                # 20-95% 的进度用于语音生成（前20%给前置操作，后80%给克隆）
+                progress = 20 + int((current / total) * 75)
+                voice_cloning_status[task_id]["progress"] = progress
+                voice_cloning_status[task_id]["message"] = f"正在生成语音... ({current}/{total})"
             # 调试日志已移除 - 减少日志输出
 
-        # 将生成脚本保存到audio_dir下的scripts目录，避免触发uvicorn reload
-        script_dir = os.path.join(audio_dir, "scripts")
+            # 将生成脚本保存到audio_dir下的scripts目录，避免触发uvicorn reload
+            script_dir = os.path.join(audio_dir, "scripts")
 
-        # 在线程池中运行语音生成（避免阻塞事件循环）
-        def run_batch_generation():
-            return batch_cloner.batch_generate_audio(
-                tasks,
-                speaker_npy_files,
-                speaker_references,
-                cloned_audio_dir,
-                script_dir=script_dir,
-                progress_callback=voice_cloning_progress_callback
+            # 在线程池中运行语音生成（避免阻塞事件循环）
+            def run_batch_generation():
+                return batch_cloner.batch_generate_audio(
+                    tasks,
+                    speaker_npy_files,
+                    speaker_references,
+                    cloned_audio_dir,
+                    script_dir=script_dir,
+                    progress_callback=voice_cloning_progress_callback
+                )
+
+            loop = asyncio.get_event_loop()
+            generated_audio_files = await loop.run_in_executor(
+                None,  # 使用默认线程池
+                run_batch_generation
             )
 
-        loop = asyncio.get_event_loop()
-        generated_audio_files = await loop.run_in_executor(
-            None,  # 使用默认线程池
-            run_batch_generation
-        )
+            # 调试：打印生成结果
+            print(f"\n[DEBUG] generated_audio_files 类型: {type(generated_audio_files)}")
+            print(f"[DEBUG] generated_audio_files 键示例 (前3个): {list(generated_audio_files.keys())[:3]}")
+            print(f"[DEBUG] generated_audio_files 示例:")
+            for key in list(generated_audio_files.keys())[:3]:
+                print(f"  key={key} (type={type(key)}), value={generated_audio_files[key]}")
 
-        # 调试：打印生成结果
-        print(f"\n[DEBUG] generated_audio_files 类型: {type(generated_audio_files)}")
-        print(f"[DEBUG] generated_audio_files 键示例 (前3个): {list(generated_audio_files.keys())[:3]}")
-        print(f"[DEBUG] generated_audio_files 示例:")
-        for key in list(generated_audio_files.keys())[:3]:
-            print(f"  key={key} (type={type(key)}), value={generated_audio_files[key]}")
+            # 更新结果，添加生成成功的音频路径
+            for task in tasks:
+                segment_index = task["segment_index"]
+                if segment_index in generated_audio_files:
+                    # 生成API路径（与 fish_simple_cloner.py 中的文件名格式一致）
+                    audio_filename = f"segment_{segment_index}.wav"
+                    api_path = f"/cloned-audio/{task_id}/{audio_filename}"
 
-        # 更新结果，添加生成成功的音频路径
-        for task in tasks:
-            segment_index = task["segment_index"]
-            if segment_index in generated_audio_files:
-                # 生成API路径（与 fish_simple_cloner.py 中的文件名格式一致）
-                audio_filename = f"segment_{segment_index}.wav"
-                api_path = f"/cloned-audio/{task_id}/{audio_filename}"
+                    cloned_results.append({
+                        "index": segment_index,
+                        "speaker_id": task["speaker_id"],
+                        "target_text": task["target_text"],
+                        "cloned_audio_path": api_path,
+                        "start_time": task.get("start_time", 0),
+                        "end_time": task.get("end_time", 0)
+                    })
+                else:
+                    cloned_results.append({
+                        "index": segment_index,
+                        "speaker_id": task["speaker_id"],
+                        "target_text": task["target_text"],
+                        "cloned_audio_path": None,
+                        "error": "生成失败",
+                        "start_time": task.get("start_time", 0),
+                        "end_time": task.get("end_time", 0)
+                    })
 
-                cloned_results.append({
-                    "index": segment_index,
-                    "speaker_id": task["speaker_id"],
-                    "target_text": task["target_text"],
-                    "cloned_audio_path": api_path,
-                    "start_time": task.get("start_time", 0),
-                    "end_time": task.get("end_time", 0)
-                })
-            else:
-                cloned_results.append({
-                    "index": segment_index,
-                    "speaker_id": task["speaker_id"],
-                    "target_text": task["target_text"],
-                    "cloned_audio_path": None,
-                    "error": "生成失败",
-                    "start_time": task.get("start_time", 0),
-                    "end_time": task.get("end_time", 0)
-                })
+            # 按索引排序结果
+            cloned_results.sort(key=lambda x: x["index"])
 
-        # 按索引排序结果
-        cloned_results.sort(key=lambda x: x["index"])
+            # 调试：打印前几个结果（包含 target_text）
+            print(f"\n[DEBUG] cloned_results 示例 (前3个):")
+            for i, result in enumerate(cloned_results[:3]):
+                print(f"  [{i}] index={result['index']}, speaker_id={result['speaker_id']}")
+                print(f"      target_text='{result['target_text']}'")
+                print(f"      cloned_audio_path={result.get('cloned_audio_path', 'None')}")
 
-        # 调试：打印前几个结果（包含 target_text）
-        print(f"\n[DEBUG] cloned_results 示例 (前3个):")
-        for i, result in enumerate(cloned_results[:3]):
-            print(f"  [{i}] index={result['index']}, speaker_id={result['speaker_id']}")
-            print(f"      target_text='{result['target_text']}'")
-            print(f"      cloned_audio_path={result.get('cloned_audio_path', 'None')}")
+            # 计算总耗时
+            end_time = time.time()
+            total_duration = end_time - start_time
 
-        # 计算总耗时
-        end_time = time.time()
-        total_duration = end_time - start_time
+            # 格式化时间显示
+            def format_duration(seconds):
+                """将秒数格式化为易读的时间字符串"""
+                if seconds < 60:
+                    return f"{seconds:.1f}秒"
+                elif seconds < 3600:
+                    minutes = int(seconds // 60)
+                    secs = int(seconds % 60)
+                    return f"{minutes}分{secs}秒"
+                else:
+                    hours = int(seconds // 3600)
+                    minutes = int((seconds % 3600) // 60)
+                    return f"{hours}小时{minutes}分钟"
 
-        # 格式化时间显示
-        def format_duration(seconds):
-            """将秒数格式化为易读的时间字符串"""
-            if seconds < 60:
-                return f"{seconds:.1f}秒"
-            elif seconds < 3600:
-                minutes = int(seconds // 60)
-                secs = int(seconds % 60)
-                return f"{minutes}分{secs}秒"
-            else:
-                hours = int(seconds // 3600)
-                minutes = int((seconds % 3600) // 60)
-                return f"{hours}小时{minutes}分钟"
+            duration_str = format_duration(total_duration)
 
-        duration_str = format_duration(total_duration)
+            # 创建完整的初始音色映射（为所有说话人设置默认值）
+            complete_initial_mapping = {}
+            for speaker_id in speaker_references.keys():
+                speaker_id_str = str(speaker_id)
+                complete_initial_mapping[speaker_id_str] = speaker_voice_mapping.get(speaker_id_str, "default")
 
-        # 创建完整的初始音色映射（为所有说话人设置默认值）
-        complete_initial_mapping = {}
-        for speaker_id in speaker_references.keys():
-            speaker_id_str = str(speaker_id)
-            complete_initial_mapping[speaker_id_str] = speaker_voice_mapping.get(speaker_id_str, "default")
+            # 更新状态：完成
+            voice_cloning_status[task_id] = {
+                "status": "completed",
+                "message": f"语音克隆完成 (耗时: {duration_str})",
+                "progress": 100,
+                "speaker_references": speaker_references,
+                "unique_speakers": len(speaker_references),
+                "speaker_name_mapping": speaker_name_mapping,
+                "gender_dict": gender_dict,
+                "cloned_results": cloned_results,
+                "audio_dir": audio_dir,  # 保存音频片段目录
+                "cloned_audio_dir": cloned_audio_dir,  # 保存克隆音频目录
+                "initial_speaker_voice_mapping": complete_initial_mapping,  # 保存完整的初始音色映射
+                "total_duration": total_duration,  # 原始秒数
+                "duration_str": duration_str  # 格式化的时间字符串
+            }
 
-        # 更新状态：完成
-        voice_cloning_status[task_id] = {
-            "status": "completed",
-            "message": f"语音克隆完成 (耗时: {duration_str})",
-            "progress": 100,
-            "speaker_references": speaker_references,
-            "unique_speakers": len(speaker_references),
-            "speaker_name_mapping": speaker_name_mapping,
-            "gender_dict": gender_dict,
-            "cloned_results": cloned_results,
-            "audio_dir": audio_dir,  # 保存音频片段目录
-            "cloned_audio_dir": cloned_audio_dir,  # 保存克隆音频目录
-            "initial_speaker_voice_mapping": complete_initial_mapping,  # 保存完整的初始音色映射
-            "total_duration": total_duration,  # 原始秒数
-            "duration_str": duration_str  # 格式化的时间字符串
-        }
+            print(f"\n语音克隆准备完成！")
+            print(f"识别到 {len(speaker_references)} 个说话人")
+            for speaker_id, ref_data in speaker_references.items():
+                print(f"\n{ref_data['speaker_name']} (ID: {speaker_id}, 性别: {ref_data['gender']}):")
+                print(f"  参考音频: {ref_data['reference_audio']}")
+                print(f"  参考文本: {ref_data['reference_text'][:100]}...")
 
-        print(f"\n语音克隆准备完成！")
-        print(f"识别到 {len(speaker_references)} 个说话人")
-        for speaker_id, ref_data in speaker_references.items():
-            print(f"\n{ref_data['speaker_name']} (ID: {speaker_id}, 性别: {ref_data['gender']}):")
-            print(f"  参考音频: {ref_data['reference_audio']}")
-            print(f"  参考文本: {ref_data['reference_text'][:100]}...")
-
-        print(f"\n✅ 语音克隆任务 {task_id} 成功完成！")
-        print(f"⏱️  总耗时: {duration_str}")
-        return  # 显式返回，确保函数正常结束
+            print(f"\n✅ 语音克隆任务 {task_id} 成功完成！")
+            print(f"⏱️  总耗时: {duration_str}")
+            return  # 显式返回，确保函数正常结束
 
     except Exception as e:
         # 计算失败时的耗时
@@ -1646,6 +1920,12 @@ async def get_default_voices():
         }
         voices.append(voice_info)
     return {"voices": voices}
+
+
+@app.get("/voice-cloning/indonesian-voices")
+async def get_indonesian_voices():
+    """获取印尼语默认音色库列表"""
+    return {"voices": INDONESIAN_VOICES}
 
 
 @app.get("/default-voices/{filename}")
@@ -2694,7 +2974,8 @@ async def run_batch_translation(task_id: str, source_subtitle_filename: str, tar
                 '日语': 'ja',
                 '法语': 'fr',
                 '德语': 'de',
-                '西班牙语': 'es'
+                '西班牙语': 'es',
+                '印尼语': 'id'
             }
             target_lang_code = language_code_map.get(target_language, target_language.lower())
 

@@ -258,6 +258,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 <option value="fr">法语</option>
                 <option value="de">德语</option>
                 <option value="es">西班牙语</option>
+                <option value="id">印尼语</option>
               </select>
               {!speakerDiarizationCompleted && (
                 <p className="text-xs text-slate-500 mt-1.5">
