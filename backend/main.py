@@ -306,7 +306,9 @@ def map_speakers_to_indonesian_voices(
 
     # 遍历所有说话人
     for speaker_id in sorted(speaker_references.keys()):
-        gender = gender_dict.get(str(speaker_id), "unknown")
+        # gender_dict 的键可能是整数或字符串，都尝试一下
+        gender = gender_dict.get(speaker_id) or gender_dict.get(str(speaker_id), "unknown")
+
         if gender == "female":
             # 女声 -> gadis
             speaker_to_indonesian[speaker_id] = "gadis"
@@ -1485,6 +1487,10 @@ async def run_voice_cloning_process(
                 "speaker_name_mapping": speaker_name_mapping
             }
 
+            # 调试：打印性别识别结果
+            print(f"\n[印尼语TTS DEBUG] gender_dict: {gender_dict}")
+            print(f"[印尼语TTS DEBUG] speaker_references keys: {list(speaker_references.keys())}")
+
             speaker_to_indonesian = map_speakers_to_indonesian_voices(
                 speaker_references,
                 speaker_diarization_result
@@ -1493,7 +1499,9 @@ async def run_voice_cloning_process(
             print(f"\n[印尼语TTS] 说话人音色映射:")
             for speaker_id, indo_voice in speaker_to_indonesian.items():
                 speaker_name = speaker_name_mapping.get(str(speaker_id), f"说话人{speaker_id}")
-                print(f"  {speaker_name} → {indo_voice}")
+                # 和映射函数使用相同的逻辑
+                gender = gender_dict.get(speaker_id) or gender_dict.get(str(speaker_id), "unknown")
+                print(f"  {speaker_name} (性别: {gender}) → {indo_voice}")
 
             # 2. 准备批量生成任务
             cloned_audio_dir = os.path.join("exports", f"cloned_{task_id}")
@@ -1656,7 +1664,12 @@ async def run_voice_cloning_process(
             for speaker_id in speaker_references.keys():
                 speaker_id_str = str(speaker_id)
                 indonesian_voice = speaker_to_indonesian.get(speaker_id, "ardi")
-                complete_initial_mapping[speaker_id_str] = f"indonesian_{indonesian_voice}"
+                # 映射到正确的 voice ID: ardi -> indonesian_male, gadis -> indonesian_female
+                if indonesian_voice == "gadis":
+                    voice_id = "indonesian_female"
+                else:  # ardi
+                    voice_id = "indonesian_male"
+                complete_initial_mapping[speaker_id_str] = voice_id
 
             # 更新状态：完成
             voice_cloning_status[task_id] = {
@@ -1909,8 +1922,10 @@ async def get_voice_cloning_status(task_id: str):
 
 @app.get("/voice-cloning/default-voices")
 async def get_default_voices():
-    """获取默认音色库列表"""
+    """获取默认音色库列表（包括Fish-Speech和印尼语音色）"""
     voices = []
+
+    # 添加 Fish-Speech 音色
     for voice in DEFAULT_VOICES:
         voice_info = {
             "id": voice["id"],
@@ -1919,6 +1934,17 @@ async def get_default_voices():
             "reference_text": voice["reference_text"]
         }
         voices.append(voice_info)
+
+    # 添加印尼语音色（没有音频文件，所以 audio_url 为空）
+    for voice in INDONESIAN_VOICES:
+        voice_info = {
+            "id": voice["id"],
+            "name": voice["name"],
+            "audio_url": "",  # 印尼语音色没有预览音频
+            "reference_text": voice.get("reference_text", "")
+        }
+        voices.append(voice_info)
+
     return {"voices": voices}
 
 
@@ -3235,6 +3261,133 @@ async def regenerate_segment(request: RegenerateSegmentRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _remove_silence_by_volume(
+    audio_data,
+    sample_rate: int,
+    window_ms: int = 50,
+    db_threshold: float = -50.0,
+    min_silence_windows: int = 2
+):
+    """
+    基于音量检测并移除静音段
+
+    Args:
+        audio_data: 音频数据
+        sample_rate: 采样率
+        window_ms: 窗口长度（毫秒）
+        db_threshold: dBFS阈值，低于此值视为静音
+        min_silence_windows: 连续多少个窗口低于阈值才视为静音
+
+    Returns:
+        移除静音后的音频数据
+    """
+    import numpy as np
+
+    if len(audio_data) == 0:
+        return audio_data
+
+    # 计算窗口大小（样本数）
+    window_samples = int(sample_rate * window_ms / 1000.0)
+
+    if window_samples == 0 or len(audio_data) < window_samples:
+        return audio_data
+
+    # 计算每个窗口的dBFS
+    num_windows = len(audio_data) // window_samples
+    db_values = []
+
+    for i in range(num_windows):
+        start = i * window_samples
+        end = start + window_samples
+        window = audio_data[start:end]
+
+        # 计算RMS
+        rms = np.sqrt(np.mean(window ** 2))
+
+        # 转换为dBFS（相对于满量程）
+        if rms > 1e-10:  # 避免log(0)
+            db = 20 * np.log10(rms)
+        else:
+            db = -100.0
+
+        db_values.append(db)
+
+    # 标记每个窗口是否为语音
+    is_speech = []
+    for i in range(len(db_values)):
+        # 检查连续的窗口
+        silence_count = 0
+        for j in range(min_silence_windows):
+            if i + j < len(db_values) and db_values[i + j] < db_threshold:
+                silence_count += 1
+
+        # 如果连续窗口都低于阈值，标记为静音
+        is_speech.append(silence_count < min_silence_windows)
+
+    # 提取语音段
+    speech_segments = []
+    for i, speech in enumerate(is_speech):
+        if speech:
+            start = i * window_samples
+            end = min((i + 1) * window_samples, len(audio_data))
+            speech_segments.append(audio_data[start:end])
+
+    # 处理剩余的样本（不足一个窗口的部分）
+    remaining_start = num_windows * window_samples
+    if remaining_start < len(audio_data):
+        speech_segments.append(audio_data[remaining_start:])
+
+    if speech_segments:
+        result = np.concatenate(speech_segments)
+        reduction_ratio = (1 - len(result) / len(audio_data)) * 100
+        print(f"  [静音移除] 移除 {reduction_ratio:.1f}% 的静音段")
+        return result
+
+    return audio_data
+
+
+def _apply_fade_in_out(
+    audio_data,
+    sample_rate: int,
+    fade_ms: int = 10
+):
+    """
+    在音频首尾应用淡入淡出效果
+
+    Args:
+        audio_data: 音频数据
+        sample_rate: 采样率
+        fade_ms: 淡入淡出时长（毫秒）
+
+    Returns:
+        应用淡入淡出后的音频数据
+    """
+    import numpy as np
+
+    if len(audio_data) == 0:
+        return audio_data
+
+    # 计算淡入淡出的样本数
+    fade_samples = int(sample_rate * fade_ms / 1000.0)
+    fade_samples = min(fade_samples, len(audio_data) // 2)  # 不超过音频长度的一半
+
+    if fade_samples == 0:
+        return audio_data
+
+    # 创建副本避免修改原数据
+    result = audio_data.copy()
+
+    # 淡入（线性）
+    fade_in_curve = np.linspace(0, 1, fade_samples)
+    result[:fade_samples] *= fade_in_curve
+
+    # 淡出（线性）
+    fade_out_curve = np.linspace(1, 0, fade_samples)
+    result[-fade_samples:] *= fade_out_curve
+
+    return result
+
+
 def _replan_audio_timeline(
     cloned_results: List[Dict],
     cloned_audio_dir: str,
@@ -3388,30 +3541,21 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
 
         print(f"[音频拼接] 开始拼接任务 {task_id} 的音频片段...")
 
-        # 步骤1: 音频优化（VAD 去除静音）
+        # 步骤1: 优化过长的音频片段（仅使用VAD去除静音）
         from audio_optimizer import AudioOptimizer
-
-        print(f"[音频优化] 检查是否有需要优化的片段...")
         optimizer = AudioOptimizer()
         optimized_files = optimizer.optimize_segments_for_stitching(
-            cloned_results=cloned_results,
-            cloned_audio_dir=cloned_audio_dir,
-            threshold_ratio=1.1  # 超过目标长度10%的片段将被优化
+            cloned_results,
+            cloned_audio_dir,
+            threshold_ratio=1.1  # 超过10%就优化
         )
 
-        if optimized_files:
-            print(f"[音频优化] 成功优化 {len(optimized_files)} 个片段")
-        else:
-            print(f"[音频优化] 无需优化")
-
-        # 步骤2: 时间轴重新规划（VAD后仍超长的片段尝试借用相邻空闲时间）
-        print(f"[时间轴规划] 开始规划音频时间轴...")
+        # 步骤2: 重新规划时间轴（为超长片段借用相邻空闲时间）
         replanned_segments = _replan_audio_timeline(
-            cloned_results=cloned_results,
-            cloned_audio_dir=cloned_audio_dir,
-            optimized_files=optimized_files
+            cloned_results,
+            cloned_audio_dir,
+            optimized_files
         )
-        print(f"[时间轴规划] 完成，共调整 {len(replanned_segments)} 个片段的时间轴")
 
         # 获取原视频文件路径，用于提取原始音频音量
         video_file = status.get("video_file")
@@ -3460,13 +3604,9 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
                 print(f"[音频拼接] 跳过片段 {idx}: 没有克隆音频")
                 continue
 
-            # 优先使用优化后的文件路径，如果没有则使用原始文件
-            if idx in optimized_files:
-                audio_file_path = optimized_files[idx]
-            else:
-                # 构建实际文件路径
-                audio_filename = f"segment_{idx}.wav"
-                audio_file_path = os.path.join(cloned_audio_dir, audio_filename)
+            # 构建实际文件路径
+            audio_filename = f"segment_{idx}.wav"
+            audio_file_path = os.path.join(cloned_audio_dir, audio_filename)
 
             if not os.path.exists(audio_file_path):
                 print(f"[音频拼接] 跳过片段 {idx}: 文件不存在 {audio_file_path}")
@@ -3503,6 +3643,9 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
         # 按开始时间排序
         segments_with_timing.sort(key=lambda x: x["start_time"])
 
+        print(f"\n[音频拼接] ========== 开始处理 {len(segments_with_timing)} 个音频片段 ==========")
+        print(f"[音频拼接] 采样率: {sample_rate} Hz")
+
         # 处理每个片段的时长和音量
         processed_segments = []
 
@@ -3528,7 +3671,25 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
                 actual_start = seg["start_time"]
                 actual_end = seg["end_time"]
 
-            target_samples = int(target_duration * sample_rate)
+            # 步骤1: 如果音频过长，先尝试移除静音段
+            if len(audio_data) / sample_rate > target_duration * 1.05:  # 超过5%才处理
+                original_duration = len(audio_data) / sample_rate
+                audio_data = _remove_silence_by_volume(
+                    audio_data,
+                    sample_rate,
+                    window_ms=50,
+                    db_threshold=-50.0,
+                    min_silence_windows=2
+                )
+                new_duration = len(audio_data) / sample_rate
+                if new_duration < original_duration:
+                    print(f"  [片段 {idx}] 移除静音: {original_duration:.3f}s → {new_duration:.3f}s")
+
+            # 步骤2: 根据目标时长调整音频长度
+            # 使用精确的样本计算，避免累积误差
+            target_start_sample = int(actual_start * sample_rate + 0.5)  # 四舍五入
+            target_end_sample = int(actual_end * sample_rate + 0.5)
+            target_samples = target_end_sample - target_start_sample  # 精确的样本数
             actual_samples = len(audio_data)
 
             if actual_samples > target_samples:
@@ -3537,6 +3698,8 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
                 trim_left = excess_samples // 2
                 trim_right = excess_samples - trim_left
                 processed_audio = audio_data[trim_left:actual_samples - trim_right]
+                if excess_samples > sample_rate * 0.01:  # 超过10ms才输出日志
+                    print(f"  [片段 {idx}] 裁剪: -{excess_samples} 样本 ({excess_samples/sample_rate:.3f}s)")
 
             elif actual_samples < target_samples:
                 # 情况2: 音频过短，居中并两端补零
@@ -3544,10 +3707,29 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
                 pad_left = pad_samples // 2
                 pad_right = pad_samples - pad_left
                 processed_audio = np.pad(audio_data, (pad_left, pad_right), mode='constant', constant_values=0)
+                if pad_samples > sample_rate * 0.01:  # 超过10ms才输出日志
+                    print(f"  [片段 {idx}] 补零: +{pad_samples} 样本 ({pad_samples/sample_rate:.3f}s)")
 
             else:
                 # 情况3: 时长完全匹配
                 processed_audio = audio_data
+
+            # 最终验证：确保处理后的音频长度精确匹配目标样本数
+            if len(processed_audio) != target_samples:
+                print(f"  [片段 {idx}] 警告: 长度不匹配 实际={len(processed_audio)} 目标={target_samples}")
+                # 强制调整到精确长度
+                if len(processed_audio) > target_samples:
+                    processed_audio = processed_audio[:target_samples]
+                else:
+                    diff = target_samples - len(processed_audio)
+                    processed_audio = np.pad(processed_audio, (0, diff), mode='constant', constant_values=0)
+
+            # 步骤3: 应用淡入淡出效果（减少剪切感）
+            processed_audio = _apply_fade_in_out(
+                processed_audio,
+                sample_rate,
+                fade_ms=10  # 10ms快速淡入淡出
+            )
 
             # 调整音量以匹配原视频
             if original_volume is not None and original_volume > 1e-6:
@@ -3564,26 +3746,54 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
             })
 
         # 拼接所有片段，中间填充静音
+        # 关键：使用实际样本数计算位置，避免累积误差
         final_audio_parts = []
-        last_end_time = 0
+        current_sample_position = 0  # 当前实际样本位置
 
-        for seg in processed_segments:
-            # 计算与上一段的间隙
-            gap_duration = seg["start_time"] - last_end_time
+        print(f"[音频拼接] 开始精确拼接 {len(processed_segments)} 个片段...")
 
-            if gap_duration > 0.001:  # 大于1ms才填充静音
-                gap_samples = int(gap_duration * sample_rate)
-                silence = np.zeros(gap_samples, dtype=audio_data.dtype)
+        for i, seg in enumerate(processed_segments):
+            target_start_sample = int(seg["start_time"] * sample_rate + 0.5)  # 四舍五入
+            target_end_sample = int(seg["end_time"] * sample_rate + 0.5)
+
+            # 计算需要填充的静音样本数
+            gap_samples = target_start_sample - current_sample_position
+
+            if gap_samples > 0:
+                # 填充静音以对齐时间
+                silence = np.zeros(gap_samples, dtype=seg["audio"].dtype)
                 final_audio_parts.append(silence)
+                current_sample_position += gap_samples
+                print(f"  [片段 {i}] 填充静音: {gap_samples} 样本 ({gap_samples/sample_rate:.3f}s)")
+            elif gap_samples < 0:
+                # 负数表示重叠，这不应该发生，记录警告
+                print(f"  [片段 {i}] 警告: 时间重叠 {-gap_samples} 样本 ({-gap_samples/sample_rate:.3f}s)")
 
-            final_audio_parts.append(seg["audio"])
-            last_end_time = seg["end_time"]
+            # 添加音频片段
+            audio_segment = seg["audio"]
+            final_audio_parts.append(audio_segment)
+            current_sample_position += len(audio_segment)
+
+            # 验证实际位置与目标位置的偏差
+            expected_end_sample = target_end_sample
+            actual_end_sample = current_sample_position
+            drift_samples = actual_end_sample - expected_end_sample
+            drift_ms = (drift_samples / sample_rate) * 1000
+
+            if abs(drift_ms) > 1.0:  # 偏差超过1ms时输出警告
+                print(f"  [片段 {i}] 时间偏差: {drift_ms:+.2f}ms (累积样本偏差: {drift_samples:+d})")
 
         # 合并所有部分
         if not final_audio_parts:
             raise ValueError("没有音频部分可以拼接")
 
         final_audio = np.concatenate(final_audio_parts)
+
+        print(f"[音频拼接] 最终音频: {len(final_audio)} 样本 ({len(final_audio)/sample_rate:.3f}s)")
+        print(f"[音频拼接] 预期时长: {processed_segments[-1]['end_time']:.3f}s")
+        print(f"[音频拼接] 实际时长: {len(final_audio)/sample_rate:.3f}s")
+        final_drift = len(final_audio)/sample_rate - processed_segments[-1]['end_time']
+        print(f"[音频拼接] 总体偏差: {final_drift*1000:+.2f}ms")
 
         # 数据验证和清理
         has_nan = np.isnan(final_audio).any()

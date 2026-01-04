@@ -53,32 +53,102 @@ SESSION = requests.Session()
 SESSION.headers.update({'Content-Type': 'application/json'})
 
 
+def start_ollama_service():
+    """
+    自动启动 Ollama 服务
+    """
+    import subprocess
+    import platform
+
+    print("🚀 正在启动 Ollama 服务...", flush=True)
+
+    try:
+        if platform.system() == "Windows":
+            # Windows: 使用 START 命令在新窗口中启动 ollama serve
+            subprocess.Popen(
+                ["cmd", "/c", "start", "ollama", "serve"],
+                shell=False,
+                creationflags=subprocess.CREATE_NEW_CONSOLE
+            )
+        else:
+            # Linux/Mac: 后台启动
+            subprocess.Popen(
+                ["ollama", "serve"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+
+        # 等待服务启动
+        print("⏳ 等待 Ollama 服务启动...", flush=True)
+        max_retries = 10
+        for i in range(max_retries):
+            time.sleep(2)
+            try:
+                response = SESSION.get("http://127.0.0.1:11434/api/tags", timeout=2)
+                if response.status_code == 200:
+                    print(f"✅ Ollama 服务已启动！", flush=True)
+                    return True
+            except:
+                pass
+            print(f"  等待中... ({i+1}/{max_retries})", flush=True)
+
+        print("❌ Ollama 服务启动超时", flush=True)
+        return False
+
+    except Exception as e:
+        print(f"❌ 启动 Ollama 服务失败: {e}", flush=True)
+        return False
+
+
 def warm_up(model: str = "qwen2.5:7b"):
     """
     热启动函数：发送一个空请求，确保模型从硬盘加载到了显存中。
+    如果 Ollama 未启动，会自动启动服务。
     """
     print(f"🔥 正在进行热启动 (加载模型 {model} 到显存)...", flush=True)
     start = time.time()
-    try:
-        # 设置 keep_alive=-1 让模型永久保持在显存中
-        response = SESSION.post(
-            OLLAMA_API_URL,
-            json={
-                'model': model,
-                'messages': [{"role": "user", "content": "hi"}],
-                'max_tokens': 1,
-                'keep_alive': -1
-            },
-            timeout=30
-        )
-        response.raise_for_status()
-        elapsed = time.time() - start
-        print(f"✅ 热启动完成！加载耗时: {elapsed:.2f}s", flush=True)
-        print(f"✅ 模型已锁定在显存中（不会自动卸载）", flush=True)
-        print("-" * 60, flush=True)
-    except Exception as e:
-        print(f"❌ 连接 Ollama 失败，请检查服务是否开启。错误信息: {e}", flush=True)
-        raise
+
+    # 先尝试连接
+    max_attempts = 2
+    for attempt in range(max_attempts):
+        try:
+            # 设置 keep_alive=-1 让模型永久保持在显存中
+            response = SESSION.post(
+                OLLAMA_API_URL,
+                json={
+                    'model': model,
+                    'messages': [{"role": "user", "content": "hi"}],
+                    'max_tokens': 1,
+                    'keep_alive': -1
+                },
+                timeout=30
+            )
+            response.raise_for_status()
+            elapsed = time.time() - start
+            print(f"✅ 热启动完成！加载耗时: {elapsed:.2f}s", flush=True)
+            print(f"✅ 模型已锁定在显存中（不会自动卸载）", flush=True)
+            print("-" * 60, flush=True)
+            return
+
+        except requests.exceptions.ConnectionError as e:
+            if attempt == 0:
+                # 第一次失败，尝试启动 Ollama
+                print(f"⚠️ 无法连接到 Ollama 服务 (尝试 {attempt+1}/{max_attempts})", flush=True)
+                if start_ollama_service():
+                    # 重新计时
+                    start = time.time()
+                    continue
+                else:
+                    print(f"❌ 连接 Ollama 失败，请检查服务是否开启。错误信息: {e}", flush=True)
+                    raise
+            else:
+                # 第二次还是失败，抛出异常
+                print(f"❌ 连接 Ollama 失败，请检查服务是否开启。错误信息: {e}", flush=True)
+                raise
+        except Exception as e:
+            print(f"❌ 连接 Ollama 失败，请检查服务是否开启。错误信息: {e}", flush=True)
+            raise
 
 
 def translate_single(

@@ -502,6 +502,157 @@ else:
 
 ---
 
+### 优化 #2: 修复性别识别和音色显示
+**优化时间**: 2026-01-05
+
+**问题描述**:
+1. **女声未使用 gadis**: 所有说话人都使用 ardi 音色，女声没有使用 gadis
+2. **UI显示默认音色**: 印尼语模式下，UI显示"默认音色"而不是"印尼男"和"印尼女"
+
+**根本原因**:
+1. **gender_dict 键类型不匹配**:
+   - `gender_dict` 使用整数键: `{0: 'male', 1: 'female', ...}`
+   - 查询时使用字符串键: `gender_dict.get(str(speaker_id))`
+   - 导致所有查询返回 `"unknown"`，全部映射到 ardi
+
+2. **API未返回印尼语音色**:
+   - `/voice-cloning/default-voices` 只返回 Fish-Speech 音色
+   - 前端无法获取印尼语音色列表
+
+**修复方案**:
+
+**1. 修复性别识别** (`backend/main.py:307-319`):
+```python
+# 遍历所有说话人
+for speaker_id in sorted(speaker_references.keys()):
+    # gender_dict 的键可能是整数或字符串，都尝试一下
+    gender = gender_dict.get(speaker_id) or gender_dict.get(str(speaker_id), "unknown")
+
+    if gender == "female":
+        speaker_to_indonesian[speaker_id] = "gadis"
+    else:
+        speaker_to_indonesian[speaker_id] = "ardi"
+```
+
+**2. 修复音色API** (`backend/main.py:1915-1940`):
+```python
+@app.get("/voice-cloning/default-voices")
+async def get_default_voices():
+    voices = []
+
+    # 添加 Fish-Speech 音色
+    for voice in DEFAULT_VOICES:
+        voices.append({...})
+
+    # 添加印尼语音色
+    for voice in INDONESIAN_VOICES:
+        voices.append({
+            "id": voice["id"],
+            "name": voice["name"],
+            "audio_url": "",  # 印尼语音色没有预览音频
+            "reference_text": voice.get("reference_text", "")
+        })
+
+    return {"voices": voices}
+```
+
+**3. 添加调试日志** (`backend/main.py:1488-1501`):
+```python
+print(f"[印尼语TTS DEBUG] gender_dict: {gender_dict}")
+print(f"[印尼语TTS] 说话人音色映射:")
+for speaker_id, indo_voice in speaker_to_indonesian.items():
+    gender = gender_dict.get(speaker_id) or gender_dict.get(str(speaker_id), "unknown")
+    print(f"  {speaker_name} (性别: {gender}) → {indo_voice}")
+```
+
+**修改文件**:
+- `backend/main.py:307-319` - 修复性别识别键类型不匹配
+- `backend/main.py:1915-1940` - API返回所有音色（Fish-Speech + 印尼语）
+- `backend/main.py:1488-1501` - 添加调试日志
+
+**预期效果**:
+- ✅ 女性说话人自动映射到 gadis（印尼女声）
+- ✅ 男性说话人自动映射到 ardi（印尼男声）
+- ✅ UI正确显示"印尼男声"和"印尼女声"选项
+- ✅ 调试日志显示正确的性别识别结果
+
+**状态**: ✅ 已修复，待测试验证
+
+---
+
+### 优化 #3: 修复音色映射和数字替换
+**优化时间**: 2026-01-05
+
+**问题描述**:
+1. **UI显示"原音色"**: 印尼语模式下，说话人默认音色显示"原音色"而不是"印尼男声"或"印尼女声"
+2. **数字替换不支持**: 翻译时显示"不支持的语言代码: id，跳过数字替换"
+
+**根本原因**:
+1. **音色ID映射错误**:
+   - 代码生成: `indonesian_ardi` 或 `indonesian_gadis`
+   - 实际 voice ID: `indonesian_male` 或 `indonesian_female`
+   - 前端找不到匹配的音色，回退到"原音色"
+
+2. **缺少印尼语数字映射**:
+   - `digits_mapping.json` 只有 6 种语言（英、韩、日、法、德、西）
+   - 没有印尼语（id）的数字发音映射
+
+**修复方案**:
+
+**1. 修复音色ID映射** (`backend/main.py:1662-1672`):
+```python
+# 创建完整的初始音色映射（印尼语音色映射）
+complete_initial_mapping = {}
+for speaker_id in speaker_references.keys():
+    indonesian_voice = speaker_to_indonesian.get(speaker_id, "ardi")
+    # 映射到正确的 voice ID
+    if indonesian_voice == "gadis":
+        voice_id = "indonesian_female"
+    else:  # ardi
+        voice_id = "indonesian_male"
+    complete_initial_mapping[speaker_id_str] = voice_id
+```
+
+**2. 添加印尼语数字映射** (`backend/digits_mapping.json`):
+```json
+{
+  "id": {
+    "0": "nol",
+    "1": "satu",
+    "2": "dua",
+    "3": "tiga",
+    "4": "empat",
+    "5": "lima",
+    "6": "enam",
+    "7": "tujuh",
+    "8": "delapan",
+    "9": "sembilan"
+  }
+}
+```
+
+**3. 自动启动 Ollama** (`backend/batch_translate_ollama.py:56-151`):
+- 添加 `start_ollama_service()` 函数
+- 检测 Ollama 未启动时自动启动服务
+- Windows: 在新窗口启动 `ollama serve`
+- Linux/Mac: 后台启动
+- 等待最多20秒确认服务就绪
+
+**修改文件**:
+- `backend/main.py:1662-1672` - 修复音色ID映射
+- `backend/digits_mapping.json` - 添加印尼语数字发音
+- `backend/batch_translate_ollama.py:56-151` - 自动启动 Ollama
+
+**预期效果**:
+- ✅ UI正确显示"印尼男声"和"印尼女声"
+- ✅ 数字替换正常工作（如 "4" → "empat"）
+- ✅ Ollama 未启动时自动启动服务
+- ✅ 翻译流程无需手动干预
+
+**状态**: ✅ 已完成
+
+---
+
 ## 🎉 实现成果
 
 ✅ **翻译链路**: 支持印尼语翻译

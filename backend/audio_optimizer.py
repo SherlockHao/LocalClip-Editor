@@ -163,27 +163,6 @@ class AudioOptimizer:
             traceback.print_exc()
             return None
 
-    def time_stretch_audio(
-        self,
-        audio_data: np.ndarray,
-        rate: float = 1.05
-    ) -> np.ndarray:
-        """
-        对音频进行变速不变调处理
-
-        Args:
-            audio_data: 音频数据
-            rate: 变速倍率（>1 加速，<1 减速）
-
-        Returns:
-            变速后的音频数据
-        """
-        try:
-            stretched_audio = librosa.effects.time_stretch(audio_data, rate=rate)
-            return stretched_audio
-        except Exception as e:
-            print(f"[音频优化] 变速处理失败: {e}")
-            return audio_data
 
     def optimize_audio_segments(
         self,
@@ -221,7 +200,7 @@ class AudioOptimizer:
                 # 读取音频
                 audio_data, sr = sf.read(audio_file_path)
 
-                # 步骤1: 尝试使用 VAD 去除静音
+                # 使用 VAD 去除静音（不再使用变速）
                 if vad_available:
                     vad_audio = self.concatenate_speech_segments(audio_data, sr)
 
@@ -236,25 +215,16 @@ class AudioOptimizer:
                             )
                             sf.write(output_path, vad_audio, sr)
                             optimized_segments[index] = output_path
-                            continue
-
-                        # VAD 后仍然过长，使用 VAD 结果继续处理
-                        audio_data = vad_audio
-                        actual_duration = vad_duration
-
-                # 步骤2: 如果 VAD 后仍然过长，使用变速
-                if actual_duration > target_duration:
-                    rate = actual_duration / target_duration
-                    rate = min(max(rate, 1.0), 2.0)
-
-                    stretched_audio = self.time_stretch_audio(audio_data, rate=rate)
-
-                    output_path = os.path.join(
-                        cloned_audio_dir,
-                        f"segment_{index}_optimized.wav"
-                    )
-                    sf.write(output_path, stretched_audio, sr)
-                    optimized_segments[index] = output_path
+                            print(f"[音频优化] 片段 {index}: VAD优化成功，从 {actual_duration:.3f}s 缩短到 {vad_duration:.3f}s")
+                        else:
+                            # VAD 后仍然过长，也保存 VAD 结果（比原始音频短）
+                            output_path = os.path.join(
+                                cloned_audio_dir,
+                                f"segment_{index}_vad.wav"
+                            )
+                            sf.write(output_path, vad_audio, sr)
+                            optimized_segments[index] = output_path
+                            print(f"[音频优化] 片段 {index}: VAD优化部分成功，从 {actual_duration:.3f}s 缩短到 {vad_duration:.3f}s (仍超过目标 {target_duration:.3f}s，将通过时间轴规划和裁剪处理)")
 
             except Exception as e:
                 print(f"[音频优化] 片段 {index} 优化失败: {e}")

@@ -1068,7 +1068,13 @@ const App: React.FC = () => {
         }
 
         // 保存初始音色映射，用于后续检测变化
-        setInitialSpeakerVoiceMapping({...speakerVoiceMapping});
+        // 使用后端返回的初始映射（印尼语会自动设置为对应音色）
+        if (status.initial_speaker_voice_mapping) {
+          setSpeakerVoiceMapping(status.initial_speaker_voice_mapping);
+          setInitialSpeakerVoiceMapping(status.initial_speaker_voice_mapping);
+        } else {
+          setInitialSpeakerVoiceMapping({...speakerVoiceMapping});
+        }
 
         // 显示成功通知，包含处理时间
         const durationInfo = status.duration_str ? ` (耗时: ${status.duration_str})` : '';
