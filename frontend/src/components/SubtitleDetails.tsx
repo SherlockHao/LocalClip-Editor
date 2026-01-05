@@ -763,26 +763,30 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
           >
             {(() => {
               const selectedVoice = speakerVoiceMapping[openVoiceMenuSpeakerId.toString()] || 'default';
+              const isIndonesian = targetLanguage === 'id' || targetLanguage === '印尼语' || targetLanguage?.toLowerCase().includes('indonesian');
               console.log('[下拉菜单] defaultVoices:', defaultVoices);
               console.log('[下拉菜单] defaultVoices 数量:', defaultVoices.length);
+              console.log('[下拉菜单] 是否为印尼语:', isIndonesian);
               return (
                 <>
-                  <button
-                    onClick={() => {
-                      handleVoiceSelect(openVoiceMenuSpeakerId, 'default');
-                      setOpenVoiceMenuSpeakerId(null);
-                      setVoiceMenuPosition(null);
-                    }}
-                    className={`w-full px-3 py-2 text-xs text-left hover:bg-slate-700 transition-colors ${
-                      selectedVoice === 'default' ? 'bg-slate-700 text-blue-400' : 'text-slate-300'
-                    }`}
-                  >
-                    原音色
-                  </button>
+                  {/* 只有非印尼语时才显示"原音色"选项 */}
+                  {!isIndonesian && (
+                    <button
+                      onClick={() => {
+                        handleVoiceSelect(openVoiceMenuSpeakerId, 'default');
+                        setOpenVoiceMenuSpeakerId(null);
+                        setVoiceMenuPosition(null);
+                      }}
+                      className={`w-full px-3 py-2 text-xs text-left hover:bg-slate-700 transition-colors ${
+                        selectedVoice === 'default' ? 'bg-slate-700 text-blue-400' : 'text-slate-300'
+                      }`}
+                    >
+                      原音色
+                    </button>
+                  )}
                   {defaultVoices
                     .filter(voice => {
                       // 如果目标语言是印尼语，只显示印尼语音色
-                      const isIndonesian = targetLanguage === 'id' || targetLanguage === '印尼语' || targetLanguage?.toLowerCase().includes('indonesian');
                       if (isIndonesian) {
                         // 只显示以 "indonesian_" 开头的音色
                         return voice.id.startsWith('indonesian_');
