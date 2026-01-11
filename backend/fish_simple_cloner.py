@@ -71,8 +71,11 @@ class SimpleFishCloner:
 
         # 多进程模式配置
         if use_multiprocess is None:
-            # 从环境变量读取（默认关闭）
-            self.use_multiprocess = os.environ.get("FISH_MULTIPROCESS_MODE", "false").lower() == "true"
+            # 自动检测：如果有GPU且显存充足，自动启用多进程
+            self.use_multiprocess = self._should_use_multiprocess()
+            if not self.use_multiprocess:
+                # 如果自动检测建议不使用，仍然检查环境变量覆盖
+                self.use_multiprocess = os.environ.get("FISH_MULTIPROCESS_MODE", "false").lower() == "true"
         else:
             self.use_multiprocess = use_multiprocess
 
@@ -80,6 +83,50 @@ class SimpleFishCloner:
         logger.info(f"检查点目录: {self.checkpoint_dir}")
         logger.info(f"Python 路径: {self.fish_python}")
         logger.info(f"多进程模式: {'启用' if self.use_multiprocess else '禁用'}")
+
+    def _should_use_multiprocess(self) -> bool:
+        """
+        自动检测是否应该使用多进程模式
+
+        策略：
+        - 检测是否有可用的 GPU
+        - 检测 GPU 显存是否充足（>=16GB 可以考虑多进程）
+        - 如果显存 >= 16GB，启用多进程（可以运行2个worker）
+
+        Returns:
+            True 表示应该使用多进程，False 表示使用单进程
+        """
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                logger.info("[自动检测] 未检测到GPU，使用单进程模式")
+                return False
+
+            gpu_count = torch.cuda.device_count()
+            if gpu_count == 0:
+                logger.info("[自动检测] 未检测到GPU，使用单进程模式")
+                return False
+
+            # 检查第一个GPU的显存
+            props = torch.cuda.get_device_properties(0)
+            total_memory_gb = props.total_memory / 1024**3
+
+            logger.info(f"[自动检测] 检测到 {gpu_count} 个GPU")
+            logger.info(f"[自动检测] GPU 0: {props.name}, 显存: {total_memory_gb:.2f} GB")
+
+            # 模型大约需要 6-8 GB，如果显存 >= 16GB，可以运行2个worker
+            # 如果显存 >= 24GB，可以运行3个worker
+            if total_memory_gb >= 16.0:
+                logger.info(f"[自动检测] GPU显存充足 ({total_memory_gb:.2f} GB >= 16 GB)，启用多进程模式")
+                return True
+            else:
+                logger.info(f"[自动检测] GPU显存不足 ({total_memory_gb:.2f} GB < 16 GB)，使用单进程模式")
+                return False
+
+        except Exception as e:
+            logger.warning(f"[自动检测] GPU检测失败: {e}，使用单进程模式")
+            return False
 
     def batch_encode_speakers(
         self,

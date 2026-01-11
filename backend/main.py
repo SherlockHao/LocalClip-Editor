@@ -880,10 +880,10 @@ async def run_voice_cloning_process(
         await asyncio.sleep(1)  # 给前端时间轮询
 
         # 使用新的简单批量克隆器（参照 batch_inference.py）
-        # 使用单进程模式以获得准确的进度信息
-        print("[Voice Clone] Using simple batch cloner (single-process mode for accurate progress)")
+        # 自动检测GPU显存并选择单进程或多进程模式
+        print("[Voice Clone] Using simple batch cloner (auto-detect multiprocess mode)")
         from fish_simple_cloner import SimpleFishCloner
-        batch_cloner = SimpleFishCloner(use_multiprocess=False)
+        batch_cloner = SimpleFishCloner()  # 让它自动检测
 
         # 9. 批量编码所有说话人的参考音频（无缓存：15%，有缓存：13%）
         current_progress = 15 if not has_cached_mos else 13
@@ -1746,19 +1746,19 @@ async def run_voice_cloning_process(
                         "index": idx,
                         "speaker_id": speaker_id,
                         "target_text": target_text,
-                    "cloned_audio_path": None,
-                    "start_time": target_sub.get("start_time", 0),
-                    "end_time": target_sub.get("end_time", 0)
-                })
-            else:
-                # 添加到批量生成任务
-                tasks.append({
-                    "speaker_id": speaker_id,
-                    "target_text": target_text,
-                    "segment_index": idx,
-                    "start_time": target_sub.get("start_time", 0),
-                    "end_time": target_sub.get("end_time", 0)
-                })
+                        "cloned_audio_path": None,
+                        "start_time": target_sub.get("start_time", 0),
+                        "end_time": target_sub.get("end_time", 0)
+                    })
+                else:
+                    # 添加到批量生成任务
+                    tasks.append({
+                        "speaker_id": speaker_id,
+                        "target_text": target_text,
+                        "segment_index": idx,
+                        "start_time": target_sub.get("start_time", 0),
+                        "end_time": target_sub.get("end_time", 0)
+                    })
 
             # 批量生成所有语音
             print(f"\n🚀 批量生成 {len(tasks)} 个语音片段...")
