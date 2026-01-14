@@ -21,7 +21,7 @@ from loguru import logger
 
 # 获取环境配置
 if platform.system() == "Windows":
-    FISH_SPEECH_DIR = os.environ.get("FISH_SPEECH_DIR", r"C:\workspace\ai_editing\fish-speech-win")
+    FISH_SPEECH_DIR = os.environ.get("FISH_SPEECH_DIR", r"d:/ai_editing\fish-speech-win")
     FISH_PYTHON = os.environ.get("FISH_SPEECH_PYTHON", r"C:\Users\7\miniconda3\envs\fish-speech\python.exe")
 else:
     FISH_SPEECH_DIR = os.environ.get("FISH_SPEECH_DIR", "/Users/yiya_workstation/Documents/ai_editing/fish-speech")

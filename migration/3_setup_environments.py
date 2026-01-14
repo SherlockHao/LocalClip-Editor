@@ -98,7 +98,7 @@ CONDA_ENVIRONMENTS = {
         "conda_packages": [],
         "说明": "用于 Fish-Speech 语音克隆，需要与 fish-speech 仓库配合",
         "额外步骤": [
-            "cd C:\\workspace\\ai_editing\\fish-speech-win",
+            "cd d:/ai_editing/fish-speech-win",
             "pip install -e .",  # 安装 fish-speech 包
         ],
     },

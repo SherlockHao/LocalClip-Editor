@@ -1068,12 +1068,9 @@ async def run_voice_cloning_process(
             # 使用 ui conda 环境（Ollama 方案）
             ui_env_python = os.environ.get("UI_PYTHON")
             if not ui_env_python:
-                # 默认路径
-                import platform
-                if platform.system() == "Windows":
-                    ui_env_python = r"C:\Users\7\miniconda3\envs\ui\python.exe"
-                else:
-                    ui_env_python = os.path.expanduser("~/miniconda3/envs/ui/bin/python")
+                # 使用当前运行的 Python 解释器路径
+                import sys
+                ui_env_python = sys.executable
 
             batch_retranslate_script = os.path.join(
                 os.path.dirname(os.path.abspath(__file__)),
@@ -2293,11 +2290,9 @@ async def translate_text(request: TranslateTextRequest):
             # 使用 ui conda 环境（Ollama 方案）
             ui_env_python = os.environ.get("UI_PYTHON")
             if not ui_env_python:
-                import platform
-                if platform.system() == "Windows":
-                    ui_env_python = r"C:\Users\7\miniconda3\envs\ui\python.exe"
-                else:
-                    ui_env_python = os.path.expanduser("~/miniconda3/envs/ui/bin/python")
+                # 使用当前运行的 Python 解释器路径
+                import sys
+                ui_env_python = sys.executable
 
             # 调用 Ollama 批量翻译脚本
             batch_retranslate_script = os.path.join(
@@ -2573,11 +2568,9 @@ async def run_batch_translation(task_id: str, source_subtitle_filename: str, tar
             # 获取Python可执行文件路径
             ui_env_python = os.environ.get("UI_PYTHON")
             if not ui_env_python:
-                import platform
-                if platform.system() == "Windows":
-                    ui_env_python = r"C:\Users\7\miniconda3\envs\ui\python.exe"
-                else:
-                    ui_env_python = os.path.expanduser("~/miniconda3/envs/ui/bin/python")
+                # 使用当前运行的 Python 解释器路径
+                import sys
+                ui_env_python = sys.executable
 
             # 调用翻译脚本
             batch_translate_script = os.path.join(

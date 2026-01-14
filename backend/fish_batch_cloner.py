@@ -15,7 +15,7 @@ import platform
 # 根据操作系统自动检测路径
 if platform.system() == "Windows":
     # Windows 默认路径
-    FISH_SPEECH_DIR = os.environ.get("FISH_SPEECH_DIR", r"C:\workspace\ai_editing\fish-speech-win")
+    FISH_SPEECH_DIR = os.environ.get("FISH_SPEECH_DIR", r"d:/ai_editing\fish-speech-win")
     CHECKPOINT_DIR = os.path.join(FISH_SPEECH_DIR, "checkpoints", "openaudio-s1-mini")
     # 使用当前激活的 conda 环境中的 Python
     FISH_AUDIO_PYTHON = os.environ.get("FISH_SPEECH_PYTHON", sys.executable)

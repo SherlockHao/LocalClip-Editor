@@ -54,7 +54,7 @@ npm install
 模型应该位于项目根目录的上两级 `models` 文件夹中：
 
 ```
-C:\workspace\ai_editing\
+d:/ai_editing\
 ├── models\
 │   ├── models--prithivMLmods--Common-Voice-Geneder-Detection\
 │   ├── models--pyannote--segmentation\
@@ -79,7 +79,7 @@ copy .env.example .env
 Fish-Speech 应该位于：
 
 ```
-C:\workspace\ai_editing\fish-speech-win\
+d:/ai_editing\fish-speech-win\
 ```
 
 #### 3.2 确认 Fish-Speech Checkpoint
@@ -87,7 +87,7 @@ C:\workspace\ai_editing\fish-speech-win\
 确保存在：
 
 ```
-C:\workspace\ai_editing\fish-speech-win\checkpoints\openaudio-s1-mini\
+d:/ai_editing\fish-speech-win\checkpoints\openaudio-s1-mini\
 ├── codec.pth
 ├── model.ckpt
 └── ...
@@ -157,13 +157,13 @@ taskkill /F /PID <PID>
 1. 在 `.env` 文件中设置 `FISH_SPEECH_DIR`:
 
    ```bash
-   FISH_SPEECH_DIR=C:\workspace\ai_editing\fish-speech-win
+   FISH_SPEECH_DIR=d:/ai_editing\fish-speech-win
    ```
 
 2. 或设置环境变量:
 
    ```bash
-   set FISH_SPEECH_DIR=C:\workspace\ai_editing\fish-speech-win
+   set FISH_SPEECH_DIR=d:/ai_editing\fish-speech-win
    ```
 
 ### Q3: GPU 不可用
@@ -201,7 +201,7 @@ taskkill /F /PID <PID>
 确保模型在正确的位置，或在 `.env` 中设置 `MODELS_DIR`:
 
 ```bash
-MODELS_DIR=C:\workspace\ai_editing\models
+MODELS_DIR=d:/ai_editing\models
 ```
 
 ### Q5: 性别识别模型加载失败
@@ -213,7 +213,7 @@ MODELS_DIR=C:\workspace\ai_editing\models
 1. 确认模型路径:
 
    ```
-   C:\workspace\ai_editing\models\models--prithivMLmods--Common-Voice-Geneder-Detection\
+   d:/ai_editing\models\models--prithivMLmods--Common-Voice-Geneder-Detection\
    ```
 
 2. 如果模型不存在，会自动从 HuggingFace 下载（需要网络连接）

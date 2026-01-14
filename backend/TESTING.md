@@ -43,7 +43,7 @@ python test_model_selection.py
 测试模型选择
 ============================================================
 
-模型目录: C:\workspace\ai_editing\models
+模型目录: d:/ai_editing\models
 
 可用模型:
   ✓ Qwen3-4B-FP8
@@ -55,7 +55,7 @@ python test_model_selection.py
 [模型选择] ✓ 选择 Qwen3-4B-FP8 (需要 6.0 GB, 可用 12.00 GB)
 ------------------------------------------------------------
 
-✅ 选择的模型路径: C:\workspace\ai_editing\models\Qwen3-4B-FP8
+✅ 选择的模型路径: d:/ai_editing\models\Qwen3-4B-FP8
    模型名称: Qwen3-4B-FP8
 
 ============================================================
@@ -118,7 +118,7 @@ python test_translation_simple.py
 
 [模型选择] ✓ 选择 Qwen3-4B-FP8
 
-[PID 12345] Loading model from C:\workspace\ai_editing\models\Qwen3-4B-FP8...
+[PID 12345] Loading model from d:/ai_editing\models\Qwen3-4B-FP8...
 [PID 12345] Model loaded on device: cuda:0
 
 [批量翻译] 开始批量翻译
@@ -328,7 +328,7 @@ conda install transformers
 **解决方案**:
 检查模型目录：
 ```bash
-dir C:\workspace\ai_editing\models
+dir d:/ai_editing\models
 ```
 
 应该看到：
@@ -401,7 +401,7 @@ NameError: name 'model_path' is not defined
 [模型选择] 可用显存: 12.00 GB
 [模型选择] ✓ 选择 Qwen3-4B-FP8 (需要 6.0 GB, 可用 12.00 GB)
 
-[PID 12345] Loading model from C:\workspace\ai_editing\models\Qwen3-4B-FP8...
+[PID 12345] Loading model from d:/ai_editing\models\Qwen3-4B-FP8...
 [PID 12345] Tokenizer loaded, loading model...
 [PID 12345] Model loaded on device: cuda:0
 

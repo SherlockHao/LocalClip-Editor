@@ -32,7 +32,7 @@ echo.
 
 REM Activate conda environment and start backend
 cd "%SCRIPT_DIR%backend"
-start "LocalClip-Backend" cmd /k "call conda activate ui && uvicorn main:app --reload --host 0.0.0.0 --port 8000"
+start "LocalClip-Backend" cmd /k "C:\Miniconda3\Scripts\conda.exe run -n ui --no-capture-output uvicorn main:app --reload --host 0.0.0.0 --port 8000"
 
 REM Wait for backend to be ready
 echo [3/6] Waiting for backend service to start...
@@ -79,7 +79,7 @@ echo.
 REM Start frontend service
 echo [5/6] Starting frontend service (React + Vite)...
 cd "%SCRIPT_DIR%frontend"
-start "LocalClip-Frontend" cmd /k "npm run dev"
+start "LocalClip-Frontend" cmd /k "node node_modules\vite\bin\vite.js"
 echo.
 
 echo [6/7] Waiting for frontend service to be ready...

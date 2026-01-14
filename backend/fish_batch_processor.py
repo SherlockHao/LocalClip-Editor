@@ -15,7 +15,7 @@ from fish_io_pipeline import IOPipeline
 
 # 添加 fish-speech 目录到 Python 路径
 if platform.system() == "Windows":
-    FISH_SPEECH_DIR = os.environ.get("FISH_SPEECH_DIR", r"C:\workspace\ai_editing\fish-speech-win")
+    FISH_SPEECH_DIR = os.environ.get("FISH_SPEECH_DIR", r"d:/ai_editing\fish-speech-win")
 else:
     FISH_SPEECH_DIR = os.environ.get("FISH_SPEECH_DIR", "/Users/yiya_workstation/Documents/ai_editing/fish-speech")
 

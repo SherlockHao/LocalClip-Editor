@@ -37,7 +37,7 @@ class NISQAScorer:
         if platform.system() == "Windows":
             self.nisqa_dir = nisqa_dir or os.environ.get(
                 "NISQA_DIR",
-                r"C:\workspace\ai_editing\NISQA"
+                "d:/ai_editing/NISQA"
             )
         else:
             self.nisqa_dir = nisqa_dir or os.environ.get(

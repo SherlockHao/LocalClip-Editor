@@ -294,6 +294,9 @@ def load_digits_mapping() -> dict:
         return {}
 
 
+# 用于跟踪已警告过的不支持语言，避免重复打印
+_warned_languages = set()
+
 def replace_digits_in_text(text: str, language_code: str) -> str:
     """
     将文本中的阿拉伯数字替换为指定语言的发音
@@ -317,7 +320,10 @@ def replace_digits_in_text(text: str, language_code: str) -> str:
     # 检查语言代码是否存在
     lang_code = language_code.lower()
     if lang_code not in digits_mapping:
-        print(f"[警告] 不支持的语言代码: {language_code}，跳过数字替换")
+        # 只在第一次遇到不支持的语言时打印警告
+        if lang_code not in _warned_languages:
+            print(f"[信息] 语言 '{language_code}' 不需要数字替换，跳过")
+            _warned_languages.add(lang_code)
         return text
 
     language_map = digits_mapping[lang_code]

@@ -49,7 +49,7 @@ class SimpleFishCloner:
         if platform.system() == "Windows":
             self.fish_speech_dir = fish_speech_dir or os.environ.get(
                 "FISH_SPEECH_DIR",
-                r"C:\workspace\ai_editing\fish-speech-win"
+                r"d:/ai_editing/fish-speech-win"
             )
             self.fish_python = fish_python or os.environ.get(
                 "FISH_SPEECH_PYTHON",

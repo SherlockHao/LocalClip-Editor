@@ -353,7 +353,7 @@ VITE v5.4.8  ready in 1234 ms
 
 ```powershell
 # Fish-Speech
-[System.Environment]::SetEnvironmentVariable("FISH_SPEECH_DIR", "C:\workspace\ai_editing\fish-speech-win", "User")
+[System.Environment]::SetEnvironmentVariable("FISH_SPEECH_DIR", "d:/ai_editing\fish-speech-win", "User")
 [System.Environment]::SetEnvironmentVariable("FISH_SPEECH_PYTHON", "C:\Users\YOUR_USERNAME\miniconda3\envs\fish-speech\python.exe", "User")
 
 # HuggingFace Token（从 https://huggingface.co/settings/tokens 获取）
@@ -372,7 +372,7 @@ $env:HUGGINGFACE_TOKEN
 
 ```
 我设置了以下环境变量：
-FISH_SPEECH_DIR=C:\workspace\ai_editing\fish-speech-win
+FISH_SPEECH_DIR=d:/ai_editing\fish-speech-win
 FISH_SPEECH_PYTHON=C:\Users\xxx\miniconda3\envs\fish-speech\python.exe
 HUGGINGFACE_TOKEN=hf_xxxxx
 

@@ -107,7 +107,7 @@ LocalClip-Editor/
 
 1. **Fish-Speech 仓库**
    ```
-   C:\workspace\ai_editing\fish-speech-win\
+   d:/ai_editing\fish-speech-win\
    ├── fish_speech/           # Python 包
    ├── checkpoints/
    │   └── openaudio-s1-mini/ # 模型文件（约1GB）
@@ -116,14 +116,14 @@ LocalClip-Editor/
 
 2. **VITS-TTS-ID 模型**（仅印尼语需要）
    ```
-   C:\workspace\ai_editing\models\vits-tts-id\
+   d:/ai_editing\models\vits-tts-id\
    ├── config.json
    └── G_100000.pth          # 模型权重（约155MB）
    ```
 
 3. **Silero VAD**（可选）
    ```
-   C:\workspace\ai_editing\silero-vad\
+   d:/ai_editing\silero-vad\
    ```
 
 ### 验证代码结构
@@ -162,19 +162,19 @@ python migration/1_verify_code_structure.py
 
 ```bash
 # 旧机器
-robocopy C:\workspace\ai_editing\fish-speech-win Z:\backup\fish-speech-win /MIR
-robocopy C:\workspace\ai_editing\models Z:\backup\models /MIR
+robocopy d:/ai_editing\fish-speech-win Z:\backup\fish-speech-win /MIR
+robocopy d:/ai_editing\models Z:\backup\models /MIR
 
 # 新机器
-robocopy Z:\backup\fish-speech-win C:\workspace\ai_editing\fish-speech-win /MIR
-robocopy Z:\backup\models C:\workspace\ai_editing\models /MIR
+robocopy Z:\backup\fish-speech-win d:/ai_editing\fish-speech-win /MIR
+robocopy Z:\backup\models d:/ai_editing\models /MIR
 ```
 
 #### 方法2：从 HuggingFace 重新下载
 
 ```bash
 # Fish-Speech 模型
-cd C:\workspace\ai_editing
+cd d:/ai_editing
 git clone https://huggingface.co/fishaudio/fish-speech-1.5 fish-speech-win
 
 # VITS-TTS-ID 模型
@@ -270,7 +270,7 @@ conda activate fish-speech
 pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu118
 
 # 安装 Fish-Speech
-cd C:\workspace\ai_editing\fish-speech-win
+cd d:/ai_editing\fish-speech-win
 pip install -e .
 
 # 验证安装
@@ -353,13 +353,13 @@ npm run dev
 
 ```powershell
 # 必需环境变量
-[System.Environment]::SetEnvironmentVariable("FISH_SPEECH_DIR", "C:\workspace\ai_editing\fish-speech-win", "User")
+[System.Environment]::SetEnvironmentVariable("FISH_SPEECH_DIR", "d:/ai_editing\fish-speech-win", "User")
 [System.Environment]::SetEnvironmentVariable("FISH_SPEECH_PYTHON", "C:\Users\YourUsername\miniconda3\envs\fish-speech\python.exe", "User")
 [System.Environment]::SetEnvironmentVariable("HUGGINGFACE_TOKEN", "hf_your_token_here", "User")
 
 # 可选环境变量（印尼语）
 [System.Environment]::SetEnvironmentVariable("TTS_ID_PYTHON", "C:\Users\YourUsername\miniconda3\envs\tts-id-py311\python.exe", "User")
-[System.Environment]::SetEnvironmentVariable("VITS_TTS_ID_MODEL_DIR", "C:\workspace\ai_editing\models\vits-tts-id", "User")
+[System.Environment]::SetEnvironmentVariable("VITS_TTS_ID_MODEL_DIR", "d:/ai_editing\models\vits-tts-id", "User")
 
 # 可选：启用多进程模式（>=16GB GPU）
 [System.Environment]::SetEnvironmentVariable("FISH_MULTIPROCESS_MODE", "true", "User")
@@ -371,7 +371,7 @@ npm run dev
 
 ```ini
 # Fish-Speech 配置
-FISH_SPEECH_DIR=C:\workspace\ai_editing\fish-speech-win
+FISH_SPEECH_DIR=d:/ai_editing\fish-speech-win
 FISH_SPEECH_PYTHON=C:\Users\YourUsername\miniconda3\envs\fish-speech\python.exe
 
 # HuggingFace Token
@@ -379,7 +379,7 @@ HUGGINGFACE_TOKEN=hf_your_token_here
 
 # 印尼语 TTS（可选）
 TTS_ID_PYTHON=C:\Users\YourUsername\miniconda3\envs\tts-id-py311\python.exe
-VITS_TTS_ID_MODEL_DIR=C:\workspace\ai_editing\models\vits-tts-id
+VITS_TTS_ID_MODEL_DIR=d:/ai_editing\models\vits-tts-id
 
 # 多进程模式（可选）
 FISH_MULTIPROCESS_MODE=true
@@ -653,7 +653,7 @@ npm update
 
 ```bash
 # Fish-Speech
-cd C:\workspace\ai_editing\fish-speech-win
+cd d:/ai_editing\fish-speech-win
 git pull
 
 # PyAnnote（自动更新）

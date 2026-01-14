@@ -99,7 +99,7 @@ REQUIRED_STRUCTURE = {
 # 外部依赖仓库和脚本（需要单独迁移）
 EXTERNAL_DEPENDENCIES = {
     "Fish-Speech 仓库": {
-        "Windows默认路径": r"C:\workspace\ai_editing\fish-speech-win",
+        "Windows默认路径": r"d:/ai_editing\fish-speech-win",
         "关键文件": [
             "checkpoints/openaudio-s1-mini",  # 模型目录
             "fish_speech",  # Python包
@@ -108,7 +108,7 @@ EXTERNAL_DEPENDENCIES = {
     },
 
     "VITS-TTS-ID 模型": {
-        "Windows默认路径": r"C:\workspace\ai_editing\models\vits-tts-id",
+        "Windows默认路径": r"d:/ai_editing\models\vits-tts-id",
         "关键文件": [
             "config.json",
             "G_100000.pth",  # 模型权重
@@ -118,7 +118,7 @@ EXTERNAL_DEPENDENCIES = {
 
     "Silero VAD": {
         "可能路径": [
-            r"C:\workspace\ai_editing\silero-vad",
+            r"d:/ai_editing\silero-vad",
             "../silero-vad",  # 相对路径
         ],
         "说明": "可选依赖，用于 VAD 音频优化",

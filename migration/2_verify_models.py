@@ -56,7 +56,7 @@ def format_size(size_bytes: int) -> str:
 MODELS_CONFIG = {
     "Fish-Speech TTS 模型": {
         "描述": "Fish-Speech 语音克隆模型（英语、中文等多语言）",
-        "默认路径": r"C:\workspace\ai_editing\fish-speech-win\checkpoints\openaudio-s1-mini",
+        "默认路径": r"d:/ai_editing\fish-speech-win\checkpoints\openaudio-s1-mini",
         "环境变量": "FISH_SPEECH_DIR",
         "必需文件": {
             "firefly-gan-vq-fsq-8x1024-21hz-generator.pth": {
@@ -80,7 +80,7 @@ MODELS_CONFIG = {
 
     "VITS-TTS-ID 印尼语模型": {
         "描述": "印尼语 TTS 模型（VITS 架构）",
-        "默认路径": r"C:\workspace\ai_editing\models\vits-tts-id",
+        "默认路径": r"d:/ai_editing\models\vits-tts-id",
         "环境变量": "VITS_TTS_ID_MODEL_DIR",
         "必需文件": {
             "G_100000.pth": {
@@ -113,7 +113,7 @@ MODELS_CONFIG = {
     "Silero VAD 模型": {
         "描述": "语音活动检测模型（可选，用于音频优化）",
         "可能路径": [
-            r"C:\workspace\ai_editing\silero-vad",
+            r"d:/ai_editing\silero-vad",
             "../../silero-vad",
         ],
         "优先级": "低",
