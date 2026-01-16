@@ -101,7 +101,7 @@ def start_ollama_service():
         return False
 
 
-def warm_up(model: str = "qwen2.5:7b"):
+def warm_up(model: str = "qwen2.5:32b"):
     """
     热启动函数：发送一个空请求，确保模型从硬盘加载到了显存中。
     如果 Ollama 未启动，会自动启动服务。
@@ -155,7 +155,7 @@ def translate_single(
     sentence: str,
     target_language: str,
     task_id: str,
-    model: str = "qwen2.5:7b"
+    model: str = "qwen2.5:32b"
 ) -> Dict[str, Any]:
     """
     单个翻译任务（同步）
@@ -229,7 +229,7 @@ def translate_single(
 
 def batch_translate(
     tasks: List[Dict[str, str]],
-    model: str = "qwen2.5:7b"
+    model: str = "qwen2.5:32b"
 ) -> List[Dict[str, Any]]:
     """
     批量翻译任务
@@ -322,7 +322,7 @@ def main(config_path: str):
         config = json.load(f)
 
     tasks = config.get("tasks", [])
-    model = config.get("model", "qwen2.5:7b")
+    model = config.get("model", "qwen2.5:32b")
 
     if not tasks:
         print("❌ 没有翻译任务", flush=True)

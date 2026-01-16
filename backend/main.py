@@ -1348,7 +1348,7 @@ async def run_voice_cloning_process(
                     if retranslate_tasks:
                         retranslate_config = {
                             "tasks": retranslate_tasks,
-                            "model": "qwen2.5:7b",
+                            "model": "qwen2.5:32b",
                             "output_file": str(target_subtitle_path)
                         }
 
@@ -2277,7 +2277,7 @@ async def translate_text(request: TranslateTextRequest):
                 "source": request.text,
                 "target_language": target_language_name
             }],
-            "model": "qwen2.5:7b"  # 使用 qwen2.5:7b 避免 qwen3 的思考延迟
+            "model": "qwen2.5:32b"  # 使用 qwen2.5:32b 避免 qwen3 的思考延迟
         }
 
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
@@ -2555,7 +2555,7 @@ async def run_batch_translation(task_id: str, source_subtitle_filename: str, tar
         # 创建临时配置文件
         config_data = {
             "tasks": translate_tasks,
-            "model": "qwen2.5:7b"  # 使用 qwen2.5:7b 避免 qwen3 的思考延迟
+            "model": "qwen2.5:32b"  # 使用 qwen2.5:32b 避免 qwen3 的思考延迟
         }
 
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
@@ -2784,7 +2784,7 @@ async def run_batch_translation(task_id: str, source_subtitle_filename: str, tar
 
                 retranslate_config = {
                     "tasks": retranslate_tasks,
-                    "model": "qwen2.5:7b",
+                    "model": "qwen2.5:32b",
                     "output_file": str(target_srt_path)
                 }
 
@@ -2930,7 +2930,7 @@ async def run_batch_translation(task_id: str, source_subtitle_filename: str, tar
                         if retranslate_tasks:
                             retranslate_config = {
                                 "tasks": retranslate_tasks,
-                                "model": "qwen2.5:7b",
+                                "model": "qwen2.5:32b",
                                 "output_file": str(target_srt_path)
                             }
 
@@ -3534,13 +3534,13 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
 
         print(f"[音频拼接] 开始拼接任务 {task_id} 的音频片段...")
 
-        # 步骤1: 优化过长的音频片段（仅使用VAD去除静音）
+        # 步骤1: 优化过长的音频片段（去静音 + 变速加速）
         from audio_optimizer import AudioOptimizer
-        optimizer = AudioOptimizer()
+        optimizer = AudioOptimizer(use_vad=False)  # 使用基于音量的静音检测
         optimized_files = optimizer.optimize_segments_for_stitching(
             cloned_results,
             cloned_audio_dir,
-            threshold_ratio=1.1  # 超过10%就优化
+            threshold_ratio=1.02  # 超过2%就优化
         )
 
         # 步骤2: 重新规划时间轴（为超长片段借用相邻空闲时间）

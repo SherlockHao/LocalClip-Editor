@@ -14,9 +14,9 @@ REM Check and clean occupied ports
 echo [1/6] Checking and cleaning occupied ports...
 echo.
 
-REM Clean port 8000 (backend)
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8000 ^| findstr LISTENING') do (
-    echo Killing process on port 8000: %%a
+REM Clean port 8080 (backend)
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8080 ^| findstr LISTENING') do (
+    echo Killing process on port 8080: %%a
     taskkill /F /PID %%a 2>nul
 )
 
@@ -32,7 +32,7 @@ echo.
 
 REM Activate conda environment and start backend
 cd "%SCRIPT_DIR%backend"
-start "LocalClip-Backend" cmd /k "C:\Miniconda3\Scripts\conda.exe run -n ui --no-capture-output uvicorn main:app --reload --host 0.0.0.0 --port 8000"
+start "LocalClip-Backend" cmd /k "C:\Miniconda3\Scripts\conda.exe run -n ui --no-capture-output python -u -m uvicorn main:app --host 0.0.0.0 --port 8080"
 
 REM Wait for backend to be ready
 echo [3/6] Waiting for backend service to start...
@@ -45,7 +45,7 @@ set BACKEND_RETRY_COUNT=0
 
 :check_backend
 REM Use curl if available, otherwise use powershell
-curl -s -o nul -w "%%{http_code}" http://localhost:8000/ | findstr "200 404" >nul 2>&1
+curl -s -o nul -w "%%{http_code}" http://localhost:8080/ | findstr "200 404" >nul 2>&1
 if %ERRORLEVEL% EQU 0 (
     echo Backend service is ready!
     goto backend_ready
@@ -122,7 +122,7 @@ echo   LocalClip Editor Started!
 echo ================================
 echo.
 echo Frontend URL: http://localhost:5173
-echo Backend API:  http://localhost:8000/docs
+echo Backend API:  http://localhost:8080/docs
 echo.
 echo Browser window should open automatically
 echo If not, please manually open: http://localhost:5173

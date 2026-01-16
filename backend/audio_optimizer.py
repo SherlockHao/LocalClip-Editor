@@ -11,9 +11,27 @@ import librosa
 import os
 from typing import List, Dict, Tuple, Optional
 
+# 配置 rubberband 路径（Windows）
+RUBBERBAND_PATH = os.path.join(
+    os.path.dirname(__file__),
+    "..", "..", "..",
+    "tools", "rubberband", "rubberband-4.0.0-gpl-executable-windows"
+)
+RUBBERBAND_PATH = os.path.abspath(RUBBERBAND_PATH)
+
+# 将 rubberband 添加到 PATH（如果存在）
+if os.path.exists(RUBBERBAND_PATH):
+    current_path = os.environ.get("PATH", "")
+    if RUBBERBAND_PATH not in current_path:
+        os.environ["PATH"] = RUBBERBAND_PATH + os.pathsep + current_path
+        print(f"[音频优化] 添加 rubberband 到 PATH: {RUBBERBAND_PATH}")
+
 
 class AudioOptimizer:
     """音频优化器，用于缩短过长的克隆音频"""
+
+    # 加速比例上限
+    MAX_SPEED_RATIO = 1.5
 
     def __init__(self, use_vad: bool = True):
         """
@@ -25,6 +43,44 @@ class AudioOptimizer:
         self.vad_model = None
         self.use_vad = use_vad
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    def speed_up_audio(
+        self,
+        audio_data: np.ndarray,
+        sampling_rate: int,
+        speed_ratio: float
+    ) -> np.ndarray:
+        """
+        对音频进行变速不变调处理（使用 pyrubberband）
+
+        Args:
+            audio_data: 音频数据
+            sampling_rate: 采样率
+            speed_ratio: 加速比例（>1 表示加速，如 1.2 表示加速 20%）
+
+        Returns:
+            加速后的音频数据
+        """
+        # 限制加速比例上限
+        speed_ratio = min(speed_ratio, self.MAX_SPEED_RATIO)
+
+        # 使用 pyrubberband 进行变速不变调（音质最好）
+        try:
+            import pyrubberband as pyrb
+
+            # pyrubberband 的 time_stretch 参数 rate 是播放速率
+            # rate > 1 表示加速播放（音频变短）
+            # speed_ratio = 1.2 表示加速 20%，直接传入 1.2
+
+            # 执行变速不变调
+            stretched_audio = pyrb.time_stretch(audio_data, sampling_rate, speed_ratio)
+            print(f"[音频优化] pyrubberband 变速成功: {speed_ratio:.2f}x")
+            return stretched_audio
+
+        except Exception as e:
+            print(f"[音频优化] pyrubberband 变速失败: {e}")
+            print(f"[音频优化] 请确保 rubberband-cli 已安装并在 PATH 中")
+            return audio_data
 
     def _load_vad_model(self):
         """加载 Silero VAD 模型（只加载一次）"""
@@ -358,7 +414,7 @@ class AudioOptimizer:
                 # 读取音频
                 audio_data, sr = sf.read(audio_file_path)
 
-                # 选择语音检测方法
+                # 步骤1: 去除静音
                 if vad_available:
                     # 使用 VAD 去除静音
                     processed_audio = self.concatenate_speech_segments(audio_data, sr)
@@ -368,24 +424,54 @@ class AudioOptimizer:
                     processed_audio = self.concatenate_speech_by_volume(audio_data, sr)
                     method_name = "Volume"
 
-                if processed_audio is not None:
-                    processed_duration = len(processed_audio) / sr
+                # 如果去静音失败，使用原始音频
+                if processed_audio is None:
+                    processed_audio = audio_data
 
-                    # 保存优化后的音频
-                    output_path = os.path.join(
-                        cloned_audio_dir,
-                        f"segment_{index}_optimized.wav"
-                    )
-                    sf.write(output_path, processed_audio, sr)
-                    optimized_segments[index] = output_path
+                processed_duration = len(processed_audio) / sr
 
-                    if processed_duration <= target_duration:
-                        print(f"[音频优化] 片段 {index}: {method_name}优化成功，从 {actual_duration:.3f}s 缩短到 {processed_duration:.3f}s")
+                # 步骤2: 如果去静音后仍超过目标时长，使用变速加速
+                speed_applied = False
+                if processed_duration > target_duration:
+                    # 计算需要的加速比例
+                    required_speed_ratio = processed_duration / target_duration
+
+                    # 只有在加速比例不超过上限时才进行变速
+                    if required_speed_ratio <= self.MAX_SPEED_RATIO:
+                        print(f"[音频优化] 片段 {index}: 去静音后 {processed_duration:.3f}s 仍超过目标 {target_duration:.3f}s，应用 {required_speed_ratio:.2f}x 加速")
+                        processed_audio = self.speed_up_audio(processed_audio, sr, required_speed_ratio)
+                        speed_applied = True
+                        final_duration = len(processed_audio) / sr
                     else:
-                        print(f"[音频优化] 片段 {index}: {method_name}优化部分成功，从 {actual_duration:.3f}s 缩短到 {processed_duration:.3f}s (仍超过目标 {target_duration:.3f}s)")
+                        # 加速比例超过上限，使用最大加速比例
+                        print(f"[音频优化] 片段 {index}: 需要 {required_speed_ratio:.2f}x 加速超过上限 {self.MAX_SPEED_RATIO}x，使用最大加速")
+                        processed_audio = self.speed_up_audio(processed_audio, sr, self.MAX_SPEED_RATIO)
+                        speed_applied = True
+                        final_duration = len(processed_audio) / sr
+                else:
+                    final_duration = processed_duration
+
+                # 保存优化后的音频
+                output_path = os.path.join(
+                    cloned_audio_dir,
+                    f"segment_{index}_optimized.wav"
+                )
+                sf.write(output_path, processed_audio, sr)
+                optimized_segments[index] = output_path
+
+                # 打印优化结果
+                if final_duration <= target_duration:
+                    if speed_applied:
+                        print(f"[音频优化] 片段 {index}: {method_name}+变速 优化成功，{actual_duration:.3f}s → {final_duration:.3f}s (目标 {target_duration:.3f}s)")
+                    else:
+                        print(f"[音频优化] 片段 {index}: {method_name} 优化成功，{actual_duration:.3f}s → {final_duration:.3f}s")
+                else:
+                    print(f"[音频优化] 片段 {index}: {method_name}+变速 部分成功，{actual_duration:.3f}s → {final_duration:.3f}s (仍超过目标 {target_duration:.3f}s)")
 
             except Exception as e:
                 print(f"[音频优化] 片段 {index} 优化失败: {e}")
+                import traceback
+                traceback.print_exc()
                 continue
 
         if optimized_segments:

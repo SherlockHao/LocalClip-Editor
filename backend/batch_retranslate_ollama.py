@@ -92,7 +92,7 @@ def ensure_ollama_running():
         return True
 
 
-def unload_ollama_model(model: str = "qwen2.5:7b"):
+def unload_ollama_model(model: str = "qwen2.5:32b"):
     """
     卸载 Ollama 模型，释放 GPU 显存
 
@@ -134,7 +134,7 @@ async def translate_sentence(
     sentence: str,
     target_language: str,
     task_id: str,
-    model: str = "qwen2.5:7b"
+    model: str = "qwen2.5:32b"
 ) -> Dict[str, Any]:
     """
     单个翻译任务（异步）
@@ -262,7 +262,7 @@ def extract_translation_from_json(text: str, fallback: str = "") -> str:
 
 async def batch_translate(
     tasks: List[Dict[str, str]],
-    model: str = "qwen2.5:7b"
+    model: str = "qwen2.5:32b"
 ) -> List[Dict[str, Any]]:
     """
     批量翻译（异步并发）
@@ -358,7 +358,7 @@ def retranslate_from_config(config_file: str) -> List[Dict[str, Any]]:
         config = json.load(f)
 
     tasks = config["tasks"]
-    model = config.get("model", "qwen2.5:7b")
+    model = config.get("model", "qwen2.5:32b")
 
     # 执行异步批量翻译
     results = asyncio.run(batch_translate(tasks, model))
@@ -387,7 +387,7 @@ if __name__ == "__main__":
             "target_language": "韩文"
         }
     ],
-    "model": "qwen2.5:7b"
+    "model": "qwen2.5:32b"
 }
         """, flush=True)
         sys.exit(1)

@@ -462,7 +462,7 @@ def translate_chinese_to_kana(chinese_text: str) -> str:
         response = requests.post(
             'http://127.0.0.1:11434/api/generate',
             json={
-                'model': 'qwen2.5:7b',
+                'model': 'qwen2.5:32b',
                 'prompt': f'Convert this Chinese word to Japanese hiragana only. Return ONLY hiragana characters, no explanations, no kanji, no other text.\n\nChinese: {chinese_text}\nHiragana:',
                 'stream': False,
                 'options': {
@@ -516,7 +516,7 @@ def translate_chinese_to_target(chinese_text: str, target_language: str) -> str:
         response = requests.post(
             'http://127.0.0.1:11434/api/generate',
             json={
-                'model': 'qwen2.5:7b',
+                'model': 'qwen2.5:32b',
                 'prompt': f'Translate this Chinese word to {target_language}. Return ONLY the translation, no explanations.\n\nChinese: {chinese_text}\n{target_language}:',
                 'stream': False,
                 'options': {
@@ -587,7 +587,7 @@ Hiragana:"""
         response = requests.post(
             'http://127.0.0.1:11434/api/generate',
             json={
-                'model': 'qwen2.5:7b',
+                'model': 'qwen2.5:32b',
                 'prompt': prompt,
                 'stream': False,
                 'options': {
@@ -672,7 +672,7 @@ Chinese:
         response = requests.post(
             'http://127.0.0.1:11434/api/generate',
             json={
-                'model': 'qwen2.5:7b',
+                'model': 'qwen2.5:32b',
                 'prompt': prompt,
                 'stream': False,
                 'options': {
@@ -856,7 +856,7 @@ Japanese (hiragana/katakana ONLY):"""
         response = requests.post(
             'http://127.0.0.1:11434/api/generate',
             json={
-                'model': 'qwen2.5:7b',
+                'model': 'qwen2.5:32b',
                 'prompt': prompt,
                 'stream': False,
                 'options': {
@@ -912,7 +912,7 @@ Japanese (hiragana/katakana ONLY):"""
                     retry_response = requests.post(
                         'http://127.0.0.1:11434/api/generate',
                         json={
-                            'model': 'qwen2.5:7b',
+                            'model': 'qwen2.5:32b',
                             'prompt': retry_prompt,
                             'stream': False,
                             'options': {
@@ -994,7 +994,7 @@ Korean (Hangul ONLY):"""
         response = requests.post(
             'http://127.0.0.1:11434/api/generate',
             json={
-                'model': 'qwen2.5:7b',
+                'model': 'qwen2.5:32b',
                 'prompt': prompt,
                 'stream': False,
                 'options': {
@@ -1051,7 +1051,7 @@ Korean (Hangul ONLY):"""
                     retry_response = requests.post(
                         'http://127.0.0.1:11434/api/generate',
                         json={
-                            'model': 'qwen2.5:7b',
+                            'model': 'qwen2.5:32b',
                             'prompt': retry_prompt,
                             'stream': False,
                             'options': {
