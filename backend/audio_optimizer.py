@@ -15,9 +15,15 @@ from typing import List, Dict, Tuple, Optional
 class AudioOptimizer:
     """音频优化器，用于缩短过长的克隆音频"""
 
-    def __init__(self):
-        """初始化音频优化器"""
+    def __init__(self, use_vad: bool = True):
+        """
+        初始化音频优化器
+
+        Args:
+            use_vad: 是否使用 VAD 模型，False 则使用基于音量的静音检测
+        """
         self.vad_model = None
+        self.use_vad = use_vad
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     def _load_vad_model(self):
@@ -64,11 +70,156 @@ class AudioOptimizer:
                 print("[音频优化] VAD 模型加载成功")
             except Exception as e:
                 print(f"[音频优化] 警告: 无法加载 Silero VAD 模型: {e}")
-                print("[音频优化] 将跳过 VAD 优化步骤")
-                import traceback
-                traceback.print_exc()
+                print("[音频优化] 将使用基于音量的静音检测")
+                self.use_vad = False
                 return False
         return True
+
+    def detect_speech_by_volume(
+        self,
+        audio_data: np.ndarray,
+        sampling_rate: int,
+        threshold_db: float = -40.0,
+        min_silence_duration: float = 0.1,
+        min_speech_duration: float = 0.05
+    ) -> List[Dict]:
+        """
+        基于音量的语音检测（VAD 的替代方案）
+
+        Args:
+            audio_data: 音频数据
+            sampling_rate: 采样率
+            threshold_db: 静音阈值（dB），低于此值视为静音
+            min_silence_duration: 最小静音时长（秒）
+            min_speech_duration: 最小语音时长（秒）
+
+        Returns:
+            语音时间戳列表 [{'start': float, 'end': float}, ...]
+        """
+        # 计算帧级别的 RMS 能量
+        frame_length = int(0.025 * sampling_rate)  # 25ms 帧
+        hop_length = int(0.010 * sampling_rate)    # 10ms 步长
+
+        # 确保音频是一维的
+        if audio_data.ndim > 1:
+            audio_data = audio_data.mean(axis=1)
+
+        # 计算 RMS 能量
+        rms = librosa.feature.rms(y=audio_data, frame_length=frame_length, hop_length=hop_length)[0]
+
+        # 转换为 dB
+        rms_db = librosa.amplitude_to_db(rms, ref=np.max)
+
+        # 检测语音帧（高于阈值）
+        is_speech = rms_db > threshold_db
+
+        # 转换为时间戳
+        frame_times = librosa.frames_to_time(np.arange(len(is_speech)), sr=sampling_rate, hop_length=hop_length)
+
+        # 合并连续的语音帧
+        speech_timestamps = []
+        in_speech = False
+        speech_start = 0
+
+        for i, (is_s, t) in enumerate(zip(is_speech, frame_times)):
+            if is_s and not in_speech:
+                # 语音开始
+                in_speech = True
+                speech_start = t
+            elif not is_s and in_speech:
+                # 检查静音是否足够长
+                silence_start = t
+                silence_end = t
+
+                # 向前查找静音结束点
+                for j in range(i, len(is_speech)):
+                    if is_speech[j]:
+                        break
+                    silence_end = frame_times[j] if j < len(frame_times) else frame_times[-1]
+
+                silence_duration = silence_end - silence_start
+
+                if silence_duration >= min_silence_duration:
+                    # 静音足够长，结束当前语音段
+                    speech_end = t
+                    if speech_end - speech_start >= min_speech_duration:
+                        speech_timestamps.append({
+                            'start': speech_start,
+                            'end': speech_end
+                        })
+                    in_speech = False
+
+        # 处理最后一个语音段
+        if in_speech:
+            speech_end = frame_times[-1] if len(frame_times) > 0 else len(audio_data) / sampling_rate
+            if speech_end - speech_start >= min_speech_duration:
+                speech_timestamps.append({
+                    'start': speech_start,
+                    'end': speech_end
+                })
+
+        return speech_timestamps
+
+    def concatenate_speech_by_volume(
+        self,
+        audio_data: np.ndarray,
+        sampling_rate: int
+    ) -> Optional[np.ndarray]:
+        """
+        使用基于音量的检测提取语音段并拼接
+
+        Args:
+            audio_data: 音频数据
+            sampling_rate: 采样率
+
+        Returns:
+            拼接后的语音段，如果没有检测到语音则返回 None
+        """
+        try:
+            speech_timestamps = self.detect_speech_by_volume(audio_data, sampling_rate)
+
+            if not speech_timestamps:
+                return None
+
+            # 拼接语音段
+            speech_segments = []
+            for i, segment in enumerate(speech_timestamps):
+                start_sample = int(segment['start'] * sampling_rate)
+                end_sample = int(segment['end'] * sampling_rate)
+                start_sample = min(start_sample, len(audio_data))
+                end_sample = min(end_sample, len(audio_data))
+
+                if start_sample < end_sample:
+                    # 计算当前语音段的5%时长
+                    segment_duration_samples = end_sample - start_sample
+                    five_percent_samples = int(segment_duration_samples * 0.05)
+
+                    # 语音段前扩展5%（但不超过音频开头）
+                    extended_start = max(0, start_sample - five_percent_samples)
+                    # 语音段后扩展5%（但不超过音频结尾）
+                    extended_end = min(len(audio_data), end_sample + five_percent_samples)
+
+                    # 如果是第一段，不向前扩展
+                    if i == 0:
+                        extended_start = start_sample
+                    # 如果是最后一段，不向后扩展
+                    if i == len(speech_timestamps) - 1:
+                        extended_end = end_sample
+
+                    speech_segment = audio_data[extended_start:extended_end]
+                    speech_segments.append(speech_segment)
+
+            if speech_segments:
+                concatenated = np.concatenate(speech_segments)
+                print(f"  [Volume] 拼接 {len(speech_timestamps)} 个语音段，每段前后保留5%，中间去除静音")
+                return concatenated
+            return None
+
+        except Exception as e:
+            print(f"[音频优化] 音量检测处理失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
 
     def concatenate_speech_segments(
         self,
@@ -185,8 +336,15 @@ class AudioOptimizer:
         """
         print(f"[音频优化] 开始优化 {len(segments_info)} 个音频片段...")
 
-        # 加载 VAD 模型（只加载一次）
-        vad_available = self._load_vad_model()
+        # 尝试加载 VAD 模型（如果 use_vad=True）
+        vad_available = False
+        if self.use_vad:
+            vad_available = self._load_vad_model()
+
+        if vad_available:
+            print("[音频优化] 使用 Silero VAD 进行语音检测")
+        else:
+            print("[音频优化] 使用基于音量的静音检测")
 
         optimized_segments = {}
 
@@ -200,31 +358,31 @@ class AudioOptimizer:
                 # 读取音频
                 audio_data, sr = sf.read(audio_file_path)
 
-                # 使用 VAD 去除静音（不再使用变速）
+                # 选择语音检测方法
                 if vad_available:
-                    vad_audio = self.concatenate_speech_segments(audio_data, sr)
+                    # 使用 VAD 去除静音
+                    processed_audio = self.concatenate_speech_segments(audio_data, sr)
+                    method_name = "VAD"
+                else:
+                    # 使用基于音量的检测
+                    processed_audio = self.concatenate_speech_by_volume(audio_data, sr)
+                    method_name = "Volume"
 
-                    if vad_audio is not None:
-                        vad_duration = len(vad_audio) / sr
+                if processed_audio is not None:
+                    processed_duration = len(processed_audio) / sr
 
-                        # 如果 VAD 后长度符合要求，保存并使用
-                        if vad_duration <= target_duration:
-                            output_path = os.path.join(
-                                cloned_audio_dir,
-                                f"segment_{index}_vad.wav"
-                            )
-                            sf.write(output_path, vad_audio, sr)
-                            optimized_segments[index] = output_path
-                            print(f"[音频优化] 片段 {index}: VAD优化成功，从 {actual_duration:.3f}s 缩短到 {vad_duration:.3f}s")
-                        else:
-                            # VAD 后仍然过长，也保存 VAD 结果（比原始音频短）
-                            output_path = os.path.join(
-                                cloned_audio_dir,
-                                f"segment_{index}_vad.wav"
-                            )
-                            sf.write(output_path, vad_audio, sr)
-                            optimized_segments[index] = output_path
-                            print(f"[音频优化] 片段 {index}: VAD优化部分成功，从 {actual_duration:.3f}s 缩短到 {vad_duration:.3f}s (仍超过目标 {target_duration:.3f}s，将通过时间轴规划和裁剪处理)")
+                    # 保存优化后的音频
+                    output_path = os.path.join(
+                        cloned_audio_dir,
+                        f"segment_{index}_optimized.wav"
+                    )
+                    sf.write(output_path, processed_audio, sr)
+                    optimized_segments[index] = output_path
+
+                    if processed_duration <= target_duration:
+                        print(f"[音频优化] 片段 {index}: {method_name}优化成功，从 {actual_duration:.3f}s 缩短到 {processed_duration:.3f}s")
+                    else:
+                        print(f"[音频优化] 片段 {index}: {method_name}优化部分成功，从 {actual_duration:.3f}s 缩短到 {processed_duration:.3f}s (仍超过目标 {target_duration:.3f}s)")
 
             except Exception as e:
                 print(f"[音频优化] 片段 {index} 优化失败: {e}")

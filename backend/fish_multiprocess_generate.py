@@ -296,7 +296,7 @@ def main():
     speaker_items = list(tasks_by_speaker.items())
 
     # 按工作量（文本数量）智能分配说话人给 workers
-    # 使用贪心算法：总是分配给当前工作量最少的 worker
+    # 两级负载均衡：先按 GPU 均衡，再按 worker 均衡
     worker_assignments = [[] for _ in range(worker_count)]
     worker_loads = [0] * worker_count  # 每个 worker 的总文本数
 
@@ -307,21 +307,48 @@ def main():
     for speaker_id, speaker_tasks in speaker_items_sorted:
         print(f"  Speaker {speaker_id}: {len(speaker_tasks)} texts", file=sys.stderr)
 
-    # 贪心分配：每次将当前说话人分配给工作量最少的 worker
+    # 构建 GPU -> workers 映射
+    gpu_to_workers = defaultdict(list)
+    for worker_idx, gpu_id in enumerate(gpu_assignment):
+        gpu_to_workers[gpu_id].append(worker_idx)
+
+    # 计算每个 GPU 的当前负载
+    gpu_loads = {gpu_id: 0 for gpu_id in gpu_to_workers.keys()}
+
+    print(f"\n[Main] GPU to workers mapping:", file=sys.stderr)
+    for gpu_id, workers in sorted(gpu_to_workers.items()):
+        print(f"  GPU {gpu_id}: Workers {workers}", file=sys.stderr)
+
+    # 两级贪心分配：
+    # 1. 先选择负载最少的 GPU
+    # 2. 再在该 GPU 的 workers 中选择负载最少的 worker
     for speaker_id, speaker_tasks in speaker_items_sorted:
-        # 找到当前工作量最少的 worker
-        min_load_worker = worker_loads.index(min(worker_loads))
+        task_count = len(speaker_tasks)
+
+        # 第一级：找到当前负载最少的 GPU
+        min_load_gpu = min(gpu_loads.keys(), key=lambda g: gpu_loads[g])
+
+        # 第二级：在该 GPU 的 workers 中找到负载最少的 worker
+        candidate_workers = gpu_to_workers[min_load_gpu]
+        min_load_worker = min(candidate_workers, key=lambda w: worker_loads[w])
 
         # 分配给该 worker
         worker_assignments[min_load_worker].append((speaker_id, speaker_tasks))
-        worker_loads[min_load_worker] += len(speaker_tasks)
+        worker_loads[min_load_worker] += task_count
+        gpu_loads[min_load_gpu] += task_count
 
-    # 显示分配详情
-    print(f"\n[Main] Speaker assignment (load-balanced):", file=sys.stderr)
+    # 显示 GPU 级别负载统计
+    print(f"\n[Main] GPU load distribution:", file=sys.stderr)
+    for gpu_id in sorted(gpu_loads.keys()):
+        print(f"  GPU {gpu_id}: {gpu_loads[gpu_id]} texts total", file=sys.stderr)
+
+    # 显示 Worker 分配详情
+    print(f"\n[Main] Speaker assignment (GPU-balanced):", file=sys.stderr)
     for worker_idx, assigned in enumerate(worker_assignments):
+        gpu_id = gpu_assignment[worker_idx] if worker_idx < len(gpu_assignment) else 0
         speaker_ids = [sid for sid, _ in assigned]
         total_texts = sum(len(tasks) for _, tasks in assigned)
-        print(f"  Worker {worker_idx}: {len(assigned)} speakers (IDs: {speaker_ids}), {total_texts} texts", file=sys.stderr)
+        print(f"  Worker {worker_idx} (GPU {gpu_id}): {len(assigned)} speakers (IDs: {speaker_ids}), {total_texts} texts", file=sys.stderr)
 
     # 启动所有 worker 进程
     print(f"\n[Main] Launching {worker_count} workers...", file=sys.stderr)

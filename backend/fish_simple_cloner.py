@@ -221,9 +221,19 @@ class SimpleFishCloner:
                     logger.error(line)
                 raise RuntimeError(f"编码失败，返回码: {proc.returncode}")
 
-            # 解析结果
+            # 解析结果 - 从后向前查找有效的 JSON 数组行
             try:
-                json_line = output_lines[-1] if output_lines else "[]"
+                json_line = "[]"
+                for line in reversed(output_lines):
+                    line = line.strip()
+                    if line.startswith('[') and line.endswith(']'):
+                        try:
+                            json.loads(line)  # 验证是有效 JSON
+                            json_line = line
+                            break
+                        except json.JSONDecodeError:
+                            continue
+
                 result_data = json.loads(json_line)
 
                 speaker_npy_files = {}
@@ -235,7 +245,7 @@ class SimpleFishCloner:
 
             except (json.JSONDecodeError, KeyError, IndexError) as e:
                 logger.error(f"解析编码结果失败: {e}")
-                logger.error(f"输出: {result.stdout}")
+                logger.error(f"输出最后10行: {output_lines[-10:] if output_lines else []}")
                 raise
 
         finally:
@@ -423,9 +433,19 @@ class SimpleFishCloner:
                     logger.error(line)
                 raise RuntimeError(f"生成失败，返回码: {proc.returncode}")
 
-            # 解析结果（最后一行是 JSON）
+            # 解析结果 - 从后向前查找有效的 JSON 对象行
             try:
-                json_line = output_lines[-1] if output_lines else "{}"
+                json_line = "{}"
+                for line in reversed(output_lines):
+                    line = line.strip()
+                    if line.startswith('{') and line.endswith('}'):
+                        try:
+                            json.loads(line)  # 验证是有效 JSON
+                            json_line = line
+                            break
+                        except json.JSONDecodeError:
+                            continue
+
                 result_data = json.loads(json_line)
 
                 # 将字符串键转换为整数键（JSON 会将整数键转为字符串）
@@ -436,7 +456,7 @@ class SimpleFishCloner:
 
             except (json.JSONDecodeError, KeyError, IndexError) as e:
                 logger.error(f"解析生成结果失败: {e}")
-                logger.error(f"输出: {result.stdout}")
+                logger.error(f"输出最后10行: {output_lines[-10:] if output_lines else []}")
                 raise
 
         finally:
