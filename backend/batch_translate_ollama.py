@@ -151,6 +151,103 @@ def warm_up(model: str = "qwen2.5:32b"):
             raise
 
 
+def translate_batch_group(
+    sentences: List[str],
+    target_language: str,
+    task_id_prefix: str,
+    model: str = "qwen2.5:32b"
+) -> List[Dict[str, Any]]:
+    """
+    批量翻译任务，提供上下文感知能力
+
+    Args:
+        sentences: 源文本列表（有顺序的上下文）
+        target_language: 目标语言
+        task_id_prefix: 任务前缀
+        model: 模型名称
+    """
+    if not sentences:
+        return []
+
+    # 1. 根据语言特性构建指令
+    if '日' in target_language or 'ja' in target_language.lower():
+        lang_rule = "全假名无汉字"
+    elif '韩' in target_language or 'ko' in target_language.lower():
+        lang_rule = "纯韩文无汉字"
+    else:
+        lang_rule = "地道简洁"
+
+    # 2. 构建 System Prompt：精简有力
+    system_prompt = (
+        f"翻译为{target_language}。这是连续对话片段，需保持:\n"
+        f"1. 上下文连贯(代词/指代/语气统一)\n"
+        f"2. {lang_rule}\n"
+        f"3. 极简表达(口语化/去冗余)，字数极少\n"
+        f"返回JSON: {{\"translations\": [\"译文1\", \"译文2\", ...]}}"
+    )
+
+    # 3. 构建 User Prompt：明确标注这是连续对话
+    user_content = "【连续对话】请根据上下文翻译:\n"
+    for i, s in enumerate(sentences):
+        user_content += f"{i}. {s}\n"
+
+    try:
+        start_time = time.time()
+
+        response = SESSION.post(
+            OLLAMA_API_URL,
+            json={
+                'model': model,
+                'messages': [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content}
+                ],
+                'temperature': 0.3,  # 适当提升一点点随机性，有助于上下文衔接更自然
+                'response_format': {"type": "json_object"},
+                'stream': False,
+                'keep_alive': -1
+            },
+            timeout=60  # 批量翻译耗时较长，增加超时时间
+        )
+
+        response.raise_for_status()
+        result_json = response.json()
+        raw_content = result_json['choices'][0]['message']['content'].strip()
+
+        # 解析返回的 JSON 数组
+        parsed_data = json.loads(raw_content)
+        translated_list = parsed_data.get("translations", [])
+
+        # 4. 结果校验与组装
+        results = []
+        elapsed = (time.time() - start_time) / len(sentences)  # 平均单句耗时
+
+        for i, original_text in enumerate(sentences):
+            # 如果模型漏译了（虽然 json_object 模式下概率低），则兜底返回原文
+            tr_text = translated_list[i] if i < len(translated_list) else original_text
+
+            results.append({
+                "task_id": f"{task_id_prefix}_{i}",
+                "source": original_text,
+                "translation": tr_text,
+                "success": i < len(translated_list),
+                "elapsed": elapsed
+            })
+
+        return results
+
+    except Exception as e:
+        print(f"[批量翻译错误] {task_id_prefix}: {e}", flush=True)
+        # 失败全量兜底
+        return [{
+            "task_id": f"{task_id_prefix}_{i}",
+            "source": s,
+            "translation": s,
+            "success": False,
+            "error": str(e)
+        } for i, s in enumerate(sentences)]
+
+
 def translate_single(
     sentence: str,
     target_language: str,
@@ -158,7 +255,7 @@ def translate_single(
     model: str = "qwen2.5:32b"
 ) -> Dict[str, Any]:
     """
-    单个翻译任务（同步）
+    单个翻译任务（同步）- 保留用于单句翻译
 
     Args:
         sentence: 源文本（中文）
@@ -169,62 +266,78 @@ def translate_single(
     Returns:
         dict: 翻译结果
     """
-    # 构建 system prompt - 分离指令，效果更好
-    # 所有语言都要求不含汉字（对语音克隆很重要）
-    # 日语特殊要求：强制使用假名
-    if '日' in target_language or 'ja' in target_language.lower():
-        system_prompt = f'将中文翻译成{target_language}。要求：汉字强制用假名、语义尽量保证、输出极简、字数极少。返回 JSON 对象，Key 为 "tr"。'
-    elif '韩' in target_language or 'ko' in target_language.lower():
-        system_prompt = f'将中文翻译成{target_language}。要求：不含汉字、语义尽量保证、输出极简、字数极少。返回 JSON 对象，Key 为 "tr"。'
+    # 直接调用批量翻译，传入单个句子
+    results = translate_batch_group([sentence], target_language, task_id, model)
+    if results:
+        return results[0]
     else:
-        system_prompt = f'将中文翻译成{target_language}。要求：语义尽量保证、输出极简、字数极少。返回 JSON 对象，Key 为 "tr"。'
-
-    try:
-        start_time = time.time()
-
-        # 使用 requests 直接调用 Ollama API
-        response = SESSION.post(
-            OLLAMA_API_URL,
-            json={
-                'model': model,
-                'messages': [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": sentence}
-                ],
-                'temperature': 0,
-                'response_format': {"type": "json_object"},
-                'stream': False,
-                'keep_alive': -1
-            },
-            timeout=30
-        )
-
-        response.raise_for_status()
-        result_json = response.json()
-        result = result_json['choices'][0]['message']['content'].strip()
-
-        # 提取 JSON 中的翻译结果
-        translation = extract_translation_from_json(result, sentence)
-
-        elapsed = time.time() - start_time
-
         return {
             "task_id": task_id,
             "source": sentence,
-            "translation": translation,
-            "success": True,
-            "elapsed": elapsed
-        }
-
-    except Exception as e:
-        print(f"[翻译错误] {task_id}: {e}", flush=True)
-        return {
-            "task_id": task_id,
-            "source": sentence,
-            "translation": sentence,  # 失败时返回原文
+            "translation": sentence,
             "success": False,
-            "error": str(e)
+            "error": "Translation failed"
         }
+
+
+def parse_time_to_seconds(time_str: str) -> float:
+    """将 SRT 时间戳转换为秒数"""
+    try:
+        # 格式: 00:00:01,500
+        parts = time_str.replace(',', '.').split(':')
+        hours = float(parts[0])
+        minutes = float(parts[1])
+        seconds = float(parts[2])
+        return hours * 3600 + minutes * 60 + seconds
+    except:
+        return 0.0
+
+
+def group_tasks_by_time(tasks: List[Dict], max_gap_seconds: float = 1.0, max_group_size: int = 5) -> List[List[Dict]]:
+    """
+    根据时间间隔对任务进行分组
+
+    Args:
+        tasks: 任务列表（需包含 start_time, end_time）
+        max_gap_seconds: 最大时间间隔（秒）
+        max_group_size: 每组最大任务数
+
+    Returns:
+        分组后的任务列表
+    """
+    if not tasks:
+        return []
+
+    # 按 index 排序确保顺序正确
+    sorted_tasks = sorted(tasks, key=lambda t: t.get('index', 0))
+
+    groups = []
+    current_group = []
+
+    for task in sorted_tasks:
+        if not current_group:
+            # 第一个任务，直接加入
+            current_group.append(task)
+        else:
+            # 检查时间间隔
+            prev_task = current_group[-1]
+            prev_end = parse_time_to_seconds(prev_task.get('end_time', '00:00:00,000'))
+            curr_start = parse_time_to_seconds(task.get('start_time', '00:00:00,000'))
+            gap = curr_start - prev_end
+
+            # 如果间隔小于阈值且组内任务数未达上限，加入当前组
+            if gap <= max_gap_seconds and len(current_group) < max_group_size:
+                current_group.append(task)
+            else:
+                # 否则，开始新组
+                groups.append(current_group)
+                current_group = [task]
+
+    # 添加最后一组
+    if current_group:
+        groups.append(current_group)
+
+    return groups
 
 
 def batch_translate(
@@ -232,13 +345,16 @@ def batch_translate(
     model: str = "qwen2.5:32b"
 ) -> List[Dict[str, Any]]:
     """
-    批量翻译任务
+    批量翻译任务（支持上下文感知分组）
 
     Args:
         tasks: 任务列表，每个任务包含:
             - task_id: 任务ID
             - source: 源文本（中文）
             - target_language: 目标语言
+            - start_time: 开始时间（可选，用于分组）
+            - end_time: 结束时间（可选，用于分组）
+            - index: 索引（用于排序）
 
         model: 使用的模型名称
 
@@ -253,36 +369,47 @@ def batch_translate(
         print("请确保 Ollama 已启动（运行 'ollama serve'）", flush=True)
         return []
 
-    # 2. 顺序执行所有任务
-    results = []
     total = len(tasks)
-
     print(f"\n[翻译] 开始翻译 {total} 条字幕...\n", flush=True)
+
+    # 2. 根据时间间隔分组
+    task_groups = group_tasks_by_time(tasks, max_gap_seconds=1.0, max_group_size=5)
+    print(f"[翻译] 分组策略: {len(task_groups)} 组（时间间隔≤1秒，每组≤5句）\n", flush=True)
 
     # 记录总时长
     batch_start_time = time.time()
+    results = []
+    processed_count = 0
 
-    # 逐个翻译
-    for i, task in enumerate(tasks, 1):
-        result = translate_single(
-            sentence=task["source"],
-            target_language=task["target_language"],
-            task_id=task["task_id"],
-            model=model
-        )
-        results.append(result)
+    # 3. 按组翻译
+    for group_idx, group in enumerate(task_groups, 1):
+        # 提取该组的所有句子
+        sentences = [t["source"] for t in group]
+        target_language = group[0]["target_language"]  # 同一组的目标语言应该相同
+        group_prefix = f"group-{group_idx}"
 
-        # 实时输出进度
-        status = "✓" if result["success"] else "✗"
-        elapsed = result.get("elapsed", 0)
-        source = result["source"][:20] + "..." if len(result["source"]) > 20 else result["source"]
-        translation = result["translation"][:30] + "..." if len(result["translation"]) > 30 else result["translation"]
+        # 批量翻译该组
+        group_results = translate_batch_group(sentences, target_language, group_prefix, model)
 
-        print(
-            f"[{i}/{total}] {status} {result['task_id']}: {source} -> {translation} "
-            f"({elapsed:.2f}s)",
-            flush=True
-        )
+        # 将结果映射回原始 task_id
+        for i, task in enumerate(group):
+            if i < len(group_results):
+                # 保留原始 task_id
+                group_results[i]["task_id"] = task["task_id"]
+                results.append(group_results[i])
+
+                # 实时输出进度
+                processed_count += 1
+                status = "✓" if group_results[i]["success"] else "✗"
+                elapsed = group_results[i].get("elapsed", 0)
+                source = group_results[i]["source"][:20] + "..." if len(group_results[i]["source"]) > 20 else group_results[i]["source"]
+                translation = group_results[i]["translation"][:30] + "..." if len(group_results[i]["translation"]) > 30 else group_results[i]["translation"]
+
+                print(
+                    f"[{processed_count}/{total}] {status} {group_results[i]['task_id']}: {source} -> {translation} "
+                    f"({elapsed:.2f}s)",
+                    flush=True
+                )
 
     # 计算总时长
     total_elapsed = time.time() - batch_start_time

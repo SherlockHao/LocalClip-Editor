@@ -2543,13 +2543,16 @@ async def run_batch_translation(task_id: str, source_subtitle_filename: str, tar
         target_language_name = get_language_name(target_language)
         print(f"[批量翻译-{task_id}] 目标语言: {target_language} -> {target_language_name}")
 
-        # 创建翻译任务列表
+        # 创建翻译任务列表（包含时间戳信息用于分组）
         translate_tasks = []
         for sub in subtitles:
             translate_tasks.append({
                 "task_id": f"tr-{sub['index']}",
                 "source": sub["text"],
-                "target_language": target_language_name
+                "target_language": target_language_name,
+                "start_time": sub["start_time"],
+                "end_time": sub["end_time"],
+                "index": sub["index"]
             })
 
         # 创建临时配置文件
