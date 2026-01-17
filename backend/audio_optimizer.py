@@ -31,7 +31,10 @@ class AudioOptimizer:
     """音频优化器，用于缩短过长的克隆音频"""
 
     # 加速比例上限
-    MAX_SPEED_RATIO = 1.5
+    MAX_SPEED_RATIO = 1.8
+
+    # 变速时的目标时长缓冲（秒），使变速后的音频略短于目标时长，避免拼接时跳跃
+    SPEED_TARGET_BUFFER = 0.1
 
     def __init__(self, use_vad: bool = True):
         """
@@ -433,12 +436,15 @@ class AudioOptimizer:
                 # 步骤2: 如果去静音后仍超过目标时长，使用变速加速
                 speed_applied = False
                 if processed_duration > target_duration:
-                    # 计算需要的加速比例
-                    required_speed_ratio = processed_duration / target_duration
+                    # 计算调整后的目标时长（略小于原目标时长，留出0.1秒缓冲）
+                    adjusted_target_duration = max(target_duration - self.SPEED_TARGET_BUFFER, target_duration * 0.9)
+
+                    # 计算需要的加速比例（基于调整后的目标时长）
+                    required_speed_ratio = processed_duration / adjusted_target_duration
 
                     # 只有在加速比例不超过上限时才进行变速
                     if required_speed_ratio <= self.MAX_SPEED_RATIO:
-                        print(f"[音频优化] 片段 {index}: 去静音后 {processed_duration:.3f}s 仍超过目标 {target_duration:.3f}s，应用 {required_speed_ratio:.2f}x 加速")
+                        print(f"[音频优化] 片段 {index}: 去静音后 {processed_duration:.3f}s 仍超过目标 {target_duration:.3f}s，应用 {required_speed_ratio:.2f}x 加速（目标: {adjusted_target_duration:.3f}s）")
                         processed_audio = self.speed_up_audio(processed_audio, sr, required_speed_ratio)
                         speed_applied = True
                         final_duration = len(processed_audio) / sr

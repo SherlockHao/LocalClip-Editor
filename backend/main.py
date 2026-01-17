@@ -3598,8 +3598,13 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
                 continue
 
             # 构建实际文件路径
-            audio_filename = f"segment_{idx}.wav"
-            audio_file_path = os.path.join(cloned_audio_dir, audio_filename)
+            # 优先使用优化后的音频（如果存在）
+            if idx in optimized_files:
+                audio_file_path = optimized_files[idx]
+                print(f"[音频拼接] 片段 {idx}: 使用优化音频")
+            else:
+                audio_filename = f"segment_{idx}.wav"
+                audio_file_path = os.path.join(cloned_audio_dir, audio_filename)
 
             if not os.path.exists(audio_file_path):
                 print(f"[音频拼接] 跳过片段 {idx}: 文件不存在 {audio_file_path}")
@@ -3664,8 +3669,8 @@ async def stitch_cloned_audio(request: StitchAudioRequest):
                 actual_start = seg["start_time"]
                 actual_end = seg["end_time"]
 
-            # 步骤1: 如果音频过长，先尝试移除静音段
-            if len(audio_data) / sample_rate > target_duration * 1.05:  # 超过5%才处理
+            # 步骤1: 如果音频过长，先尝试移除静音段（跳过已优化的片段）
+            if idx not in optimized_files and len(audio_data) / sample_rate > target_duration * 1.05:  # 超过5%才处理
                 original_duration = len(audio_data) / sample_rate
                 audio_data = _remove_silence_by_volume(
                     audio_data,
