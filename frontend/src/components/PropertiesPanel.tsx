@@ -1,5 +1,5 @@
 import React from 'react';
-import { Settings, Download, Users, Zap, Info, Gauge, FileText, Mic } from 'lucide-react';
+import { Settings, Download, Users, Zap, Info, FileText, Mic } from 'lucide-react';
 
 interface VideoFile {
   filename: string;
@@ -73,7 +73,7 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
           <div className="p-2 bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg">
             <Settings size={18} className="text-white" />
           </div>
-          设置和导出
+          操作栏
         </h2>
       </div>
 
@@ -114,66 +114,6 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             </div>
           </div>
         )}
-
-        {/* 导出选项区域 */}
-        <div className="mb-6">
-          <div className="flex items-center gap-2 mb-4">
-            <Gauge size={16} className="text-orange-400" />
-            <h3 className="text-sm font-bold text-slate-200 uppercase tracking-wider">导出选项</h3>
-          </div>
-          
-          <div className="space-y-4">
-            {/* 硬字幕开关 */}
-            <div className="flex items-center justify-between p-3 bg-slate-700/30 border border-slate-600 rounded-lg hover:border-slate-500 transition-colors">
-              <label className="text-sm font-medium text-slate-300 cursor-pointer">
-                硬字幕合成
-              </label>
-              <button
-                onClick={() => onExportSettingsChange({
-                  ...exportSettings,
-                  hardSubtitles: !exportSettings.hardSubtitles
-                })}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  exportSettings.hardSubtitles 
-                    ? 'bg-gradient-to-r from-blue-600 to-blue-500' 
-                    : 'bg-slate-600'
-                }`}
-              >
-                <span
-                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    exportSettings.hardSubtitles ? 'translate-x-6' : 'translate-x-1'
-                  }`}
-                />
-              </button>
-            </div>
-            
-            {/* 质量选择 */}
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-2">
-                导出质量
-              </label>
-              <select
-                value={exportSettings.quality}
-                onChange={(e) => onExportSettingsChange({
-                  ...exportSettings,
-                  quality: e.target.value
-                })}
-                className="w-full px-3 py-2.5 bg-slate-700 border border-slate-600 text-slate-100 rounded-lg text-sm font-medium focus:border-blue-500 focus:ring-1 focus:ring-blue-500/50 transition-colors appearance-none cursor-pointer"
-                style={{
-                  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23cbd5e1' d='M6 9L1 4h10z'/%3E%3C/svg%3E")`,
-                  backgroundRepeat: 'no-repeat',
-                  backgroundPosition: 'right 8px center',
-                  paddingRight: '28px'
-                }}
-              >
-                <option value="low">低质量</option>
-                <option value="medium">中质量</option>
-                <option value="high">高质量</option>
-                <option value="original">原始质量</option>
-              </select>
-            </div>
-          </div>
-        </div>
 
         {/* 说话人识别区域 */}
         <div className="mb-6">
