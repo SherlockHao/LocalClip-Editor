@@ -1,12 +1,125 @@
 # LocalClip Editor
 
-一个基于 Mac Mini M4 的本地视频编辑应用，支持视频剪辑、SRT字幕编辑和导出功能。
+一款基于任务驱动的视频多语言配音编辑器
 
-## 技术栈
+---
 
-- **后端**: Python FastAPI + FFmpeg
-- **前端**: React + Vite + TypeScript + Tailwind CSS + Shadcn/UI
-- **视频处理**: FFmpeg (支持 h264_videotoolbox 硬件加速)
+## 🚀 快速开始
+
+### 双击启动（最简单）
+
+1. 双击 `启动 LocalClip Editor.vbs`
+2. 等待 10-15 秒服务启动
+3. 浏览器自动打开任务看板
+4. 开始使用！
+
+### 停止服务
+
+- 双击 `停止 LocalClip Editor.vbs`
+- 或直接关闭两个命令行窗口
+
+---
+
+## ✨ 主要功能
+
+- ✅ **任务管理** - 创建和管理视频处理任务
+- ✅ **说话人识别** - 自动识别视频中的不同说话人
+- ✅ **多语言翻译** - 支持 7 种语言（英、韩、日、法、德、西、印尼）
+- ✅ **语音克隆** - 使用 TTS 技术克隆说话人声音
+- ✅ **视频导出** - 自动合并翻译音频和原视频
+- ✅ **实时进度** - WebSocket 实时显示处理进度
+- ✅ **字幕编辑** - 可视化字幕时间轴编辑
+
+---
+
+## 📋 系统要求
+
+- **Python** 3.8 或更高版本
+- **Node.js** 16 或更高版本
+- **Ollama** (用于翻译功能)
+- **Fish-Speech** (用于语音克隆)
+- **FFmpeg** (用于视频处理)
+
+---
+
+## 📁 项目结构
+
+```
+LocalClip-Editor/
+├── 启动 LocalClip Editor.vbs    ← 【双击启动】
+├── 停止 LocalClip Editor.vbs    ← 【双击停止】
+├── 使用说明.md                  ← 详细使用指南
+├── README.md                    ← 本文档
+│
+├── backend/                     ← 后端服务 (FastAPI)
+│   ├── main.py
+│   ├── translation_service.py
+│   ├── voice_cloning_service.py
+│   └── routers/
+│
+├── frontend/                    ← 前端界面 (React + TypeScript)
+│   └── src/
+│       ├── pages/
+│       └── components/
+│
+└── uploads/                     ← 任务文件存储
+```
+
+---
+
+## 🎯 使用流程
+
+### 1. 创建任务
+
+在任务看板点击"创建新任务"，上传视频和字幕（可选）
+
+### 2. 进入编辑器
+
+点击任务卡片进入编辑器，查看视频和字幕
+
+### 3. 处理流程
+
+```
+说话人识别 → 翻译 → 语音克隆 → 导出视频
+```
+
+### 4. 下载结果
+
+在 `uploads/{task_id}/outputs/{language}/final_video.mp4`
+
+---
+
+## 🌐 服务地址
+
+- **任务看板**: http://localhost:5173/dashboard
+- **后端 API**: http://localhost:8080
+- **API 文档**: http://localhost:8080/docs
+
+---
+
+## 📚 文档
+
+- [使用说明](使用说明.md) - 详细使用指南
+- [Phase 4 完成报告](PHASE4_FINAL_REPORT.md) - 技术实现细节
+- [工作流更新说明](TASK_WORKFLOW_UPDATE.md) - 任务驱动架构
+
+---
+
+## ⚡ 技术栈
+
+### 后端
+- **FastAPI** - 现代化 Python Web 框架
+- **SQLAlchemy** - ORM 数据库
+- **WebSocket** - 实时进度推送
+- **Ollama** - LLM 翻译
+- **Fish-Speech** - TTS 语音合成
+
+### 前端
+- **React** - UI 框架
+- **TypeScript** - 类型安全
+- **Vite** - 构建工具
+- **Tailwind CSS** - 样式框架
+- **Lucide React** - 图标库
 
 ## 功能特性
 

@@ -1,0 +1,1466 @@
+import React, { useState, useRef, useEffect } from 'react';
+import { Upload, Video, Clock, Settings, Play, Pause, RotateCcw, Zap, Volume2, Music, ArrowLeft } from 'lucide-react';
+import { useNavigate, useParams } from 'react-router-dom';
+import axios from 'axios';
+import VideoPlayer from '../components/VideoPlayer';
+import SubtitleTimeline from '../components/SubtitleTimeline';
+import SubtitleDetails from '../components/SubtitleDetails';
+import Sidebar from '../components/Sidebar';
+import PropertiesPanel from '../components/PropertiesPanel';
+import NotificationModal from '../components/NotificationModal';
+
+interface VideoFile {
+  filename: string;
+  original_name: string;
+  size: number;
+  video_info: {
+    width: number;
+    height: number;
+    resolution: string;
+    duration: number;
+    duration_formatted: string;
+    bitrate: string;
+    codec: string;
+  };
+}
+
+interface Subtitle {
+  start_time: number;
+  end_time: number;
+  start_time_formatted: string;
+  end_time_formatted: string;
+  text: string;
+  speaker_id?: number;
+  target_text?: string;
+  cloned_audio_path?: string;
+  cloned_speaker_id?: number;
+  actual_start_time?: number;
+  actual_end_time?: number;
+}
+
+const App: React.FC = () => {
+  const navigate = useNavigate();
+  const { taskId } = useParams<{ taskId: string }>();
+  const [videos, setVideos] = useState<VideoFile[]>([]);
+  const [currentVideo, setCurrentVideo] = useState<VideoFile | null>(null);
+  const [subtitles, setSubtitles] = useState<Subtitle[]>([]);
+  const [subtitleFilename, setSubtitleFilename] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [exportSettings, setExportSettings] = useState({
+    hardSubtitles: false,
+    quality: 'high'
+  });
+  const [isProcessingSpeakerDiarization, setIsProcessingSpeakerDiarization] = useState(false);
+  const [speakerDiarizationTaskId, setSpeakerDiarizationTaskId] = useState<string | null>(null);
+  const [speakerDiarizationProgress, setSpeakerDiarizationProgress] = useState({ message: '', progress: 0 });
+  const speakerDiarizationProgressTimer = useRef<NodeJS.Timeout | null>(null);
+  const lastRealProgress = useRef<number>(0);
+  const [showNotification, setShowNotification] = useState(false);
+  const [notificationData, setNotificationData] = useState({
+    title: '',
+    message: '',
+    uniqueSpeakers: undefined as number | undefined
+  });
+  const [speakerNameMapping, setSpeakerNameMapping] = useState<{[key: number]: string}>({});
+  const [filteredSpeakerId, setFilteredSpeakerId] = useState<number | null>(null); // 筛选的说话人ID
+
+  // 语音克隆相关状态
+  const [targetLanguage, setTargetLanguage] = useState<string>('');
+  const [targetSrtFilename, setTargetSrtFilename] = useState<string | null>(null);
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [translationProgress, setTranslationProgress] = useState<{message: string, progress: number} | null>(null);
+  const translationProgressTimer = useRef<NodeJS.Timeout | null>(null);
+  const lastTranslationProgress = useRef<number>(0);
+  const [isProcessingVoiceCloning, setIsProcessingVoiceCloning] = useState(false);
+  const [voiceCloningProgress, setVoiceCloningProgress] = useState<{message: string, progress: number} | null>(null);
+  const voiceCloningProgressTimer = useRef<NodeJS.Timeout | null>(null);
+  const lastVoiceCloningProgress = useRef<number>(0);
+  const [voiceCloningTaskId, setVoiceCloningTaskId] = useState<string | null>(null);
+  const [isStitchingAudio, setIsStitchingAudio] = useState(false);
+  const [stitchedAudioPath, setStitchedAudioPath] = useState<string | null>(null);
+  const [useStitchedAudio, setUseStitchedAudio] = useState(false);
+
+  // 默认音色库和音色映射状态
+  const [defaultVoices, setDefaultVoices] = useState<Array<{id: string, name: string, audio_url: string, reference_text: string}>>([]);
+  const [speakerVoiceMapping, setSpeakerVoiceMapping] = useState<{[speakerId: string]: string}>({});
+  const [initialSpeakerVoiceMapping, setInitialSpeakerVoiceMapping] = useState<{[speakerId: string]: string}>({});
+  const [isRegeneratingVoices, setIsRegeneratingVoices] = useState(false);
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const isSeekingRef = useRef<boolean>(false);
+  const progressBarRef = useRef<HTMLDivElement>(null);
+  const [isDraggingProgress, setIsDraggingProgress] = useState(false);
+
+  // 空格键播放/暂停
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      // 只在没有焦点在输入框时触发
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') {
+        return;
+      }
+
+      if (e.code === 'Space') {
+        e.preventDefault();
+        handlePlayPause();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [isPlaying]);
+
+  // 进度条拖拽功能
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDraggingProgress || !progressBarRef.current) return;
+
+      const rect = progressBarRef.current.getBoundingClientRect();
+      const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+      const percentage = x / rect.width;
+      const newTime = percentage * duration;
+
+      handleSeek(newTime);
+    };
+
+    const handleMouseUp = () => {
+      setIsDraggingProgress(false);
+    };
+
+    if (isDraggingProgress) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isDraggingProgress, duration]);
+
+  // 清理说话人识别进度定时器
+  useEffect(() => {
+    return () => {
+      if (speakerDiarizationProgressTimer.current) {
+        clearInterval(speakerDiarizationProgressTimer.current);
+        speakerDiarizationProgressTimer.current = null;
+      }
+    };
+  }, []);
+
+  // 清理翻译进度定时器
+  useEffect(() => {
+    return () => {
+      if (translationProgressTimer.current) {
+        clearInterval(translationProgressTimer.current);
+        translationProgressTimer.current = null;
+      }
+    };
+  }, []);
+
+  // 清理语音克隆进度定时器
+  useEffect(() => {
+    return () => {
+      if (voiceCloningProgressTimer.current) {
+        clearInterval(voiceCloningProgressTimer.current);
+        voiceCloningProgressTimer.current = null;
+      }
+    };
+  }, []);
+
+  const handleProgressBarMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    setIsDraggingProgress(true);
+
+    // 立即跳转到点击位置
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = x / rect.width;
+    handleSeek(percentage * duration);
+  };
+
+  const refreshVideos = async () => {
+    try {
+      const response = await fetch('/api/videos');
+      if (!response.ok) {
+        throw new Error(`获取视频列表失败: ${response.statusText}`);
+      }
+      const result = await response.json();
+      setVideos(result.videos);
+    } catch (error) {
+      // 获取视频列表失败
+    }
+  };
+
+  // 加载任务数据（视频和字幕）
+  useEffect(() => {
+    const loadTaskData = async () => {
+      if (!taskId) return;
+
+      try {
+        console.log('[任务加载] 加载任务数据:', taskId);
+
+        // 获取任务信息
+        const taskResponse = await axios.get(`/api/tasks/${taskId}`);
+        const task = taskResponse.data;
+
+        console.log('[任务加载] 任务数据:', task);
+
+        // 加载视频
+        if (task.video_filename) {
+          const videoPath = `/uploads/${taskId}/input/${task.video_filename}`;
+          console.log('[任务加载] 加载视频:', videoPath);
+
+          // 获取视频信息
+          const videoInfoResponse = await axios.get(`/api/tasks/${taskId}/video-info`);
+          const videoInfo = videoInfoResponse.data;
+
+          const videoFile: VideoFile = {
+            filename: task.video_filename,
+            original_name: task.video_original_name,
+            size: videoInfo.size || 0,
+            video_info: videoInfo
+          };
+
+          setCurrentVideo(videoFile);
+          setVideos([videoFile]);
+        }
+
+        // 加载字幕（如果存在）
+        if (task.config?.source_subtitle_filename) {
+          console.log('[任务加载] 加载字幕:', task.config.source_subtitle_filename);
+          const subtitleResponse = await axios.get(`/api/tasks/${taskId}/subtitle`);
+          setSubtitles(subtitleResponse.data.subtitles || []);
+          setSubtitleFilename(task.config.source_subtitle_filename);
+        }
+
+      } catch (error) {
+        console.error('[任务加载] 加载任务失败:', error);
+      }
+    };
+
+    loadTaskData();
+  }, [taskId]);
+
+  // 加载默认音色库
+  useEffect(() => {
+    const loadDefaultVoices = async () => {
+      try {
+        console.log('[加载默认音色] 开始加载...');
+        const response = await fetch('/api/voice-cloning/default-voices');
+        console.log('[加载默认音色] 响应状态:', response.status, response.ok);
+        if (response.ok) {
+          const result = await response.json();
+          console.log('[加载默认音色] 返回数据:', result);
+          setDefaultVoices(result.voices || []);
+          console.log('[加载默认音色] 设置音色数量:', result.voices?.length);
+        } else {
+          console.error('[加载默认音色] 响应失败:', response.status, response.statusText);
+        }
+      } catch (error) {
+        console.error('加载默认音色库失败:', error);
+      }
+    };
+    loadDefaultVoices();
+  }, []);
+
+  const handleVideoUpload = async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch('/api/upload/video', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`上传失败: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      const newVideo: VideoFile = {
+        filename: result.filename,
+        original_name: result.original_name,
+        size: result.size,
+        video_info: result.video_info
+      };
+
+      await refreshVideos();
+      setCurrentVideo(newVideo);
+    } catch (error) {
+      alert('上传视频失败: ' + (error as Error).message);
+    }
+  };
+
+  const handleSubtitleUpload = async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch('/api/upload/subtitle', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`上传失败: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      setSubtitles(result.subtitles);
+      setSubtitleFilename(result.filename);
+    } catch (error) {
+      alert('上传字幕失败: ' + (error as Error).message);
+    }
+  };
+
+  const handleEditSubtitle = (index: number, newSubtitle: Subtitle) => {
+    const updatedSubtitles = [...subtitles];
+    updatedSubtitles[index] = newSubtitle;
+    setSubtitles(updatedSubtitles);
+  };
+
+  const handleDeleteSubtitle = (index: number) => {
+    const updatedSubtitles = subtitles.filter((_, i) => i !== index);
+    setSubtitles(updatedSubtitles);
+  };
+
+  const handlePlayPause = () => {
+    if (videoRef.current) {
+      if (isPlaying) {
+        videoRef.current.pause();
+      } else {
+        videoRef.current.play();
+      }
+      setIsPlaying(!isPlaying);
+    }
+  };
+
+  const handleTimeUpdate = () => {
+    if (videoRef.current && !isSeekingRef.current) {
+      setCurrentTime(videoRef.current.currentTime);
+    }
+  };
+
+  const handleLoadedMetadata = () => {
+    if (videoRef.current) {
+      setDuration(videoRef.current.duration);
+    }
+  };
+
+  const handleSeek = (time: number) => {
+    if (videoRef.current) {
+      const video = videoRef.current;
+
+      // 检查视频是否已经加载足够的数据
+      if (video.readyState < 2) {
+        return;
+      }
+
+      // 设置 seeking 标志
+      isSeekingRef.current = true;
+
+      // 设置视频时间
+      video.currentTime = time;
+
+      // 监听 seeked 事件来更新状态
+      const handleSeeked = () => {
+        setCurrentTime(video.currentTime);
+        isSeekingRef.current = false;
+        video.removeEventListener('seeked', handleSeeked);
+      };
+      video.addEventListener('seeked', handleSeeked, { once: true });
+    }
+  };
+
+  const handleAddSpeaker = (gender: 'male' | 'female') => {
+    // 获取当前最大的说话人ID
+    const existingIds = Object.keys(speakerNameMapping).map(id => parseInt(id));
+    const maxId = existingIds.length > 0 ? Math.max(...existingIds) : -1;
+    const newId = maxId + 1;
+
+    // 计算该性别的当前数量
+    let count = 0;
+    Object.values(speakerNameMapping).forEach(name => {
+      if (gender === 'male' && name.startsWith('男')) count++;
+      if (gender === 'female' && name.startsWith('女')) count++;
+    });
+
+    // 生成新的说话人名称
+    const newName = gender === 'male' ? `男${count + 1}` : `女${count + 1}`;
+
+    // 更新映射
+    setSpeakerNameMapping({
+      ...speakerNameMapping,
+      [newId]: newName
+    });
+  };
+
+  const handleRemoveSpeaker = (speakerId: number) => {
+    // 从映射中删除该说话人
+    const newMapping = { ...speakerNameMapping };
+    delete newMapping[speakerId];
+    setSpeakerNameMapping(newMapping);
+
+    // 检查字幕中是否有使用该说话人，如果有则重置为undefined
+    const updatedSubtitles = subtitles.map(subtitle => {
+      if (subtitle.speaker_id === speakerId) {
+        return {
+          ...subtitle,
+          speaker_id: undefined
+        };
+      }
+      return subtitle;
+    });
+    setSubtitles(updatedSubtitles);
+  };
+
+  const handleExport = () => {
+    // TODO: 实现视频导出功能
+  };
+
+  const handleRunSpeakerDiarization = async () => {
+    if (!currentVideo) {
+      alert('请先上传并选择视频文件');
+      return;
+    }
+
+    if (!subtitleFilename) {
+      alert('请先上传SRT字幕文件');
+      return;
+    }
+
+    try {
+      // 清理之前的定时器
+      if (speakerDiarizationProgressTimer.current) {
+        clearInterval(speakerDiarizationProgressTimer.current);
+        speakerDiarizationProgressTimer.current = null;
+      }
+      lastRealProgress.current = 0;
+
+      setIsProcessingSpeakerDiarization(true);
+      setSpeakerDiarizationProgress({ message: '初始化中...', progress: 0 });
+
+      const response = await fetch(`/api/tasks/${taskId}/speaker-diarization`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      });
+
+      if (!response.ok) {
+        throw new Error(`请求失败: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      setSpeakerDiarizationTaskId(result.task_id);
+
+      pollSpeakerDiarizationStatus(result.task_id);
+    } catch (error) {
+      alert('启动说话人识别失败: ' + (error as Error).message);
+      setIsProcessingSpeakerDiarization(false);
+      setSpeakerDiarizationProgress({ message: '', progress: 0 });
+    }
+  };
+
+  const pollSpeakerDiarizationStatus = async (taskId: string) => {
+    try {
+      console.log('轮询状态, taskId:', taskId);
+      const response = await fetch(`/api/tasks/${taskId}/speaker-diarization/status`);
+
+      if (!response.ok) {
+        throw new Error(`获取状态失败: ${response.statusText}`);
+      }
+
+      const status = await response.json();
+      console.log('收到状态:', status);
+
+      const realProgress = status.progress || 0;
+
+      // 如果真实进度大于上次的真实进度，更新并停止模拟
+      if (realProgress > lastRealProgress.current) {
+        lastRealProgress.current = realProgress;
+
+        // 清除之前的模拟定时器
+        if (speakerDiarizationProgressTimer.current) {
+          clearInterval(speakerDiarizationProgressTimer.current);
+          speakerDiarizationProgressTimer.current = null;
+        }
+
+        // 立即更新到真实进度
+        setSpeakerDiarizationProgress({
+          message: status.message || '处理中...',
+          progress: realProgress
+        });
+
+        // 如果还没有完成，启动新的模拟进度增长
+        if (status.status === 'processing') {
+          speakerDiarizationProgressTimer.current = setInterval(() => {
+            setSpeakerDiarizationProgress(prev => {
+              // 每2秒增加1%，但不超过真实进度的下一个阶段
+              const nextProgress = Math.min(prev.progress + 1, 99);
+              return {
+                ...prev,
+                progress: nextProgress
+              };
+            });
+          }, 2000);
+        }
+      } else {
+        // 真实进度没有变化，只更新消息
+        setSpeakerDiarizationProgress(prev => ({
+          message: status.message || prev.message,
+          progress: prev.progress
+        }));
+      }
+
+      if (status.status === 'completed') {
+        // 清除模拟定时器
+        if (speakerDiarizationProgressTimer.current) {
+          clearInterval(speakerDiarizationProgressTimer.current);
+          speakerDiarizationProgressTimer.current = null;
+        }
+        lastRealProgress.current = 0;
+        if (status.speaker_labels) {
+          const updatedSubtitles = subtitles.map((subtitle, index) => {
+            const speakerId = status.speaker_labels[index];
+            return {
+              ...subtitle,
+              speaker_id: speakerId !== null && speakerId !== undefined ? speakerId : undefined
+            };
+          });
+          setSubtitles(updatedSubtitles);
+        }
+
+        // 提取说话人名称映射
+        if (status.speaker_name_mapping) {
+          setSpeakerNameMapping(status.speaker_name_mapping);
+        }
+
+        setIsProcessingSpeakerDiarization(false);
+        setSpeakerDiarizationTaskId(null);
+        setSpeakerDiarizationProgress({ message: '', progress: 0 }); // 重置进度
+
+        // 显示成功通知，包含处理时间
+        const durationInfo = status.duration_str ? ` (耗时: ${status.duration_str})` : '';
+        setNotificationData({
+          title: '说话人识别完成',
+          message: `已成功完成说话人识别并标记到字幕中，你现在可以在字幕详情中查看和编辑说话人信息。${durationInfo}`,
+          uniqueSpeakers: status.unique_speakers
+        });
+        setShowNotification(true);
+      } else if (status.status === 'failed') {
+        // 清除模拟定时器
+        if (speakerDiarizationProgressTimer.current) {
+          clearInterval(speakerDiarizationProgressTimer.current);
+          speakerDiarizationProgressTimer.current = null;
+        }
+        lastRealProgress.current = 0;
+
+        // 显示失败通知，包含失败前的耗时
+        const durationInfo = status.duration_str ? ` (失败前耗时: ${status.duration_str})` : '';
+        const errorMessage = status.message || '处理过程中发生错误，请重试。';
+        setNotificationData({
+          title: '说话人识别失败',
+          message: `${errorMessage}${durationInfo}`,
+          uniqueSpeakers: undefined
+        });
+        setShowNotification(true);
+
+        setIsProcessingSpeakerDiarization(false);
+        setSpeakerDiarizationTaskId(null);
+        setSpeakerDiarizationProgress({ message: '', progress: 0 }); // 重置进度
+      } else {
+        setTimeout(() => pollSpeakerDiarizationStatus(taskId), 2000);
+      }
+    } catch (error) {
+      // 清除模拟定时器
+      if (speakerDiarizationProgressTimer.current) {
+        clearInterval(speakerDiarizationProgressTimer.current);
+        speakerDiarizationProgressTimer.current = null;
+      }
+      lastRealProgress.current = 0;
+
+      alert('获取说话人识别状态失败: ' + (error as Error).message);
+      setIsProcessingSpeakerDiarization(false);
+      setSpeakerDiarizationTaskId(null);
+    }
+  };
+
+  // 处理目标语言srt文件上传（已废弃，保留以防需要）
+  const handleTargetSrtUpload = async (file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch('/api/upload/subtitle', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        throw new Error(`上传失败: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      setTargetSrtFilename(result.filename);
+    } catch (error) {
+      alert('上传目标语言字幕失败: ' + (error as Error).message);
+    }
+  };
+
+  // 翻译字幕
+  const handleTranslateSubtitles = async () => {
+    if (!taskId) {
+      alert('任务ID不存在');
+      return;
+    }
+
+    if (!subtitleFilename) {
+      alert('请先上传原始SRT字幕文件');
+      return;
+    }
+
+    if (!targetLanguage) {
+      alert('请选择目标语言');
+      return;
+    }
+
+    try {
+      // 清理之前的定时器
+      if (translationProgressTimer.current) {
+        clearInterval(translationProgressTimer.current);
+        translationProgressTimer.current = null;
+      }
+      lastTranslationProgress.current = 0;
+
+      console.log('[启动翻译] 开始调用API, taskId:', taskId, 'language:', targetLanguage);
+      setIsTranslating(true);
+      setTranslationProgress({ message: '正在准备翻译...', progress: 0 });
+
+      // 使用新的任务系统API (路由在 /api/tasks 下)
+      const response = await fetch(`/api/tasks/${taskId}/languages/${targetLanguage}/translate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      });
+
+      console.log('[启动翻译] 收到HTTP响应, status:', response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`翻译失败: ${errorText || response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      console.log('[启动翻译] 解析JSON完成, 收到响应:', result);
+
+      // 开始轮询翻译状态
+      console.log('[启动翻译] 开始轮询, taskId:', taskId, 'language:', targetLanguage);
+      pollTranslationStatus(taskId, targetLanguage);
+    } catch (error) {
+      alert('启动翻译失败: ' + (error as Error).message);
+      setIsTranslating(false);
+      setTranslationProgress(null);
+    }
+  };
+
+  // 轮询翻译状态
+  const pollTranslationStatus = async (pollTaskId: string, language: string) => {
+    console.log('[翻译轮询] 开始轮询, taskId:', pollTaskId, 'language:', language);
+    try {
+      // 使用新的任务系统API (路由在 /api/tasks 下)
+      const response = await fetch(`/api/tasks/${pollTaskId}/languages/${language}/translate/status`);
+
+      if (!response.ok) {
+        console.error('[翻译轮询] HTTP错误:', response.status, response.statusText);
+        throw new Error(`获取翻译状态失败: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      const realProgress = result.progress || 0;
+
+      console.log('[翻译轮询]', {
+        status: result.status,
+        progress: realProgress,
+        message: result.message
+      });
+
+      if (result.status === 'processing') {
+        // 直接使用真实进度，不再使用模拟增长
+        setTranslationProgress({
+          message: result.message || '翻译中...',
+          progress: realProgress
+        });
+        console.log('[翻译轮询] 设置进度:', realProgress);
+
+        setTimeout(() => pollTranslationStatus(pollTaskId, language), 1000);
+      } else if (result.status === 'completed') {
+        // 清除模拟定时器
+        if (translationProgressTimer.current) {
+          clearInterval(translationProgressTimer.current);
+          translationProgressTimer.current = null;
+        }
+        lastTranslationProgress.current = 0;
+
+        setTranslationProgress({ message: '翻译完成', progress: 100 });
+        setTargetSrtFilename(result.target_srt_filename || 'translated.srt');
+        setIsTranslating(false);
+
+        // 显示完成通知，包含耗时信息
+        const totalItems = result.total_items || 0;
+        const elapsedTime = result.elapsed_time || 0;
+
+        let notificationMessage = '字幕翻译已完成';
+        if (totalItems > 0 && elapsedTime > 0) {
+          const avgTime = (elapsedTime / totalItems).toFixed(2);
+          notificationMessage = `已成功翻译 ${totalItems} 条字幕\n总耗时: ${elapsedTime}秒\n平均耗时: ${avgTime}秒/条`;
+        }
+
+        setNotificationData({
+          title: '翻译完成',
+          message: notificationMessage,
+          uniqueSpeakers: undefined
+        });
+        setShowNotification(true);
+
+        setTimeout(() => setTranslationProgress(null), 2000);
+      } else if (result.status === 'failed') {
+        // 清除模拟定时器
+        if (translationProgressTimer.current) {
+          clearInterval(translationProgressTimer.current);
+          translationProgressTimer.current = null;
+        }
+        lastTranslationProgress.current = 0;
+
+        throw new Error(result.message || '翻译失败');
+      } else if (result.status === 'pending') {
+        // 任务还未开始，继续轮询
+        setTimeout(() => pollTranslationStatus(pollTaskId, language), 1000);
+      }
+    } catch (error) {
+      console.error('[翻译轮询] 捕获到错误:', error);
+      // 清除模拟定时器
+      if (translationProgressTimer.current) {
+        clearInterval(translationProgressTimer.current);
+        translationProgressTimer.current = null;
+      }
+      lastTranslationProgress.current = 0;
+
+      alert('翻译失败: ' + (error as Error).message);
+      setIsTranslating(false);
+      setTranslationProgress(null);
+    }
+  };
+
+  // 执行语音克隆
+  const handleRunVoiceCloning = async () => {
+    if (!currentVideo) {
+      alert('请先上传并选择视频文件');
+      return;
+    }
+
+    if (!subtitleFilename) {
+      alert('请先上传原始SRT字幕文件');
+      return;
+    }
+
+    if (!targetLanguage) {
+      alert('请选择目标语言');
+      return;
+    }
+
+    if (!targetSrtFilename) {
+      alert('请上传目标语言的SRT字幕文件');
+      return;
+    }
+
+    try {
+      setIsProcessingVoiceCloning(true);
+
+      // 清除旧的进度定时器并重置进度
+      if (voiceCloningProgressTimer.current) {
+        clearInterval(voiceCloningProgressTimer.current);
+        voiceCloningProgressTimer.current = null;
+      }
+      lastVoiceCloningProgress.current = 0;
+      setVoiceCloningProgress({ message: '正在启动语音克隆...', progress: 0 });
+
+      // 使用任务系统的语音克隆 API
+      const response = await fetch(`/api/tasks/${taskId}/languages/${targetLanguage}/voice-cloning`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          speaker_voice_mapping: speakerVoiceMapping
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`请求失败: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      // 任务系统使用原 taskId，不再生成新的 voiceCloningTaskId
+      setVoiceCloningTaskId(taskId || null);
+
+      // 轮询时需要传递 language
+      pollVoiceCloningStatus(taskId || '', targetLanguage);
+    } catch (error) {
+      alert('启动语音克隆失败: ' + (error as Error).message);
+      setIsProcessingVoiceCloning(false);
+    }
+  };
+
+  // 播放克隆音频
+  const handlePlayClonedAudio = (audioPath: string) => {
+    console.log('[播放音频] 输入路径:', audioPath);
+    // 构建完整的音频URL，添加额外的随机参数确保不使用缓存
+    const separator = audioPath.includes('?') ? '&' : '?';
+    // 新的任务系统路径已经包含 /api 前缀
+    const audioUrl = audioPath.startsWith('/api')
+      ? `${audioPath}${separator}_=${Date.now()}`
+      : `/api${audioPath}${separator}_=${Date.now()}`;
+    console.log('[播放音频] 实际URL:', audioUrl);
+    const audio = new Audio();
+    // 设置不使用缓存
+    audio.preload = 'none';
+    audio.src = audioUrl;
+    audio.load(); // 强制重新加载
+    audio.play().catch(error => {
+      console.error('播放克隆音频失败:', error);
+      alert('播放克隆音频失败');
+    });
+  };
+
+  // 重新生成单个片段
+  const handleRegenerateSegment = async (index: number, newSpeakerId: number, newTargetText?: string) => {
+    if (!taskId || !targetLanguage) {
+      alert('任务ID或目标语言不存在');
+      return;
+    }
+
+    try {
+      const requestBody: any = {
+        segment_index: index,
+        new_speaker_id: newSpeakerId
+      };
+
+      if (newTargetText) {
+        requestBody.new_target_text = newTargetText;
+      }
+
+      // 使用新的任务系统 API
+      const response = await fetch(`/api/tasks/${taskId}/languages/${targetLanguage}/regenerate-segment`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!response.ok) {
+        throw new Error(`重新生成失败: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        // 更新该片段的克隆音频信息
+        setSubtitles(prevSubtitles => {
+          return prevSubtitles.map((subtitle, i) => {
+            if (i === index) {
+              const updates: any = {
+                ...subtitle,
+                cloned_audio_path: result.cloned_audio_path,
+                cloned_speaker_id: result.new_speaker_id
+              };
+              // 如果有新的译文，也更新
+              if (newTargetText) {
+                updates.target_text = newTargetText;
+              }
+              return updates;
+            }
+            return subtitle;
+          });
+        });
+
+        alert('重新生成成功！');
+      }
+    } catch (error) {
+      console.error('重新生成失败:', error);
+      alert('重新生成失败: ' + (error as Error).message);
+    }
+  };
+
+  // 批量重新生成音色变化的说话人
+  const handleRegenerateVoices = async () => {
+    if (!voiceCloningTaskId) {
+      alert('语音克隆任务ID不存在');
+      return;
+    }
+
+    try {
+      setIsRegeneratingVoices(true);
+
+      const response = await fetch('/api/voice-cloning/regenerate-voices', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          task_id: voiceCloningTaskId,
+          speaker_voice_mapping: speakerVoiceMapping
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`重新生成失败: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        // 更新初始映射
+        setInitialSpeakerVoiceMapping({...speakerVoiceMapping});
+
+        // 获取最新的字幕数据
+        const statusResponse = await fetch(`/api/voice-cloning/status/${voiceCloningTaskId}`);
+        if (statusResponse.ok) {
+          const status = await statusResponse.json();
+
+          console.log('[重新生成] 获取到的 cloned_results 数量:', status.cloned_results?.length);
+          console.log('[重新生成] 前3个 cloned_results:', status.cloned_results?.slice(0, 3));
+
+          // 更新字幕数据，添加克隆音频路径
+          if (status.cloned_results && Array.isArray(status.cloned_results)) {
+            const newSubtitles = subtitles.map((subtitle, index) => {
+              const clonedResult = status.cloned_results.find((r: any) => r.index === index);
+              if (clonedResult) {
+                if (index <= 2) {
+                  console.log(`[重新生成] 更新片段 ${index}:`, {
+                    old: subtitle.cloned_audio_path,
+                    new: clonedResult.cloned_audio_path
+                  });
+                }
+                return {
+                  ...subtitle,
+                  cloned_audio_path: clonedResult.cloned_audio_path,
+                  cloned_speaker_id: clonedResult.speaker_id
+                };
+              }
+              return subtitle;
+            });
+
+            const updatedCount = newSubtitles.filter((s, i) => s.cloned_audio_path !== subtitles[i].cloned_audio_path).length;
+            console.log(`[重新生成] 总共更新了 ${updatedCount} 个片段`);
+
+            setSubtitles(newSubtitles);
+
+            // 验证更新是否生效
+            setTimeout(() => {
+              console.log('[重新生成] 验证: 片段0的音频路径:', newSubtitles[0]?.cloned_audio_path);
+            }, 100);
+          }
+        }
+
+        // 显示成功通知
+        setNotificationData({
+          title: '重新生成完成',
+          message: `已成功重新生成 ${result.regenerated_count} 个片段，可在字幕详情中播放克隆音频。 (耗时: ${result.duration})`,
+          uniqueSpeakers: undefined
+        });
+        setShowNotification(true);
+      }
+    } catch (error) {
+      console.error('重新生成失败:', error);
+      alert('重新生成失败: ' + (error as Error).message);
+    } finally {
+      setIsRegeneratingVoices(false);
+    }
+  };
+
+  // 检查音色映射是否有变化
+  const hasVoiceMappingChanged = () => {
+    const currentKeys = Object.keys(speakerVoiceMapping);
+    const initialKeys = Object.keys(initialSpeakerVoiceMapping);
+
+    if (currentKeys.length !== initialKeys.length) return true;
+
+    for (const key of currentKeys) {
+      if (speakerVoiceMapping[key] !== initialSpeakerVoiceMapping[key]) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  // 拼接克隆音频
+  const handleStitchAudio = async () => {
+    if (!taskId || !targetLanguage) {
+      alert('任务ID或目标语言不存在');
+      return;
+    }
+
+    try {
+      setIsStitchingAudio(true);
+
+      // 使用新的任务系统 API
+      const response = await fetch(`/api/tasks/${taskId}/languages/${targetLanguage}/stitch-audio`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({})
+      });
+
+      if (!response.ok) {
+        throw new Error(`拼接音频失败: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+
+      if (result.success) {
+        // 先清空音频路径，确保effect会被触发
+        setStitchedAudioPath(null);
+        setUseStitchedAudio(false);
+
+        // 使用setTimeout确保状态更新完成后再设置新路径
+        setTimeout(() => {
+          // 添加时间戳参数防止浏览器缓存
+          const audioPathWithCache = `${result.stitched_audio_path}?t=${Date.now()}`;
+          // 保存拼接音频路径并自动切换到拼接音频
+          setStitchedAudioPath(audioPathWithCache);
+          setUseStitchedAudio(true);
+        }, 0);
+
+        // 从返回结果中更新字幕数据（包含 actual_start_time 和 actual_end_time）
+        if (result.cloned_results && Array.isArray(result.cloned_results)) {
+          setSubtitles(prevSubtitles => {
+            return prevSubtitles.map((subtitle, index) => {
+              const clonedResult = result.cloned_results.find((r: any) => r.index === index);
+              if (clonedResult) {
+                return {
+                  ...subtitle,
+                  target_text: clonedResult.target_text,
+                  cloned_audio_path: clonedResult.cloned_audio_path,
+                  cloned_speaker_id: clonedResult.speaker_id,
+                  actual_start_time: clonedResult.actual_start_time,
+                  actual_end_time: clonedResult.actual_end_time
+                };
+              }
+              return subtitle;
+            });
+          });
+        }
+
+        alert(`拼接成功！已生成完整音频，共 ${result.segments_count} 个片段，总时长 ${result.total_duration.toFixed(2)}s${result.replanned_segments > 0 ? `，其中 ${result.replanned_segments} 个片段使用了智能时间轴规划` : ''}`);
+      }
+    } catch (error) {
+      console.error('拼接音频失败:', error);
+      alert('拼接音频失败: ' + (error as Error).message);
+    } finally {
+      setIsStitchingAudio(false);
+    }
+  };
+
+  // 轮询语音克隆状态
+  const pollVoiceCloningStatus = async (pollTaskId: string, language: string) => {
+    try {
+      // 使用任务系统的状态查询 API
+      const response = await fetch(`/api/tasks/${pollTaskId}/languages/${language}/voice-cloning/status`);
+
+      if (!response.ok) {
+        throw new Error(`获取状态失败: ${response.statusText}`);
+      }
+
+      const status = await response.json();
+      const realProgress = status.progress || 0;
+
+      console.log('[语音克隆轮询]', {
+        status: status.status,
+        progress: realProgress,
+        message: status.message
+      });
+
+      if (status.status === 'processing') {
+        // 直接使用真实进度，不再使用模拟增长
+        setVoiceCloningProgress({
+          message: status.message || '语音克隆中...',
+          progress: realProgress
+        });
+        console.log('[语音克隆轮询] 设置进度:', realProgress);
+
+        setTimeout(() => pollVoiceCloningStatus(pollTaskId, language), 1000);
+      } else if (status.status === 'completed') {
+        // 清除定时器并重置
+        if (voiceCloningProgressTimer.current) {
+          clearInterval(voiceCloningProgressTimer.current);
+          voiceCloningProgressTimer.current = null;
+        }
+        lastVoiceCloningProgress.current = 0;
+
+        setVoiceCloningProgress({ message: '语音克隆完成', progress: 100 });
+        setIsProcessingVoiceCloning(false);
+
+        // 更新字幕数据，添加目标语言文本和克隆音频路径
+        if (status.cloned_results && Array.isArray(status.cloned_results)) {
+          setSubtitles(prevSubtitles => {
+            return prevSubtitles.map((subtitle, index) => {
+              const clonedResult = status.cloned_results.find((r: any) => r.index === index);
+              if (clonedResult) {
+                return {
+                  ...subtitle,
+                  target_text: clonedResult.target_text,
+                  cloned_audio_path: clonedResult.cloned_audio_path,
+                  cloned_speaker_id: clonedResult.speaker_id
+                };
+              }
+              return subtitle;
+            });
+          });
+        }
+
+        // 保存初始音色映射，用于后续检测变化
+        // 使用后端返回的初始映射（印尼语会自动设置为对应音色）
+        if (status.initial_speaker_voice_mapping) {
+          setSpeakerVoiceMapping(status.initial_speaker_voice_mapping);
+          setInitialSpeakerVoiceMapping(status.initial_speaker_voice_mapping);
+        } else {
+          setInitialSpeakerVoiceMapping({...speakerVoiceMapping});
+        }
+
+        // 显示成功通知，包含处理时间
+        const elapsedTime = status.elapsed_time || 0;
+        const totalItems = status.total_items || 0;
+        let durationInfo = '';
+        if (elapsedTime > 0) {
+          const avgTime = totalItems > 0 ? (elapsedTime / totalItems).toFixed(2) : '0';
+          durationInfo = `\n总耗时: ${elapsedTime.toFixed(1)}秒`;
+          if (totalItems > 0) {
+            durationInfo += `\n平均耗时: ${avgTime}秒/条`;
+          }
+        }
+        setNotificationData({
+          title: '语音克隆完成',
+          message: `已成功完成 ${totalItems} 条语音克隆，可在字幕详情中播放克隆音频。${durationInfo}`,
+          uniqueSpeakers: undefined
+        });
+        setShowNotification(true);
+
+        // 2秒后清除进度条
+        setTimeout(() => setVoiceCloningProgress(null), 2000);
+      } else if (status.status === 'failed') {
+        // 清除定时器并重置
+        if (voiceCloningProgressTimer.current) {
+          clearInterval(voiceCloningProgressTimer.current);
+          voiceCloningProgressTimer.current = null;
+        }
+        lastVoiceCloningProgress.current = 0;
+
+        // 显示失败通知
+        const errorMessage = status.message || '处理过程中发生错误，请重试。';
+        setNotificationData({
+          title: '语音克隆失败',
+          message: errorMessage,
+          uniqueSpeakers: undefined
+        });
+        setShowNotification(true);
+
+        setIsProcessingVoiceCloning(false);
+        setVoiceCloningProgress(null);
+        setVoiceCloningTaskId(null);
+      } else {
+        setTimeout(() => pollVoiceCloningStatus(pollTaskId, language), 1000);
+      }
+    } catch (error) {
+      // 清除定时器并重置
+      if (voiceCloningProgressTimer.current) {
+        clearInterval(voiceCloningProgressTimer.current);
+        voiceCloningProgressTimer.current = null;
+      }
+      lastVoiceCloningProgress.current = 0;
+
+      alert('获取语音克隆状态失败: ' + (error as Error).message);
+      setIsProcessingVoiceCloning(false);
+      setVoiceCloningProgress(null);
+      setVoiceCloningTaskId(null);
+    }
+  };
+
+  return (
+    <div className="h-screen flex flex-col bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+      {/* 通知模态框 */}
+      <NotificationModal
+        isOpen={showNotification}
+        onClose={() => setShowNotification(false)}
+        title={notificationData.title}
+        message={notificationData.message}
+        uniqueSpeakers={notificationData.uniqueSpeakers}
+      />
+
+      {/* 顶部工具栏 */}
+      <header className="bg-gradient-to-r from-slate-900 to-slate-800 border-b border-slate-700 px-6 py-4 flex items-center justify-between shadow-lg backdrop-blur-sm bg-opacity-95">
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={() => navigate('/dashboard')}
+            className="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors flex items-center space-x-2 text-slate-200"
+            title="返回任务看板"
+          >
+            <ArrowLeft size={20} />
+            <span className="text-sm font-medium">返回看板</span>
+          </button>
+          <div className="p-2 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg shadow-lg">
+            <Video className="text-white" size={24} />
+          </div>
+          <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-blue-300 bg-clip-text text-transparent">
+            LocalClip Editor
+          </h1>
+        </div>
+        
+        <div className="flex items-center gap-6">
+          {/* 播放控制按钮 */}
+          <div className="flex items-center space-x-3">
+            <button
+              onClick={handlePlayPause}
+              className="flex items-center space-x-2 bg-gradient-to-r from-blue-600 to-blue-500 text-white px-4 py-2.5 rounded-lg hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-200 font-medium"
+            >
+              {isPlaying ? <Pause size={18} /> : <Play size={18} />}
+              <span>{isPlaying ? '暂停' : '播放'}</span>
+            </button>
+
+            <button
+              onClick={() => handleSeek(0)}
+              className="flex items-center space-x-2 bg-slate-700 text-slate-100 px-4 py-2.5 rounded-lg hover:bg-slate-600 transition-all duration-200 font-medium"
+            >
+              <RotateCcw size={18} />
+              <span>重置</span>
+            </button>
+          </div>
+
+          {/* 简洁时间轴 */}
+          {currentVideo && duration > 0 && (
+            <div className="flex items-center gap-3 flex-1 max-w-md">
+              <span className="text-xs font-mono text-blue-300 min-w-[45px] font-semibold">
+                {new Date(currentTime * 1000).toISOString().substr(14, 5)}
+              </span>
+              <div
+                ref={progressBarRef}
+                className="flex-1 h-3 bg-slate-700/50 rounded-full cursor-pointer relative group shadow-inner hover:shadow-lg transition-all duration-200"
+                onMouseDown={handleProgressBarMouseDown}
+                style={{ cursor: isDraggingProgress ? 'grabbing' : 'pointer' }}
+              >
+                {/* 进度条背景光晕 */}
+                <div
+                  className="absolute h-full bg-gradient-to-r from-blue-600/20 to-blue-400/20 rounded-full transition-all duration-200"
+                  style={{ width: `${(currentTime / duration) * 100}%` }}
+                />
+                {/* 进度条主体 */}
+                <div
+                  className="absolute h-full bg-gradient-to-r from-blue-500 via-blue-400 to-blue-500 rounded-full transition-all duration-200 shadow-md"
+                  style={{ width: `${(currentTime / duration) * 100}%` }}
+                />
+                {/* 进度条光泽效果 */}
+                <div
+                  className="absolute top-0 h-1/2 bg-gradient-to-b from-white/30 to-transparent rounded-full transition-all duration-200"
+                  style={{ width: `${(currentTime / duration) * 100}%` }}
+                />
+                {/* 播放头 */}
+                <div
+                  className="absolute top-1/2 w-4 h-4 bg-white rounded-full shadow-lg transition-all duration-200 group-hover:scale-125 border-2 border-blue-400"
+                  style={{ left: `${(currentTime / duration) * 100}%`, transform: 'translate(-50%, -50%)' }}
+                >
+                  <div className="absolute inset-0 rounded-full bg-gradient-to-br from-blue-400 to-blue-600 opacity-50"></div>
+                </div>
+              </div>
+              <span className="text-xs font-mono text-slate-400 min-w-[45px]">
+                {new Date(duration * 1000).toISOString().substr(14, 5)}
+              </span>
+            </div>
+          )}
+        </div>
+      </header>
+
+      {/* 主内容区域 - 新布局 */}
+      <div className="flex flex-1 overflow-hidden gap-3 p-3">
+        {/* 左侧边栏（处理进度） */}
+        <Sidebar />
+
+        {/* 中央区域（新布局：上方播放器+信息，下方时间轴） - 始终显示占位 */}
+        <div className="flex-1 flex flex-col overflow-hidden gap-3">
+          {/* 上层：字幕详情 + 播放器 */}
+          <div className="flex gap-3 flex-1 overflow-hidden">
+            {/* 左侧：字幕详细信息列表 (增加宽度比例) - 始终显示 */}
+            <SubtitleDetails
+                subtitles={subtitles}
+                currentTime={currentTime}
+                onEditSubtitle={handleEditSubtitle}
+                onDeleteSubtitle={handleDeleteSubtitle}
+                onSeek={handleSeek}
+                speakerNameMapping={speakerNameMapping}
+                onAddSpeaker={handleAddSpeaker}
+                onRemoveSpeaker={handleRemoveSpeaker}
+                onPlayClonedAudio={handlePlayClonedAudio}
+                onRegenerateSegment={handleRegenerateSegment}
+                voiceCloningTaskId={voiceCloningTaskId || undefined}
+                filteredSpeakerId={filteredSpeakerId}
+                onFilteredSpeakerChange={setFilteredSpeakerId}
+                defaultVoices={defaultVoices}
+                speakerVoiceMapping={speakerVoiceMapping}
+                onSpeakerVoiceMappingChange={setSpeakerVoiceMapping}
+                onRegenerateVoices={handleRegenerateVoices}
+                hasVoiceMappingChanged={hasVoiceMappingChanged()}
+                isRegeneratingVoices={isRegeneratingVoices}
+                isProcessingVoiceCloning={isProcessingVoiceCloning}
+                isStitchingAudio={isStitchingAudio}
+                targetLanguage={targetLanguage}
+              />
+
+            {/* 右侧：播放器 + 视频信息 (缩小宽度比例) */}
+            <div className="flex-1 flex flex-col overflow-hidden bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl shadow-xl border border-slate-700">
+              {/* 视频头部信息 */}
+              <div className="p-5 border-b border-slate-700 flex items-center justify-between bg-gradient-to-r from-slate-800 via-slate-800 to-slate-900 flex-shrink-0">
+                <h2 className="text-lg font-semibold text-slate-100">
+                  {currentVideo ? currentVideo.original_name : '视频预览'}
+                </h2>
+                <div className="flex items-center space-x-6 text-sm text-slate-300">
+                  <div className="flex items-center space-x-2 bg-slate-700/50 px-3 py-1.5 rounded-lg">
+                    <Clock size={16} className="text-blue-400" />
+                    <span className="font-mono">{currentTime.toFixed(2)}s / {duration.toFixed(2)}s</span>
+                  </div>
+                  {currentVideo && (
+                    <span className="bg-gradient-to-r from-blue-600/20 to-purple-600/20 px-3 py-1.5 rounded-lg border border-blue-500/30 text-blue-300 font-medium">
+                      {currentVideo.video_info.resolution}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* 视频播放器区域 */}
+              <div className="flex-1 flex items-center justify-center bg-black/40 overflow-hidden relative">
+                {currentVideo ? (
+                  <>
+                    <VideoPlayer
+                      videoRef={videoRef}
+                      src={taskId ? `/uploads/${taskId}/input/${currentVideo.filename}` : `/uploads/${currentVideo.filename}`}
+                      key={taskId ? `/uploads/${taskId}/input/${currentVideo.filename}` : `/uploads/${currentVideo.filename}`}
+                      onTimeUpdate={handleTimeUpdate}
+                      onLoadedMetadata={handleLoadedMetadata}
+                      isPlaying={isPlaying}
+                      currentTime={currentTime}
+                      duration={duration}
+                      audioSrc={stitchedAudioPath}
+                      useExternalAudio={useStitchedAudio}
+                      filteredSpeakerId={filteredSpeakerId}
+                      subtitles={subtitles}
+                    />
+                    {/* 音频切换按钮 */}
+                    {stitchedAudioPath && (
+                      <div className="absolute top-4 right-4 flex items-center gap-2 bg-slate-900/80 backdrop-blur-sm border border-slate-700 rounded-lg px-3 py-2 shadow-lg">
+                        <span className="text-xs text-slate-400 font-medium">音频源:</span>
+                        <button
+                          onClick={() => setUseStitchedAudio(false)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                            !useStitchedAudio
+                              ? 'bg-blue-600 text-white shadow-md'
+                              : 'bg-slate-700/50 text-slate-400 hover:bg-slate-700 hover:text-slate-300'
+                          }`}
+                        >
+                          <Volume2 size={14} />
+                          原音频
+                        </button>
+                        <button
+                          onClick={() => setUseStitchedAudio(true)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                            useStitchedAudio
+                              ? 'bg-emerald-600 text-white shadow-md'
+                              : 'bg-slate-700/50 text-slate-400 hover:bg-slate-700 hover:text-slate-300'
+                          }`}
+                        >
+                          <Music size={14} />
+                          克隆音频
+                        </button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="text-center text-slate-400">
+                    <div className="mb-4 flex justify-center">
+                      <div className="p-4 bg-slate-700/30 rounded-full">
+                        <Video size={64} className="opacity-60" />
+                      </div>
+                    </div>
+                    <p className="text-lg font-medium">请在左侧上传视频文件</p>
+                    <p className="text-sm text-slate-500 mt-1">支持 MP4、MOV、AVI 等常见格式</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* 下层：时间轴 - 始终显示占位 */}
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl shadow-xl border border-slate-700 p-4 flex-shrink-0">
+            <div className="flex items-center space-x-2 mb-3">
+              <Zap size={14} className="text-yellow-400" />
+              <h3 className="text-sm font-semibold text-slate-100">字幕时间轴</h3>
+              {subtitles.length > 0 && (
+                <span className="ml-auto text-xs text-slate-400 bg-slate-700/50 px-2 py-0.5 rounded">
+                  {subtitles.length} 条
+                </span>
+              )}
+            </div>
+            {subtitles.length > 0 ? (
+              <SubtitleTimeline
+                subtitles={subtitles}
+                currentTime={currentTime}
+                duration={duration}
+                onSeek={handleSeek}
+                onStitchAudio={handleStitchAudio}
+                stitching={isStitchingAudio}
+                isRegeneratingVoices={isRegeneratingVoices}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-32 text-slate-500 text-sm">
+                <div className="text-center">
+                  <p>上传字幕文件后，时间轴将显示在这里</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 右侧属性面板 - 不变 */}
+        <PropertiesPanel
+          exportSettings={exportSettings}
+          onExportSettingsChange={setExportSettings}
+          onExport={handleExport}
+          onRunSpeakerDiarization={handleRunSpeakerDiarization}
+          isProcessingSpeakerDiarization={isProcessingSpeakerDiarization}
+          speakerDiarizationProgress={speakerDiarizationProgress}
+          currentVideo={currentVideo}
+          targetLanguage={targetLanguage}
+          onTargetLanguageChange={setTargetLanguage}
+          targetSrtFilename={targetSrtFilename}
+          onTranslateSubtitles={handleTranslateSubtitles}
+          isTranslating={isTranslating}
+          translationProgress={translationProgress}
+          onRunVoiceCloning={handleRunVoiceCloning}
+          isProcessingVoiceCloning={isProcessingVoiceCloning}
+          voiceCloningProgress={voiceCloningProgress}
+          speakerDiarizationCompleted={subtitles.some(s => s.speaker_id !== undefined)}
+        />
+      </div>
+    </div>
+  );
+};
+
+export default App;

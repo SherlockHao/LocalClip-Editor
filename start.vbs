@@ -1,25 +1,19 @@
-' LocalClip Editor - Silent Startup Script
-' Double-click this file to start the application (no console window)
+Option Explicit
 
-Set WshShell = CreateObject("WScript.Shell")
-Set FSO = CreateObject("Scripting.FileSystemObject")
+Dim objShell, objFSO, strScriptPath, strBatPath
 
-' Get script directory
-ScriptDir = FSO.GetParentFolderName(WScript.ScriptFullName)
+Set objShell = CreateObject("WScript.Shell")
+Set objFSO = CreateObject("Scripting.FileSystemObject")
 
-' Build full path to start.bat
-BatPath = ScriptDir & "\start.bat"
+strScriptPath = objFSO.GetParentFolderName(WScript.ScriptFullName)
+strBatPath = objFSO.BuildPath(strScriptPath, "start_all.bat")
 
-' Check if start.bat exists
-If Not FSO.FileExists(BatPath) Then
-    MsgBox "Error: start.bat not found!" & vbCrLf & "Path: " & BatPath, vbCritical, "Startup Failed"
-    WScript.Quit
+If Not objFSO.FileExists(strBatPath) Then
+    MsgBox "Error: Cannot find start_all.bat!", vbCritical, "Launch Failed"
+    WScript.Quit 1
 End If
 
-' Run start.bat hidden (window style=0 means hidden, bWaitOnReturn=False means don't wait)
-' start.bat will handle service detection and browser opening
-WshShell.Run Chr(34) & BatPath & Chr(34), 0, False
+objShell.Run "cmd /c """ & strBatPath & """", 1, False
 
-' Cleanup objects
-Set WshShell = Nothing
-Set FSO = Nothing
+Set objShell = Nothing
+Set objFSO = Nothing

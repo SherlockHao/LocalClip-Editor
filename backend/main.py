@@ -30,6 +30,10 @@ import time
 from video_processor import VideoProcessor
 from srt_parser import SRTParser
 
+# 导入批量任务管理相关模块
+from database import init_db
+from routers import tasks, websocket, processing
+
 # 语言代码到中文名称的映射
 def get_language_name(language_code: str) -> str:
     """
@@ -62,6 +66,16 @@ from embedding_extraction import SpeakerEmbeddingExtractor
 from cluster_processor import SpeakerClusterer
 
 app = FastAPI(title="LocalClip Editor API", version="1.0.0")
+
+# 启动事件：初始化数据库
+@app.on_event("startup")
+async def startup_event():
+    init_db()
+
+# 注册路由
+app.include_router(tasks.router)
+app.include_router(websocket.router)
+app.include_router(processing.router)
 
 # 添加CORS中间件
 app.add_middleware(
@@ -210,6 +224,11 @@ async def serve_stitched_audio(task_id: str, request: Request):
 # 挂载静态文件目录（用于其他非视频文件）
 # 注意：视频和拼接音频文件会被上面的路由优先处理
 app.mount("/exports", StaticFiles(directory=EXPORTS_DIR), name="exports")
+
+# 挂载 tasks 目录用于提供任务相关文件（视频、音频等）
+TASKS_DIR = Path("tasks")
+TASKS_DIR.mkdir(exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=TASKS_DIR), name="tasks")
 
 # 初始化处理器
 video_processor = VideoProcessor()
@@ -1917,7 +1936,7 @@ async def get_voice_cloning_status(task_id: str):
     return status
 
 
-@app.get("/voice-cloning/default-voices")
+@app.get("/api/voice-cloning/default-voices")
 async def get_default_voices():
     """获取默认音色库列表（包括Fish-Speech和印尼语音色）"""
     voices = []
@@ -1945,7 +1964,7 @@ async def get_default_voices():
     return {"voices": voices}
 
 
-@app.get("/voice-cloning/indonesian-voices")
+@app.get("/api/voice-cloning/indonesian-voices")
 async def get_indonesian_voices():
     """获取印尼语默认音色库列表"""
     return {"voices": INDONESIAN_VOICES}
@@ -2436,7 +2455,7 @@ async def translate_text(request: TranslateTextRequest):
         return {"translation": request.text, "error": str(e)}
 
 
-@app.post("/translate/batch")
+@app.post("/api/translate/batch")
 async def batch_translate_subtitles(request: BatchTranslateRequest, background_tasks: BackgroundTasks):
     """批量翻译字幕文件"""
     print(f"\n[批量翻译] 收到请求")
@@ -2477,7 +2496,7 @@ async def batch_translate_subtitles(request: BatchTranslateRequest, background_t
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/translate/status/{task_id}")
+@app.get("/api/translate/status/{task_id}")
 async def get_translation_status(task_id: str):
     """获取翻译状态"""
     if task_id not in translation_status:
