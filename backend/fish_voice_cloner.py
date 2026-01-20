@@ -70,7 +70,15 @@ CHECKPOINT_DIR = os.path.join(FISH_SPEECH_DIR, "checkpoints", "openaudio-s1-mini
 class FishVoiceCloner:
     """Fish-Speech 语音克隆器"""
 
-    def __init__(self, fish_speech_dir=None, checkpoint_dir=None):
+    def __init__(self, fish_speech_dir=None, checkpoint_dir=None, device=None):
+        """
+        初始化 Fish-Speech 语音克隆器
+
+        Args:
+            fish_speech_dir: fish-speech 目录
+            checkpoint_dir: 模型检查点目录
+            device: 指定设备 ("cuda", "mps", "cpu")。如果为 None，则自动检测。
+        """
         self.fish_speech_dir = fish_speech_dir or FISH_SPEECH_DIR
         self.checkpoint_dir = checkpoint_dir or CHECKPOINT_DIR
 
@@ -80,7 +88,13 @@ class FishVoiceCloner:
         if not os.path.exists(self.checkpoint_dir):
             raise FileNotFoundError(f"checkpoint 目录不存在: {self.checkpoint_dir}")
 
-        self.device = self._detect_device()
+        # 设置设备：如果指定则使用指定的，否则自动检测
+        if device is not None:
+            self.device = device
+            print(f"✅ 使用指定设备: {self.device}")
+        else:
+            self.device = self._detect_device()
+
         # 使用fish-speech环境的Python解释器
         self.python_executable = _get_default_python_executable()
 
