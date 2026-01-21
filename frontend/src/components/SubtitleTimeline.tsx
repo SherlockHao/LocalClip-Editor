@@ -151,15 +151,31 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
   };
 
   const handleTimelineClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (Math.abs(e.clientX - dragStartX) > 5) return; // 防止拖拽时触发点击
+    console.log('[Timeline Click] 开始处理点击事件');
+    console.log('[Timeline Click] e.clientX:', e.clientX, 'dragStartX:', dragStartX, 'diff:', Math.abs(e.clientX - dragStartX));
+
+    if (Math.abs(e.clientX - dragStartX) > 5) {
+      console.log('[Timeline Click] 被拖拽检测阻止，退出');
+      return; // 防止拖拽时触发点击
+    }
 
     // 获取时间轴容器的位置
     const timelineRect = timelineRef.current?.getBoundingClientRect();
-    if (!timelineRect) return;
+    if (!timelineRect) {
+      console.log('[Timeline Click] timelineRect 为空，退出');
+      return;
+    }
 
     const clickPosition = e.clientX - timelineRect.left + scrollOffset;
     const timelineWidth = timelineRect.width * zoom;
     const time = (clickPosition / timelineWidth) * duration;
+
+    console.log('[Timeline Click] clickPosition:', clickPosition);
+    console.log('[Timeline Click] timelineWidth:', timelineWidth);
+    console.log('[Timeline Click] duration:', duration);
+    console.log('[Timeline Click] 计算的 time:', time);
+    console.log('[Timeline Click] 调用 onSeek(', time, ')');
+
     onSeek(time);
   };
 

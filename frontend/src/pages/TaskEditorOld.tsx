@@ -98,7 +98,8 @@ const App: React.FC = () => {
     const handleKeyPress = (e: KeyboardEvent) => {
       // 只在没有焦点在输入框时触发
       const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') {
+      // 排除输入框、按钮等可聚焦元素，防止空格键重复触发
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.tagName === 'BUTTON') {
         return;
       }
 
@@ -327,13 +328,32 @@ const App: React.FC = () => {
     setSubtitles(updatedSubtitles);
   };
 
+  // 使用时间戳来防止重复触发
+  const lastPlayPauseTime = useRef<number>(0);
+
   const handlePlayPause = () => {
+    const now = Date.now();
+    const timeSinceLastCall = now - lastPlayPauseTime.current;
+
+    console.log('[handlePlayPause] 调用, 当前 isPlaying:', isPlaying, 'timeSinceLastCall:', timeSinceLastCall);
+
+    // 防止 200ms 内重复触发
+    if (timeSinceLastCall < 200) {
+      console.log('[handlePlayPause] 200ms 内重复调用，跳过');
+      return;
+    }
+
+    lastPlayPauseTime.current = now;
+
     if (videoRef.current) {
       if (isPlaying) {
+        console.log('[handlePlayPause] 暂停视频');
         videoRef.current.pause();
       } else {
+        console.log('[handlePlayPause] 播放视频');
         videoRef.current.play();
       }
+      console.log('[handlePlayPause] setIsPlaying:', !isPlaying);
       setIsPlaying(!isPlaying);
     }
   };
@@ -351,11 +371,17 @@ const App: React.FC = () => {
   };
 
   const handleSeek = (time: number) => {
+    console.log('[handleSeek] 收到 seek 请求, time:', time);
+
     if (videoRef.current) {
       const video = videoRef.current;
 
+      console.log('[handleSeek] video.readyState:', video.readyState);
+      console.log('[handleSeek] video.currentTime (before):', video.currentTime);
+
       // 检查视频是否已经加载足够的数据
       if (video.readyState < 2) {
+        console.log('[handleSeek] readyState < 2，退出');
         return;
       }
 
@@ -364,14 +390,18 @@ const App: React.FC = () => {
 
       // 设置视频时间
       video.currentTime = time;
+      console.log('[handleSeek] 已设置 video.currentTime =', time);
 
       // 监听 seeked 事件来更新状态
       const handleSeeked = () => {
+        console.log('[handleSeek] seeked 事件触发, video.currentTime:', video.currentTime);
         setCurrentTime(video.currentTime);
         isSeekingRef.current = false;
         video.removeEventListener('seeked', handleSeeked);
       };
       video.addEventListener('seeked', handleSeeked, { once: true });
+    } else {
+      console.log('[handleSeek] videoRef.current 为空');
     }
   };
 
