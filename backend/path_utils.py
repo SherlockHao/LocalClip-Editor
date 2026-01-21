@@ -84,6 +84,20 @@ class TaskPathManager:
         """获取最终视频路径"""
         return self.get_language_output_dir(task_id, language) / "final_video.mp4"
 
+    def get_exported_video_path(self, task_id: str, language: str, original_video_name: str) -> Path:
+        """
+        获取导出视频路径
+        命名格式: 原始视频名_语言.mp4
+        """
+        # 移除原始文件的扩展名
+        base_name = Path(original_video_name).stem
+        export_filename = f"{base_name}_{language}.mp4"
+        return self.get_language_output_dir(task_id, language) / export_filename
+
+    def get_export_dir(self, task_id: str, language: str) -> Path:
+        """获取导出目录"""
+        return self.get_language_output_dir(task_id, language)
+
     def ensure_task_structure(self, task_id: str):
         """确保任务目录结构存在"""
         paths = self.get_task_paths(task_id)

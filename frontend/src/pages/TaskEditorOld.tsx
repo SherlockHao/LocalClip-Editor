@@ -82,6 +82,13 @@ const App: React.FC = () => {
   const [stitchedAudioPath, setStitchedAudioPath] = useState<string | null>(null);
   const [useStitchedAudio, setUseStitchedAudio] = useState(false);
 
+  // 视频导出相关状态
+  const [isExportingVideo, setIsExportingVideo] = useState(false);
+  const [exportVideoCompleted, setExportVideoCompleted] = useState(false);
+  const [exportVideoProgress, setExportVideoProgress] = useState<{message: string, progress: number} | null>(null);
+  const [exportedVideoDir, setExportedVideoDir] = useState<string | null>(null);
+  const exportVideoProgressTimer = useRef<NodeJS.Timeout | null>(null);
+
   // 默认音色库和音色映射状态
   const [defaultVoices, setDefaultVoices] = useState<Array<{id: string, name: string, audio_url: string, reference_text: string}>>([]);
   const [speakerVoiceMapping, setSpeakerVoiceMapping] = useState<{[speakerId: string]: string}>({});
@@ -171,6 +178,16 @@ const App: React.FC = () => {
     };
   }, []);
 
+  // 清理视频导出进度定时器
+  useEffect(() => {
+    return () => {
+      if (exportVideoProgressTimer.current) {
+        clearInterval(exportVideoProgressTimer.current);
+        exportVideoProgressTimer.current = null;
+      }
+    };
+  }, []);
+
   const handleProgressBarMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     setIsDraggingProgress(true);
 
@@ -194,7 +211,7 @@ const App: React.FC = () => {
     }
   };
 
-  // 加载任务数据（视频和字幕）
+  // 加载任务数据（视频、字幕和各阶段状态）
   useEffect(() => {
     const loadTaskData = async () => {
       if (!taskId) return;
@@ -207,6 +224,7 @@ const App: React.FC = () => {
         const task = taskResponse.data;
 
         console.log('[任务加载] 任务数据:', task);
+        console.log('[任务加载] language_status:', task.language_status);
 
         // 加载视频
         if (task.video_filename) {
@@ -234,6 +252,79 @@ const App: React.FC = () => {
           const subtitleResponse = await axios.get(`/api/tasks/${taskId}/subtitle`);
           setSubtitles(subtitleResponse.data.subtitles || []);
           setSubtitleFilename(task.config.source_subtitle_filename);
+        }
+
+        // ========== 恢复说话人识别状态 ==========
+        const languageStatus = task.language_status || {};
+        const defaultStatus = languageStatus['default'] || {};
+        const speakerDiarizationStatus = defaultStatus['speaker_diarization'] || {};
+
+        if (speakerDiarizationStatus.status === 'completed') {
+          console.log('[任务加载] 说话人识别已完成，恢复状态...');
+          try {
+            // 获取说话人识别结果
+            const speakerStatusResponse = await axios.get(`/api/tasks/${taskId}/speaker-diarization/status`);
+            const speakerResult = speakerStatusResponse.data;
+            console.log('[任务加载] 说话人识别结果:', speakerResult);
+
+            // 如果有说话人标签，更新字幕
+            if (speakerResult.speaker_labels && speakerResult.speaker_labels.length > 0) {
+              const subtitleResponse = await axios.get(`/api/tasks/${taskId}/subtitle`);
+              const loadedSubtitles = subtitleResponse.data.subtitles || [];
+              const updatedSubtitles = loadedSubtitles.map((subtitle: Subtitle, index: number) => {
+                const speakerId = index < speakerResult.speaker_labels.length
+                  ? speakerResult.speaker_labels[index]
+                  : undefined;
+                return {
+                  ...subtitle,
+                  speaker_id: speakerId !== null && speakerId !== undefined ? speakerId : undefined
+                };
+              });
+              setSubtitles(updatedSubtitles);
+            }
+
+            // 恢复说话人名称映射
+            if (speakerResult.speaker_name_mapping) {
+              // 将字符串键转换为数字键
+              const numericMapping: {[key: number]: string} = {};
+              Object.entries(speakerResult.speaker_name_mapping).forEach(([key, value]) => {
+                numericMapping[parseInt(key)] = value as string;
+              });
+              setSpeakerNameMapping(numericMapping);
+              console.log('[任务加载] 恢复说话人名称映射:', numericMapping);
+            }
+          } catch (err) {
+            console.error('[任务加载] 恢复说话人识别状态失败:', err);
+          }
+        }
+
+        // ========== 恢复各语言的处理状态 ==========
+        // 遍历所有语言状态（排除 'default'）
+        const languages = Object.keys(languageStatus).filter(lang => lang !== 'default');
+        console.log('[任务加载] 发现的语言:', languages);
+
+        for (const language of languages) {
+          const langStatus = languageStatus[language] || {};
+
+          // 检查翻译状态
+          const translationStatus = langStatus['translation'] || {};
+          if (translationStatus.status === 'completed') {
+            console.log(`[任务加载] ${language} 翻译已完成`);
+            // 如果当前选中的目标语言匹配，设置状态
+            // 注意：这里需要用户选择目标语言后才能完整恢复
+          }
+
+          // 检查语音克隆状态
+          const voiceCloningStatus = langStatus['voice_cloning'] || {};
+          if (voiceCloningStatus.status === 'completed') {
+            console.log(`[任务加载] ${language} 语音克隆已完成`);
+          }
+
+          // 检查拼接状态
+          const stitchStatus = langStatus['stitch'] || {};
+          if (stitchStatus.status === 'completed') {
+            console.log(`[任务加载] ${language} 音频拼接已完成`);
+          }
         }
 
       } catch (error) {
@@ -265,6 +356,168 @@ const App: React.FC = () => {
     };
     loadDefaultVoices();
   }, []);
+
+  // 当目标语言改变时，检查并恢复该语言的翻译、语音克隆和拼接状态
+  useEffect(() => {
+    const restoreLanguageStatus = async () => {
+      if (!taskId || !targetLanguage) return;
+
+      console.log(`[语言状态恢复] 开始恢复 ${targetLanguage} 的状态...`);
+
+      // 先重置所有语言相关的状态，避免显示上一个语言的状态
+      setTargetSrtFilename(null);
+      setStitchedAudioPath(null);
+      setUseStitchedAudio(false);
+      setExportVideoCompleted(false);
+      setExportedVideoDir(null);
+      // 清除字幕中的克隆信息（会在下面恢复）
+      setSubtitles(prevSubtitles => prevSubtitles.map(subtitle => ({
+        ...subtitle,
+        cloned_audio_path: undefined,
+        cloned_speaker_id: undefined,
+        actual_start_time: undefined,
+        actual_end_time: undefined
+      })));
+
+      try {
+        // 1. 检查翻译状态
+        const translationResponse = await axios.get(
+          `/api/tasks/${taskId}/languages/${targetLanguage}/translate/status`
+        );
+        const translationStatus = translationResponse.data;
+        console.log(`[语言状态恢复] ${targetLanguage} 翻译状态:`, translationStatus);
+
+        if (translationStatus.status === 'completed') {
+          console.log(`[语言状态恢复] ${targetLanguage} 翻译已完成`);
+          // 设置翻译文件名
+          if (translationStatus.target_srt_filename) {
+            setTargetSrtFilename(translationStatus.target_srt_filename);
+          }
+          // 不需要设置 isTranslating 或 translationProgress，因为已完成
+        }
+
+        // 2. 检查语音克隆状态
+        const voiceCloningResponse = await axios.get(
+          `/api/tasks/${taskId}/languages/${targetLanguage}/voice-cloning/status`
+        );
+        const voiceCloningStatus = voiceCloningResponse.data;
+        console.log(`[语言状态恢复] ${targetLanguage} 语音克隆状态:`, voiceCloningStatus);
+
+        if (voiceCloningStatus.status === 'completed') {
+          console.log(`[语言状态恢复] ${targetLanguage} 语音克隆已完成`);
+          // 如果有克隆结果，可以加载字幕的克隆音频路径
+          if (voiceCloningStatus.cloned_results && voiceCloningStatus.cloned_results.length > 0) {
+            console.log(`[语言状态恢复] cloned_results:`, voiceCloningStatus.cloned_results);
+            // 更新字幕的克隆音频信息
+            setSubtitles(prevSubtitles => {
+              return prevSubtitles.map((subtitle, index) => {
+                // cloned_results 按 index 排序，找到对应的结果
+                const clonedResult = voiceCloningStatus.cloned_results.find(
+                  (r: any) => r.index === index
+                );
+                if (clonedResult && clonedResult.cloned_audio_path) {
+                  return {
+                    ...subtitle,
+                    cloned_audio_path: clonedResult.cloned_audio_path,
+                    cloned_speaker_id: clonedResult.speaker_id,
+                    target_text: clonedResult.target_text || subtitle.target_text
+                  };
+                }
+                return subtitle;
+              });
+            });
+          }
+        }
+
+        // 3. 检查拼接音频状态 - 使用专门的状态 API
+        try {
+          const stitchStatusResponse = await axios.get(
+            `/api/tasks/${taskId}/languages/${targetLanguage}/stitch-audio/status`
+          );
+          const stitchStatus = stitchStatusResponse.data;
+          console.log(`[语言状态恢复] ${targetLanguage} 拼接状态:`, stitchStatus);
+
+          if (stitchStatus.status === 'completed' || stitchStatus.file_exists) {
+            console.log(`[语言状态恢复] ${targetLanguage} 拼接音频已完成`);
+            // 添加时间戳防止缓存
+            const audioPathWithCache = `${stitchStatus.stitched_audio_path}?t=${Date.now()}`;
+            setStitchedAudioPath(audioPathWithCache);
+            setUseStitchedAudio(true);
+
+            // 从 cloned_results 恢复字幕的 actual_start_time 和 actual_end_time
+            if (stitchStatus.cloned_results && stitchStatus.cloned_results.length > 0) {
+              console.log(`[语言状态恢复] 从拼接结果恢复字幕时间轴信息，共 ${stitchStatus.cloned_results.length} 条记录`);
+              console.log(`[语言状态恢复] 第一条 cloned_result:`, stitchStatus.cloned_results[0]);
+              setSubtitles(prevSubtitles => {
+                console.log(`[语言状态恢复] 当前字幕数量: ${prevSubtitles.length}`);
+                const updatedSubtitles = prevSubtitles.map((subtitle, index) => {
+                  const clonedResult = stitchStatus.cloned_results.find(
+                    (r: any) => r.index === index
+                  );
+                  if (clonedResult) {
+                    const updated = {
+                      ...subtitle,
+                      cloned_audio_path: clonedResult.cloned_audio_path || subtitle.cloned_audio_path,
+                      cloned_speaker_id: clonedResult.speaker_id ?? subtitle.cloned_speaker_id,
+                      target_text: clonedResult.target_text || subtitle.target_text,
+                      actual_start_time: clonedResult.actual_start_time,
+                      actual_end_time: clonedResult.actual_end_time
+                    };
+                    if (index === 0) {
+                      console.log(`[语言状态恢复] 更新第一条字幕:`, {
+                        before: { start: subtitle.start_time, end: subtitle.end_time, actual_start: subtitle.actual_start_time, actual_end: subtitle.actual_end_time },
+                        after: { start: updated.start_time, end: updated.end_time, actual_start: updated.actual_start_time, actual_end: updated.actual_end_time }
+                      });
+                    }
+                    return updated;
+                  }
+                  return subtitle;
+                });
+                return updatedSubtitles;
+              });
+            } else {
+              console.log(`[语言状态恢复] 没有找到 cloned_results 数据`);
+            }
+          } else {
+            setStitchedAudioPath(null);
+            setUseStitchedAudio(false);
+          }
+        } catch (err) {
+          // API 调用失败
+          console.log(`[语言状态恢复] ${targetLanguage} 获取拼接状态失败`);
+          setStitchedAudioPath(null);
+          setUseStitchedAudio(false);
+        }
+
+        // 4. 检查视频导出状态
+        try {
+          const exportStatusResponse = await axios.get(
+            `/api/tasks/${taskId}/languages/${targetLanguage}/export-video/status`
+          );
+          const exportStatus = exportStatusResponse.data;
+          console.log(`[语言状态恢复] ${targetLanguage} 导出状态:`, exportStatus);
+
+          if (exportStatus.status === 'completed' || exportStatus.file_exists) {
+            console.log(`[语言状态恢复] ${targetLanguage} 视频导出已完成`);
+            setExportVideoCompleted(true);
+            setExportedVideoDir(exportStatus.output_dir || null);
+          } else {
+            setExportVideoCompleted(false);
+            setExportedVideoDir(null);
+          }
+        } catch (err) {
+          console.log(`[语言状态恢复] ${targetLanguage} 获取导出状态失败`);
+          setExportVideoCompleted(false);
+          setExportedVideoDir(null);
+        }
+
+      } catch (error) {
+        console.error(`[语言状态恢复] 恢复 ${targetLanguage} 状态失败:`, error);
+      }
+    };
+
+    restoreLanguageStatus();
+  }, [taskId, targetLanguage]);
 
   const handleVideoUpload = async (file: File) => {
     const formData = new FormData();
@@ -815,6 +1068,10 @@ const App: React.FC = () => {
     try {
       setIsProcessingVoiceCloning(true);
 
+      // 重置拼接音频状态（因为语音克隆会生成新的音频片段，旧的拼接音频将不再有效）
+      setStitchedAudioPath(null);
+      setUseStitchedAudio(false);
+
       // 清除旧的进度定时器并重置进度
       if (voiceCloningProgressTimer.current) {
         clearInterval(voiceCloningProgressTimer.current);
@@ -1103,6 +1360,130 @@ const App: React.FC = () => {
     }
   };
 
+  // 导出视频
+  const handleExportVideo = async () => {
+    if (!taskId || !targetLanguage) {
+      alert('任务ID或目标语言不存在');
+      return;
+    }
+
+    if (!stitchedAudioPath) {
+      alert('请先完成音频拼接');
+      return;
+    }
+
+    try {
+      setIsExportingVideo(true);
+      setExportVideoCompleted(false);
+      setExportVideoProgress({ message: '开始导出视频...', progress: 0 });
+
+      const response = await fetch(`/api/tasks/${taskId}/languages/${targetLanguage}/export-video`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({})
+      });
+
+      if (!response.ok) {
+        throw new Error(`导出视频失败: ${response.statusText}`);
+      }
+
+      const result = await response.json();
+      console.log('[导出视频] API 响应:', result);
+
+      // 开始轮询导出状态
+      pollExportVideoStatus(taskId, targetLanguage);
+
+    } catch (error) {
+      console.error('导出视频失败:', error);
+      alert('导出视频失败: ' + (error as Error).message);
+      setIsExportingVideo(false);
+      setExportVideoProgress(null);
+    }
+  };
+
+  // 轮询导出视频状态
+  const pollExportVideoStatus = async (pollTaskId: string, language: string) => {
+    try {
+      const response = await fetch(`/api/tasks/${pollTaskId}/languages/${language}/export-video/status`);
+
+      if (!response.ok) {
+        throw new Error('获取导出状态失败');
+      }
+
+      const status = await response.json();
+      console.log('[导出视频] 状态:', status);
+
+      setExportVideoProgress({
+        message: status.message || '正在导出...',
+        progress: status.progress || 0
+      });
+
+      if (status.status === 'completed' || status.file_exists) {
+        // 导出完成
+        setIsExportingVideo(false);
+        setExportVideoCompleted(true);
+        setExportedVideoDir(status.output_dir || null);
+        setExportVideoProgress(null);
+
+        // 清除轮询定时器
+        if (exportVideoProgressTimer.current) {
+          clearInterval(exportVideoProgressTimer.current);
+          exportVideoProgressTimer.current = null;
+        }
+
+        alert(`视频导出成功！\n文件名: ${status.output_filename}`);
+      } else if (status.status === 'failed') {
+        // 导出失败
+        setIsExportingVideo(false);
+        setExportVideoProgress(null);
+
+        if (exportVideoProgressTimer.current) {
+          clearInterval(exportVideoProgressTimer.current);
+          exportVideoProgressTimer.current = null;
+        }
+
+        alert(`视频导出失败: ${status.message || '未知错误'}`);
+      } else {
+        // 继续轮询
+        if (!exportVideoProgressTimer.current) {
+          exportVideoProgressTimer.current = setInterval(() => {
+            pollExportVideoStatus(pollTaskId, language);
+          }, 1000);
+        }
+      }
+    } catch (error) {
+      console.error('[导出视频] 轮询失败:', error);
+      // 出错时也继续轮询，避免中断
+      if (!exportVideoProgressTimer.current) {
+        exportVideoProgressTimer.current = setInterval(() => {
+          pollExportVideoStatus(pollTaskId, language);
+        }, 2000);
+      }
+    }
+  };
+
+  // 打开导出文件夹
+  const handleOpenExportFolder = () => {
+    if (exportedVideoDir) {
+      // 使用 window.open 打开本地文件夹
+      // 注意：这在浏览器中通常不起作用，需要后端支持
+      // 我们将使用一个专门的 API 来打开文件夹
+      fetch(`/api/open-folder`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ path: exportedVideoDir })
+      }).catch(err => {
+        console.error('打开文件夹失败:', err);
+        // 如果 API 不存在，显示路径给用户
+        alert(`导出文件夹路径:\n${exportedVideoDir}`);
+      });
+    }
+  };
+
   // 轮询语音克隆状态
   const pollVoiceCloningStatus = async (pollTaskId: string, language: string) => {
     try {
@@ -1323,7 +1704,11 @@ const App: React.FC = () => {
       {/* 主内容区域 - 新布局 */}
       <div className="flex flex-1 overflow-hidden gap-3 p-3">
         {/* 左侧边栏（处理进度） */}
-        <Sidebar />
+        <Sidebar
+          speakerDiarizationCompleted={subtitles.some(s => s.speaker_id !== undefined)}
+          selectedLanguage={targetLanguage}
+          onLanguageSelect={setTargetLanguage}
+        />
 
         {/* 中央区域（新布局：上方播放器+信息，下方时间轴） - 始终显示占位 */}
         <div className="flex-1 flex flex-col overflow-hidden gap-3">
@@ -1487,6 +1872,16 @@ const App: React.FC = () => {
           isProcessingVoiceCloning={isProcessingVoiceCloning}
           voiceCloningProgress={voiceCloningProgress}
           speakerDiarizationCompleted={subtitles.some(s => s.speaker_id !== undefined)}
+          voiceCloningCompleted={subtitles.some(s => s.cloned_audio_path !== undefined)}
+          stitchedAudioReady={!!stitchedAudioPath}
+          onStitchAudio={handleStitchAudio}
+          isStitchingAudio={isStitchingAudio}
+          onExportVideo={handleExportVideo}
+          isExportingVideo={isExportingVideo}
+          exportVideoCompleted={exportVideoCompleted}
+          exportVideoProgress={exportVideoProgress}
+          exportedVideoDir={exportedVideoDir}
+          onOpenExportFolder={handleOpenExportFolder}
         />
       </div>
     </div>

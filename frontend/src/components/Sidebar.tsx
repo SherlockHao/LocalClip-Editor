@@ -2,9 +2,17 @@ import React from 'react';
 import { Video } from 'lucide-react';
 import LanguageProgressSidebar from './LanguageProgressSidebar';
 
-interface SidebarProps {}
+interface SidebarProps {
+  speakerDiarizationCompleted: boolean;
+  selectedLanguage: string;
+  onLanguageSelect: (languageCode: string) => void;
+}
 
-const Sidebar: React.FC<SidebarProps> = () => {
+const Sidebar: React.FC<SidebarProps> = ({
+  speakerDiarizationCompleted,
+  selectedLanguage,
+  onLanguageSelect,
+}) => {
   return (
     <div className="w-72 bg-gradient-to-b from-slate-800 to-slate-900 border-r border-slate-700 flex flex-col shadow-2xl">
       {/* 标题区域 */}
@@ -18,11 +26,15 @@ const Sidebar: React.FC<SidebarProps> = () => {
       </div>
 
       {/* 语言进度显示区域 */}
-      <LanguageProgressSidebar />
+      <LanguageProgressSidebar
+        speakerDiarizationCompleted={speakerDiarizationCompleted}
+        selectedLanguage={selectedLanguage}
+        onLanguageSelect={onLanguageSelect}
+      />
 
       {/* 底部说明 */}
       <div className="p-4 border-t border-slate-700 bg-slate-900/50 text-xs text-slate-500">
-        <p className="text-center">实时显示各语言处理进度</p>
+        <p className="text-center">点击语言卡片切换目标语言</p>
       </div>
     </div>
   );

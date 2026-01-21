@@ -1,5 +1,5 @@
 import React from 'react';
-import { Settings, Download, Users, Zap, Info, FileText, Mic } from 'lucide-react';
+import { Settings, Download, Users, Zap, Info, FileText, Mic, Music, FolderOpen } from 'lucide-react';
 
 interface VideoFile {
   filename: string;
@@ -39,6 +39,17 @@ interface PropertiesPanelProps {
   isProcessingVoiceCloning: boolean;
   voiceCloningProgress: { message: string; progress: number } | null;
   speakerDiarizationCompleted: boolean;
+  voiceCloningCompleted?: boolean;
+  stitchedAudioReady?: boolean;
+  onStitchAudio?: () => void;
+  isStitchingAudio?: boolean;
+  // 新增：导出视频相关
+  onExportVideo?: () => void;
+  isExportingVideo?: boolean;
+  exportVideoCompleted?: boolean;
+  exportVideoProgress?: { message: string; progress: number } | null;
+  exportedVideoDir?: string | null;
+  onOpenExportFolder?: () => void;
 }
 
 const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
@@ -58,13 +69,28 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   onRunVoiceCloning,
   isProcessingVoiceCloning,
   voiceCloningProgress,
-  speakerDiarizationCompleted
+  speakerDiarizationCompleted,
+  voiceCloningCompleted = false,
+  stitchedAudioReady = false,
+  onStitchAudio,
+  isStitchingAudio = false,
+  // 新增：导出视频相关
+  onExportVideo,
+  isExportingVideo = false,
+  exportVideoCompleted = false,
+  exportVideoProgress = null,
+  exportedVideoDir = null,
+  onOpenExportFolder
 }) => {
 
   // 判断语音克隆按钮是否可用
   const isVoiceCloningEnabled = speakerDiarizationCompleted &&
                                  targetLanguage !== '' &&
                                  targetSrtFilename !== null;
+
+  // 判断导出视频按钮是否可用（拼接音频完成后才能导出）
+  const isExportVideoEnabled = stitchedAudioReady && targetLanguage !== '';
+
   return (
     <div className="w-72 bg-gradient-to-b from-slate-800 to-slate-900 border-l border-slate-700 flex flex-col shadow-2xl overflow-hidden">
       {/* 头部 */}
@@ -128,6 +154,8 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
             className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-medium transition-all duration-200 ${
               isProcessingSpeakerDiarization
                 ? 'bg-slate-600 text-slate-400 cursor-not-allowed opacity-75'
+                : speakerDiarizationCompleted
+                ? 'bg-gradient-to-r from-green-600 to-green-500 text-white hover:shadow-lg hover:shadow-green-500/50'
                 : 'bg-gradient-to-r from-purple-600 to-purple-500 text-white hover:shadow-lg hover:shadow-purple-500/50'
             }`}
           >
@@ -135,6 +163,13 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               <>
                 <div className="spinner"></div>
                 <span>识别中...</span>
+              </>
+            ) : speakerDiarizationCompleted ? (
+              <>
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+                <span>说话人识别已完成</span>
               </>
             ) : (
               <>
@@ -159,6 +194,15 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 {speakerDiarizationProgress.progress}%
               </p>
             </div>
+          )}
+
+          {speakerDiarizationCompleted && !isProcessingSpeakerDiarization && (
+            <p className="text-xs text-green-400 mt-1.5 flex items-center gap-1">
+              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+              点击可重新运行说话人识别
+            </p>
           )}
         </div>
 
@@ -269,7 +313,11 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               onClick={onRunVoiceCloning}
               disabled={!isVoiceCloningEnabled || isProcessingVoiceCloning}
               className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-medium transition-all duration-200 ${
-                isVoiceCloningEnabled && !isProcessingVoiceCloning
+                isProcessingVoiceCloning
+                  ? 'bg-slate-600 text-slate-400 cursor-not-allowed opacity-75'
+                  : voiceCloningCompleted
+                  ? 'bg-gradient-to-r from-green-600 to-green-500 text-white hover:shadow-lg hover:shadow-green-500/50'
+                  : isVoiceCloningEnabled
                   ? 'bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:shadow-lg hover:shadow-blue-500/50'
                   : 'bg-slate-600 text-slate-400 cursor-not-allowed opacity-75'
               }`}
@@ -278,6 +326,13 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 <>
                   <div className="spinner"></div>
                   <span>克隆中...</span>
+                </>
+              ) : voiceCloningCompleted ? (
+                <>
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                  <span>语音克隆已完成</span>
                 </>
               ) : (
                 <>
@@ -304,7 +359,16 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               </div>
             )}
 
-            {!isVoiceCloningEnabled && !isProcessingVoiceCloning && (
+            {voiceCloningCompleted && !isProcessingVoiceCloning && !voiceCloningProgress && (
+              <p className="text-xs text-green-400 mt-1.5 flex items-center gap-1">
+                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+                {stitchedAudioReady ? '语音克隆和音频拼接已完成' : '点击可重新运行语音克隆'}
+              </p>
+            )}
+
+            {!isVoiceCloningEnabled && !isProcessingVoiceCloning && !voiceCloningCompleted && (
               <div className="p-2.5 bg-slate-700/30 border border-slate-600 rounded-lg">
                 <p className="text-xs text-slate-400 text-center">
                   完成以下步骤后可启用：
@@ -322,19 +386,127 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                 </ul>
               </div>
             )}
+
+            {/* 拼接音频按钮 - 语音克隆完成后显示 */}
+            {voiceCloningCompleted && onStitchAudio && (
+              <div className="mt-3 pt-3 border-t border-slate-600">
+                <button
+                  onClick={onStitchAudio}
+                  disabled={isStitchingAudio}
+                  className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-medium transition-all duration-200 ${
+                    isStitchingAudio
+                      ? 'bg-slate-600 text-slate-400 cursor-not-allowed opacity-75'
+                      : stitchedAudioReady
+                      ? 'bg-gradient-to-r from-green-600 to-green-500 text-white hover:shadow-lg hover:shadow-green-500/50'
+                      : 'bg-gradient-to-r from-amber-600 to-amber-500 text-white hover:shadow-lg hover:shadow-amber-500/50'
+                  }`}
+                >
+                  {isStitchingAudio ? (
+                    <>
+                      <div className="spinner"></div>
+                      <span>拼接中...</span>
+                    </>
+                  ) : stitchedAudioReady ? (
+                    <>
+                      <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                      <span>音频拼接已完成</span>
+                    </>
+                  ) : (
+                    <>
+                      <Music size={18} />
+                      <span>拼接音频</span>
+                    </>
+                  )}
+                </button>
+                {stitchedAudioReady && !isStitchingAudio && (
+                  <p className="text-xs text-green-400 mt-1.5 flex items-center gap-1">
+                    <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                    </svg>
+                    可点击播放预览拼接后的音频
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* 底部导出按钮 */}
       <div className="p-5 border-t border-slate-700 bg-gradient-to-r from-slate-900 to-slate-800">
-        <button
-          onClick={onExport}
-          className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-emerald-500 text-white py-3 px-4 rounded-lg hover:shadow-lg hover:shadow-emerald-500/50 transition-all duration-200 font-semibold"
-        >
-          <Download size={18} />
-          <span>导出视频</span>
-        </button>
+        {/* 导出视频按钮 */}
+        <div className="flex gap-2">
+          <button
+            onClick={onExportVideo}
+            disabled={!isExportVideoEnabled || isExportingVideo}
+            className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-semibold transition-all duration-200 ${
+              isExportingVideo
+                ? 'bg-slate-600 text-slate-400 cursor-not-allowed opacity-75'
+                : exportVideoCompleted
+                ? 'bg-gradient-to-r from-green-600 to-green-500 text-white hover:shadow-lg hover:shadow-green-500/50'
+                : isExportVideoEnabled
+                ? 'bg-gradient-to-r from-emerald-600 to-emerald-500 text-white hover:shadow-lg hover:shadow-emerald-500/50'
+                : 'bg-slate-600 text-slate-400 cursor-not-allowed opacity-75'
+            }`}
+          >
+            {isExportingVideo ? (
+              <>
+                <div className="spinner"></div>
+                <span>导出中...</span>
+              </>
+            ) : exportVideoCompleted ? (
+              <>
+                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                </svg>
+                <span>导出成功</span>
+              </>
+            ) : (
+              <>
+                <Download size={18} />
+                <span>导出视频</span>
+              </>
+            )}
+          </button>
+
+          {/* 打开文件夹按钮 - 导出完成后显示 */}
+          {exportVideoCompleted && onOpenExportFolder && (
+            <button
+              onClick={onOpenExportFolder}
+              className="flex items-center justify-center p-3 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-200 transition-all duration-200"
+              title="打开输出文件夹"
+            >
+              <FolderOpen size={18} />
+            </button>
+          )}
+        </div>
+
+        {/* 导出进度 */}
+        {isExportingVideo && exportVideoProgress && (
+          <div className="mt-3 p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-lg">
+            <p className="text-xs text-emerald-300 text-center font-medium mb-2">
+              {exportVideoProgress.message}
+            </p>
+            <div className="w-full bg-slate-700 rounded-full h-1.5">
+              <div
+                className="bg-gradient-to-r from-emerald-500 to-emerald-400 h-1.5 rounded-full transition-all duration-300"
+                style={{ width: `${exportVideoProgress.progress}%` }}
+              ></div>
+            </div>
+            <p className="text-xs text-emerald-300 text-center mt-1">
+              {exportVideoProgress.progress}%
+            </p>
+          </div>
+        )}
+
+        {/* 未启用时的提示 */}
+        {!isExportVideoEnabled && !isExportingVideo && !exportVideoCompleted && (
+          <p className="text-xs text-slate-500 mt-2 text-center">
+            完成音频拼接后可导出视频
+          </p>
+        )}
       </div>
     </div>
   );

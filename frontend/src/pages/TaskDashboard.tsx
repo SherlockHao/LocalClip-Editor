@@ -3,13 +3,27 @@ import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
 import { Play, Trash2, Plus, Video, Clock, Loader2, FileText, Upload } from 'lucide-react';
 
+interface StageStatus {
+  status: string;
+  progress: number;
+  message?: string;
+}
+
+interface LanguageStageStatus {
+  speaker_diarization?: StageStatus;
+  translation?: StageStatus;
+  voice_cloning?: StageStatus;
+  stitch?: StageStatus;
+  export?: StageStatus;
+}
+
 interface Task {
   id: number;
   task_id: string;
   video_filename: string;
   video_original_name: string;
   status: string;
-  language_status: Record<string, { status: string; progress: number }>;
+  language_status: Record<string, LanguageStageStatus>;
   config: { target_languages: string[] };
   created_at: string;
 }
@@ -263,6 +277,44 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onOpen, onDelete }) => {
     });
   };
 
+  // 计算某个语言的综合进度和状态
+  const getLanguageOverallStatus = (lang: string): { status: string; progress: number } => {
+    const langStatus = task.language_status[lang];
+    if (!langStatus) return { status: 'idle', progress: 0 };
+
+    const stages = ['translation', 'voice_cloning', 'stitch'] as const;
+    let completedStages = 0;
+    let processingProgress = 0;
+    let hasProcessing = false;
+    let hasFailed = false;
+
+    stages.forEach(stage => {
+      const stageData = langStatus[stage];
+      if (stageData?.status === 'completed') {
+        completedStages++;
+      } else if (stageData?.status === 'processing') {
+        hasProcessing = true;
+        processingProgress = stageData.progress || 0;
+      } else if (stageData?.status === 'failed') {
+        hasFailed = true;
+      }
+    });
+
+    if (hasFailed) return { status: 'failed', progress: Math.round((completedStages / stages.length) * 100) };
+    if (completedStages === stages.length) return { status: 'completed', progress: 100 };
+    if (hasProcessing) {
+      const baseProgress = (completedStages / stages.length) * 100;
+      const currentStageProgress = (processingProgress / stages.length);
+      return { status: 'processing', progress: Math.round(baseProgress + currentStageProgress) };
+    }
+    if (completedStages > 0) return { status: 'partial', progress: Math.round((completedStages / stages.length) * 100) };
+    return { status: 'idle', progress: 0 };
+  };
+
+  // 检查说话人识别状态
+  const speakerDiarizationStatus = task.language_status['default']?.speaker_diarization;
+  const isSpeakerDiarizationCompleted = speakerDiarizationStatus?.status === 'completed';
+
   return (
     <div
       onClick={onOpen}
@@ -278,7 +330,7 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onOpen, onDelete }) => {
           <Clock size={14} />
           <span>{formatDate(task.created_at)}</span>
         </div>
-        <div className="mt-2">
+        <div className="mt-2 flex flex-wrap gap-2">
           <span className={`text-xs px-2 py-1 rounded ${
             task.status === 'completed' ? 'bg-green-500/20 text-green-400' :
             task.status === 'processing' ? 'bg-blue-500/20 text-blue-400' :
@@ -289,15 +341,18 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onOpen, onDelete }) => {
              task.status === 'processing' ? '处理中' :
              task.status === 'failed' ? '失败' : '待处理'}
           </span>
+          {isSpeakerDiarizationCompleted && (
+            <span className="text-xs px-2 py-1 rounded bg-purple-500/20 text-purple-400">
+              说话人识别 ✓
+            </span>
+          )}
         </div>
       </div>
 
       {/* 语言进度 */}
       <div className="space-y-2 mb-4">
         {languages.map(lang => {
-          const langStatus = task.language_status[lang];
-          const status = langStatus?.status || 'idle';
-          const progress = langStatus?.progress || 0;
+          const { status, progress } = getLanguageOverallStatus(lang);
 
           return (
             <div key={lang} className="flex items-center gap-2">
@@ -307,7 +362,8 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onOpen, onDelete }) => {
                   className={`h-2 rounded-full transition-all ${
                     status === 'completed' ? 'bg-green-500' :
                     status === 'processing' ? 'bg-blue-500' :
-                    status === 'failed' ? 'bg-red-500' : 'bg-slate-600'
+                    status === 'failed' ? 'bg-red-500' :
+                    status === 'partial' ? 'bg-yellow-500' : 'bg-slate-600'
                   }`}
                   style={{ width: `${progress}%` }}
                 />

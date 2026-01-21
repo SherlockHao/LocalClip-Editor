@@ -341,6 +341,48 @@ def map_speakers_to_indonesian_voices(
 async def root():
     return {"message": "LocalClip Editor API"}
 
+
+@app.post("/api/open-folder")
+async def open_folder(request: Request):
+    """
+    打开本地文件夹（仅限 Windows）
+    """
+    import subprocess
+    import platform
+
+    try:
+        data = await request.json()
+        folder_path = data.get("path")
+
+        if not folder_path:
+            raise HTTPException(status_code=400, detail="缺少文件夹路径")
+
+        # 确保路径存在
+        folder = Path(folder_path)
+        if not folder.exists():
+            raise HTTPException(status_code=404, detail="文件夹不存在")
+
+        # 根据操作系统打开文件夹
+        system = platform.system()
+        if system == "Windows":
+            # Windows: 使用 explorer
+            subprocess.Popen(["explorer", str(folder)])
+        elif system == "Darwin":
+            # macOS: 使用 open
+            subprocess.Popen(["open", str(folder)])
+        else:
+            # Linux: 使用 xdg-open
+            subprocess.Popen(["xdg-open", str(folder)])
+
+        return {"success": True, "message": "文件夹已打开"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[打开文件夹] 错误: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/upload/video")
 async def upload_video(file: UploadFile = File(...)):
     try:

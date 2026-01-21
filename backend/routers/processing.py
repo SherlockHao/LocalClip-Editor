@@ -1430,6 +1430,22 @@ async def stitch_cloned_audio(
                 cloned_results[idx]['actual_start_time'] = replan_info['actual_start']
                 cloned_results[idx]['actual_end_time'] = replan_info['actual_end']
 
+        # 保存更新后的 cloned_results 到文件（包含 actual_start_time 和 actual_end_time）
+        cloned_results_path = cloned_audio_dir / "cloned_results.json"
+        with open(cloned_results_path, 'w', encoding='utf-8') as f:
+            json.dump(cloned_results, f, ensure_ascii=False, indent=2)
+        print(f"[音频拼接] 已保存更新后的 cloned_results 到: {cloned_results_path}", flush=True)
+
+        # 更新数据库中的拼接状态
+        await mark_task_completed(
+            task_id, language, "stitch",
+            extra_data={
+                "total_duration": total_duration,
+                "segments_count": len(processed_segments),
+                "stitch_duration": stitch_duration
+            }
+        )
+
         return {
             "success": True,
             "stitched_audio_path": f"/api/tasks/{task_id}/languages/{language}/stitched-audio",
@@ -1448,6 +1464,69 @@ async def stitch_cloned_audio(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{task_id}/languages/{language}/stitch-audio/status")
+async def get_stitch_audio_status(
+    task_id: str,
+    language: str,
+    db: Session = Depends(get_db)
+):
+    """
+    获取音频拼接状态
+    """
+    task = db.query(Task).filter(Task.task_id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    # 从 language_status 获取拼接状态
+    language_status = task.language_status or {}
+    lang_data = language_status.get(language, {})
+    stitch_status = lang_data.get("stitch", {})
+
+    status = stitch_status.get("status", "pending")
+
+    # 同时检查文件是否存在
+    stitched_audio_path = task_path_manager.get_stitched_audio_path(task_id, language)
+    file_exists = stitched_audio_path.exists()
+
+    response = {
+        "status": status,
+        "progress": stitch_status.get("progress", 0),
+        "message": stitch_status.get("message", ""),
+        "file_exists": file_exists
+    }
+
+    # 如果文件存在但状态不是 completed，更新状态
+    if file_exists and status != "completed":
+        response["status"] = "completed"
+        response["progress"] = 100
+
+    if file_exists or status == "completed":
+        response["stitched_audio_path"] = f"/api/tasks/{task_id}/languages/{language}/stitched-audio"
+        response["total_duration"] = stitch_status.get("total_duration", 0)
+        response["segments_count"] = stitch_status.get("segments_count", 0)
+
+        # 尝试从 cloned_results.json 读取详细数据（包含 actual_start_time 和 actual_end_time）
+        cloned_results_path = task_path_manager.get_cloned_audio_dir(task_id, language) / "cloned_results.json"
+        if cloned_results_path.exists():
+            try:
+                with open(cloned_results_path, 'r', encoding='utf-8') as f:
+                    cloned_results = json.load(f)
+                # 如果没有 actual_start_time/actual_end_time，使用 start_time/end_time 作为默认值
+                for item in cloned_results:
+                    if 'actual_start_time' not in item and 'start_time' in item:
+                        item['actual_start_time'] = item['start_time']
+                    if 'actual_end_time' not in item and 'end_time' in item:
+                        item['actual_end_time'] = item['end_time']
+                response["cloned_results"] = cloned_results
+                print(f"[拼接状态查询] 已加载 cloned_results，共 {len(cloned_results)} 条记录", flush=True)
+            except Exception as e:
+                print(f"[拼接状态查询] 读取 cloned_results 失败: {e}", flush=True)
+
+    print(f"[拼接状态查询] task_id={task_id}, language={language}, status={response['status']}, file_exists={file_exists}", flush=True)
+
+    return response
 
 
 @router.get("/{task_id}/languages/{language}/stitched-audio")
@@ -1671,3 +1750,245 @@ async def regenerate_segment(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== 视频导出 API ====================
+
+class ExportVideoRequest(BaseModel):
+    """视频导出请求"""
+    pass  # 不需要额外参数
+
+
+@router.post("/{task_id}/languages/{language}/export-video")
+async def export_video(
+    task_id: str,
+    language: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """
+    导出视频 - 将原视频画面与拼接音频合成为新视频
+    """
+    try:
+        print(f"[视频导出] 开始导出: task_id={task_id}, language={language}", flush=True)
+
+        # 验证任务存在
+        task = db.query(Task).filter(Task.task_id == task_id).first()
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        # 检查拼接音频是否存在
+        stitched_audio_path = task_path_manager.get_stitched_audio_path(task_id, language)
+        if not stitched_audio_path.exists():
+            raise HTTPException(status_code=400, detail="拼接音频不存在，请先完成音频拼接")
+
+        # 获取输入视频路径
+        input_video_path = task_path_manager.get_input_video_path(task_id, task.video_filename)
+        if not input_video_path.exists():
+            raise HTTPException(status_code=400, detail="输入视频不存在")
+
+        # 获取导出视频路径（使用原始文件名）
+        output_video_path = task_path_manager.get_exported_video_path(
+            task_id, language, task.video_original_name
+        )
+
+        print(f"[视频导出] 输入视频: {input_video_path}", flush=True)
+        print(f"[视频导出] 拼接音频: {stitched_audio_path}", flush=True)
+        print(f"[视频导出] 输出视频: {output_video_path}", flush=True)
+
+        # 更新状态为处理中
+        await update_task_progress(task_id, language, "export", 0, "开始导出视频...")
+
+        # 在后台执行导出
+        background_tasks.add_task(
+            export_video_task,
+            task_id,
+            language,
+            str(input_video_path),
+            str(stitched_audio_path),
+            str(output_video_path)
+        )
+
+        return {
+            "status": "started",
+            "message": "视频导出已开始",
+            "output_path": str(output_video_path)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[视频导出] ❌ 失败: {str(e)}", flush=True)
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def export_video_task(
+    task_id: str,
+    language: str,
+    input_video_path: str,
+    stitched_audio_path: str,
+    output_video_path: str
+):
+    """
+    后台执行视频导出任务
+    """
+    import subprocess
+    import time
+
+    try:
+        start_time = time.time()
+        print(f"[视频导出] 开始处理...", flush=True)
+
+        await update_task_progress(task_id, language, "export", 10, "准备视频编码...")
+
+        # 使用 ffmpeg 合成视频
+        # -c:v copy: 直接复制视频流（保持原质量）
+        # -map 0:v: 使用第一个输入的视频流
+        # -map 1:a: 使用第二个输入的音频流
+        # -shortest: 以较短的流为准
+        ffmpeg_cmd = [
+            "ffmpeg",
+            "-y",  # 覆盖输出文件
+            "-i", input_video_path,  # 输入视频
+            "-i", stitched_audio_path,  # 输入音频
+            "-map", "0:v:0",  # 使用视频的视频流
+            "-map", "1:a:0",  # 使用音频文件的音频流
+            "-c:v", "copy",  # 视频流直接复制（保持原质量）
+            "-c:a", "aac",  # 音频编码为 AAC
+            "-b:a", "192k",  # 音频比特率
+            "-shortest",  # 以较短的为准
+            output_video_path
+        ]
+
+        print(f"[视频导出] FFmpeg 命令: {' '.join(ffmpeg_cmd)}", flush=True)
+
+        await update_task_progress(task_id, language, "export", 30, "正在合成视频...")
+
+        # 执行 ffmpeg
+        process = subprocess.Popen(
+            ffmpeg_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True
+        )
+
+        stdout, stderr = process.communicate()
+
+        if process.returncode != 0:
+            print(f"[视频导出] FFmpeg 错误: {stderr}", flush=True)
+            await mark_task_failed(task_id, language, "export", f"FFmpeg 错误: {stderr[:500]}")
+            return
+
+        # 验证输出文件
+        from pathlib import Path
+        output_path = Path(output_video_path)
+        if not output_path.exists():
+            await mark_task_failed(task_id, language, "export", "输出视频文件未生成")
+            return
+
+        file_size = output_path.stat().st_size
+        if file_size == 0:
+            await mark_task_failed(task_id, language, "export", "输出视频文件为空")
+            return
+
+        # 计算耗时
+        duration = time.time() - start_time
+        file_size_mb = file_size / (1024 * 1024)
+
+        print(f"[视频导出] ✅ 完成! 文件大小: {file_size_mb:.2f}MB, 耗时: {duration:.1f}s", flush=True)
+
+        # 标记完成
+        await mark_task_completed(
+            task_id, language, "export",
+            extra_data={
+                "output_path": output_video_path,
+                "file_size": file_size,
+                "duration": duration
+            }
+        )
+
+    except Exception as e:
+        print(f"[视频导出] ❌ 任务失败: {str(e)}", flush=True)
+        import traceback
+        traceback.print_exc()
+        await mark_task_failed(task_id, language, "export", str(e))
+
+
+@router.get("/{task_id}/languages/{language}/export-video/status")
+async def get_export_video_status(
+    task_id: str,
+    language: str,
+    db: Session = Depends(get_db)
+):
+    """
+    获取视频导出状态
+    """
+    task = db.query(Task).filter(Task.task_id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    # 从 language_status 获取导出状态
+    language_status = task.language_status or {}
+    lang_data = language_status.get(language, {})
+    export_status = lang_data.get("export", {})
+
+    status = export_status.get("status", "pending")
+
+    # 检查导出文件是否存在
+    exported_video_path = task_path_manager.get_exported_video_path(
+        task_id, language, task.video_original_name
+    )
+    file_exists = exported_video_path.exists()
+
+    response = {
+        "status": status,
+        "progress": export_status.get("progress", 0),
+        "message": export_status.get("message", ""),
+        "file_exists": file_exists
+    }
+
+    # 如果文件存在但状态不是 completed，更新状态
+    if file_exists and status != "completed":
+        response["status"] = "completed"
+        response["progress"] = 100
+
+    if file_exists or status == "completed":
+        response["output_path"] = str(exported_video_path)
+        response["output_filename"] = exported_video_path.name
+        response["output_dir"] = str(exported_video_path.parent)
+        response["file_size"] = export_status.get("file_size", 0)
+
+    print(f"[导出状态查询] task_id={task_id}, language={language}, status={response['status']}, file_exists={file_exists}", flush=True)
+
+    return response
+
+
+@router.get("/{task_id}/languages/{language}/exported-video")
+async def serve_exported_video(
+    task_id: str,
+    language: str,
+    db: Session = Depends(get_db)
+):
+    """
+    提供导出的视频文件下载
+    """
+    from fastapi.responses import FileResponse
+
+    task = db.query(Task).filter(Task.task_id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    exported_video_path = task_path_manager.get_exported_video_path(
+        task_id, language, task.video_original_name
+    )
+
+    if not exported_video_path.exists():
+        raise HTTPException(status_code=404, detail="导出视频不存在")
+
+    return FileResponse(
+        str(exported_video_path),
+        media_type="video/mp4",
+        filename=exported_video_path.name
+    )
