@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Play, Trash2, Plus, Video, Clock, Loader2, FileText, Upload } from 'lucide-react';
+import { Play, Trash2, Plus, Video, Clock, Loader2, FileText, Upload, PlayCircle, StopCircle } from 'lucide-react';
 
 interface StageStatus {
   status: string;
@@ -38,6 +38,22 @@ interface RunningTaskInfo {
   progress?: number;
 }
 
+// 批量处理状态接口
+interface BatchStatus {
+  state: 'idle' | 'running' | 'stopping' | 'stopped';
+  is_running: boolean;
+  current_task_id: string | null;
+  current_language: string | null;
+  current_stage: string | null;
+  total_tasks: number;
+  completed_tasks: number;
+  total_stages: number;
+  completed_stages: number;
+  message: string;
+  started_at: string | null;
+  error: string | null;
+}
+
 const TaskDashboard: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -46,6 +62,7 @@ const TaskDashboard: React.FC = () => {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [subtitleFile, setSubtitleFile] = useState<File | null>(null);
   const [runningTasks, setRunningTasks] = useState<Record<string, RunningTaskInfo>>({});
+  const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null);
   const navigate = useNavigate();
 
   // 用于追踪是否曾经成功加载过任务
@@ -56,17 +73,20 @@ const TaskDashboard: React.FC = () => {
   useEffect(() => {
     fetchTasks();
     fetchRunningTasks();
+    fetchBatchStatus();
 
-    // 每3秒刷新一次运行任务状态和任务列表（更频繁以确保及时更新）
+    // 每3秒刷新一次运行任务状态、任务列表和批量处理状态
     const runningTasksInterval = setInterval(fetchRunningTasks, 3000);
     const tasksInterval = setInterval(() => {
       // 静默刷新任务列表，不设置 loading 状态
       fetchTasksSilent();
     }, 3000);
+    const batchStatusInterval = setInterval(fetchBatchStatus, 2000);
 
     return () => {
       clearInterval(runningTasksInterval);
       clearInterval(tasksInterval);
+      clearInterval(batchStatusInterval);
     };
   }, []);
 
@@ -115,6 +135,56 @@ const TaskDashboard: React.FC = () => {
     }
   };
 
+  // 获取批量处理状态
+  const fetchBatchStatus = async () => {
+    try {
+      const response = await axios.get('/api/batch/status', { timeout: 5000 });
+      setBatchStatus(response.data);
+    } catch (error) {
+      // 静默失败
+      console.log('Failed to fetch batch status:', error);
+    }
+  };
+
+  // 启动批量处理所有任务
+  const handleStartBatchAll = async () => {
+    if (tasks.length === 0) {
+      alert('没有任务可以处理');
+      return;
+    }
+
+    try {
+      const response = await axios.post('/api/batch/start', {
+        task_ids: tasks.map(t => t.task_id),
+        languages: ['en', 'ko', 'ja', 'fr', 'de', 'es', 'id']
+      });
+
+      if (response.data.success) {
+        console.log('批量处理已启动:', response.data.message);
+        fetchBatchStatus();
+      }
+    } catch (error: any) {
+      if (error.response?.status === 409) {
+        alert('批量处理已在运行中');
+      } else {
+        alert('启动批量处理失败: ' + (error.response?.data?.detail || error.message));
+      }
+    }
+  };
+
+  // 停止批量处理
+  const handleStopBatch = async () => {
+    try {
+      const response = await axios.post('/api/batch/stop');
+      if (response.data.success) {
+        console.log('已请求停止批量处理');
+        fetchBatchStatus();
+      }
+    } catch (error: any) {
+      alert('停止批量处理失败: ' + (error.response?.data?.detail || error.message));
+    }
+  };
+
   // 获取阶段的中文名称
   const getStageName = (stage: string): string => {
     const stageNames: Record<string, string> = {
@@ -160,13 +230,12 @@ const TaskDashboard: React.FC = () => {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
 
-      setTasks([response.data, ...tasks]);
+      // 新任务添加到列表最后面
+      setTasks([...tasks, response.data]);
       setShowUploadModal(false);
       setVideoFile(null);
       setSubtitleFile(null);
-
-      // 自动跳转到新创建的任务编辑器
-      navigate(`/tasks/${response.data.task_id}`);
+      // 留在看板页面，不跳转到编辑器
     } catch (error) {
       console.error('Upload failed:', error);
       alert('上传失败，请重试');
@@ -189,6 +258,11 @@ const TaskDashboard: React.FC = () => {
     }
   };
 
+  // 判断是否可以启动批量处理
+  const canStartBatch = tasks.length > 0 && !batchStatus?.is_running;
+  const isBatchRunning = batchStatus?.is_running || false;
+  const isBatchStopping = batchStatus?.state === 'stopping';
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 p-8">
       <div className="max-w-7xl mx-auto">
@@ -204,15 +278,109 @@ const TaskDashboard: React.FC = () => {
             <p className="text-slate-400 mt-2">管理您的视频编辑任务</p>
           </div>
 
-          <button
-            onClick={() => setShowUploadModal(true)}
-            className="flex items-center gap-2 bg-gradient-to-r from-purple-600 to-purple-500 text-white px-6 py-3 rounded-lg hover:shadow-lg hover:shadow-purple-500/50 transition-all"
-            disabled={uploading}
-          >
-            <Plus size={20} />
-            <span>创建新任务</span>
-          </button>
+          <div className="flex items-center gap-3">
+            {/* 批量处理按钮 */}
+            {!isBatchRunning ? (
+              <button
+                onClick={handleStartBatchAll}
+                disabled={!canStartBatch}
+                className={`flex items-center gap-2 px-5 py-3 rounded-lg font-medium transition-all ${
+                  canStartBatch
+                    ? 'bg-gradient-to-r from-green-600 to-green-500 text-white hover:shadow-lg hover:shadow-green-500/50'
+                    : 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                }`}
+                title={!canStartBatch ? '没有可处理的任务' : '批量处理所有任务'}
+              >
+                <PlayCircle size={20} />
+                <span>批量处理</span>
+              </button>
+            ) : (
+              <button
+                onClick={handleStopBatch}
+                disabled={isBatchStopping}
+                className={`flex items-center gap-2 px-5 py-3 rounded-lg font-medium transition-all ${
+                  isBatchStopping
+                    ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-red-600 to-red-500 text-white hover:shadow-lg hover:shadow-red-500/50'
+                }`}
+              >
+                {isBatchStopping ? (
+                  <>
+                    <Loader2 size={20} className="animate-spin" />
+                    <span>正在停止...</span>
+                  </>
+                ) : (
+                  <>
+                    <StopCircle size={20} />
+                    <span>停止处理</span>
+                  </>
+                )}
+              </button>
+            )}
+
+            <button
+              onClick={() => setShowUploadModal(true)}
+              className="flex items-center gap-2 bg-gradient-to-r from-purple-600 to-purple-500 text-white px-6 py-3 rounded-lg hover:shadow-lg hover:shadow-purple-500/50 transition-all"
+              disabled={uploading}
+            >
+              <Plus size={20} />
+              <span>创建新任务</span>
+            </button>
+          </div>
         </div>
+
+        {/* 批量处理状态提示 */}
+        {isBatchRunning && batchStatus && (
+          <div className={`mb-6 p-4 rounded-lg ${
+            isBatchStopping
+              ? 'bg-yellow-500/10 border border-yellow-500/30'
+              : 'bg-blue-500/10 border border-blue-500/30'
+          }`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <Loader2 size={20} className={`animate-spin ${isBatchStopping ? 'text-yellow-400' : 'text-blue-400'}`} />
+                <div>
+                  <h3 className={`text-sm font-bold ${isBatchStopping ? 'text-yellow-300' : 'text-blue-300'}`}>
+                    {isBatchStopping ? '正在停止...' : '批量处理中'}
+                  </h3>
+                  <p className={`text-xs mt-1 ${isBatchStopping ? 'text-yellow-200' : 'text-blue-200'}`}>
+                    {batchStatus.message}
+                    {batchStatus.current_language && batchStatus.current_language !== 'default' && (
+                      <span> ({getLanguageName(batchStatus.current_language)})</span>
+                    )}
+                  </p>
+                  {isBatchStopping && (
+                    <p className="text-xs text-yellow-300 mt-1">
+                      当前阶段完成后将停止批量处理
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="text-right">
+                <p className={`text-sm ${isBatchStopping ? 'text-yellow-300' : 'text-blue-300'}`}>
+                  任务: {batchStatus.completed_tasks}/{batchStatus.total_tasks}
+                </p>
+                <p className={`text-xs ${isBatchStopping ? 'text-yellow-200' : 'text-blue-200'}`}>
+                  阶段: {batchStatus.completed_stages}/{batchStatus.total_stages}
+                </p>
+              </div>
+            </div>
+            {batchStatus.total_stages > 0 && (
+              <div className="mt-3">
+                <div className="w-full bg-slate-700 rounded-full h-2">
+                  <div
+                    className={`h-2 rounded-full transition-all duration-300 ${
+                      isBatchStopping
+                        ? 'bg-gradient-to-r from-yellow-500 to-yellow-400'
+                        : 'bg-gradient-to-r from-blue-500 to-blue-400'
+                    }`}
+                    style={{ width: `${(batchStatus.completed_stages / batchStatus.total_stages) * 100}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 任务网格 */}
         {loading ? (

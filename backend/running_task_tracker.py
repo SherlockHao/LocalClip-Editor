@@ -41,7 +41,35 @@ class RunningTaskTracker:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
                     cls._instance._running_tasks: Dict[str, RunningTask] = {}
+                    cls._instance._cancel_requested: bool = False  # 取消请求标志
         return cls._instance
+
+    def request_cancel(self) -> bool:
+        """
+        请求取消当前运行的任务
+
+        Returns:
+            True 如果有任务正在运行且已请求取消
+        """
+        with self._lock:
+            if len(self._running_tasks) > 0:
+                self._cancel_requested = True
+                task_id = list(self._running_tasks.keys())[0]
+                running = self._running_tasks[task_id]
+                print(f"[RunningTaskTracker] ⚠️ 已请求取消任务: {task_id} - {running.language}/{running.stage}", flush=True)
+                return True
+            return False
+
+    def is_cancel_requested(self) -> bool:
+        """检查是否已请求取消"""
+        with self._lock:
+            return self._cancel_requested
+
+    def clear_cancel_request(self):
+        """清除取消请求标志"""
+        with self._lock:
+            self._cancel_requested = False
+            print(f"[RunningTaskTracker] 已清除取消请求标志", flush=True)
 
     def start_task(self, task_id: str, language: str, stage: str) -> bool:
         """
@@ -64,6 +92,9 @@ class RunningTaskTracker:
                 print(f"[RunningTaskTracker] ⚠️ 全局已有任务正在运行: "
                       f"{existing_task_id} - {existing.language}/{existing.stage}", flush=True)
                 return False
+
+            # 清除之前的取消请求
+            self._cancel_requested = False
 
             self._running_tasks[task_id] = RunningTask(
                 task_id=task_id,

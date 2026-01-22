@@ -1,7 +1,23 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, Video, Clock, Settings, Play, Pause, RotateCcw, Zap, Volume2, Music, ArrowLeft } from 'lucide-react';
+import { Upload, Video, Clock, Settings, Play, Pause, RotateCcw, Zap, Volume2, Music, ArrowLeft, PlayCircle, StopCircle, Loader2 } from 'lucide-react';
 import { useNavigate, useParams } from 'react-router-dom';
 import axios from 'axios';
+
+// 批量处理状态接口
+interface BatchStatus {
+  state: 'idle' | 'running' | 'stopping' | 'stopped';
+  is_running: boolean;
+  current_task_id: string | null;
+  current_language: string | null;
+  current_stage: string | null;
+  total_tasks: number;
+  completed_tasks: number;
+  total_stages: number;
+  completed_stages: number;
+  message: string;
+  started_at: string | null;
+  error: string | null;
+}
 import VideoPlayer from '../components/VideoPlayer';
 import SubtitleTimeline from '../components/SubtitleTimeline';
 import SubtitleDetails from '../components/SubtitleDetails';
@@ -118,6 +134,9 @@ const App: React.FC = () => {
   const [speakerVoiceMapping, setSpeakerVoiceMapping] = useState<{[speakerId: string]: string}>({});
   const [initialSpeakerVoiceMapping, setInitialSpeakerVoiceMapping] = useState<{[speakerId: string]: string}>({});
   const [isRegeneratingVoices, setIsRegeneratingVoices] = useState(false);
+
+  // 批量处理状态
+  const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const isSeekingRef = useRef<boolean>(false);
@@ -298,6 +317,79 @@ const App: React.FC = () => {
 
     return () => clearInterval(interval);
   }, [taskId]);
+
+  // 定期刷新批量处理状态
+  useEffect(() => {
+    const fetchBatchStatus = async () => {
+      try {
+        const response = await axios.get('/api/batch/status', { timeout: 5000 });
+        setBatchStatus(response.data);
+      } catch (error) {
+        // 静默失败
+      }
+    };
+
+    fetchBatchStatus();
+    const interval = setInterval(fetchBatchStatus, 2000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // 启动单任务批量处理
+  const handleStartBatchSingleTask = async () => {
+    if (!taskId) return;
+
+    // 获取当前左侧选中的语言列表
+    const languages = ['en', 'ko', 'ja', 'fr', 'de', 'es', 'id']; // TODO: 从左侧面板获取实际选择的语言
+
+    try {
+      const response = await axios.post(`/api/batch/start/${taskId}`, {
+        languages: languages,
+        speaker_voice_mapping: speakerVoiceMapping
+      });
+
+      if (response.data.success) {
+        console.log('单任务批量处理已启动:', response.data.message);
+      }
+    } catch (error: any) {
+      if (error.response?.status === 409) {
+        alert('批量处理已在运行中');
+      } else {
+        alert('启动批量处理失败: ' + (error.response?.data?.detail || error.message));
+      }
+    }
+  };
+
+  // 停止批量处理
+  const handleStopBatch = async () => {
+    try {
+      const response = await axios.post('/api/batch/stop');
+      if (response.data.success) {
+        console.log('已请求停止批量处理');
+      }
+    } catch (error: any) {
+      alert('停止批量处理失败: ' + (error.response?.data?.detail || error.message));
+    }
+  };
+
+  // 获取语言的中文名称
+  const getLanguageNameForBatch = (language: string): string => {
+    if (language === 'default') return '';
+    const languageNames: Record<string, string> = {
+      'en': '英语', 'ko': '韩语', 'ja': '日语', 'fr': '法语',
+      'de': '德语', 'es': '西班牙语', 'id': '印尼语'
+    };
+    return languageNames[language] || language;
+  };
+
+  // 获取阶段的中文名称
+  const getStageNameForBatch = (stage: string): string => {
+    const stageNames: Record<string, string> = {
+      'speaker_diarization': '说话人识别', 'translation': '翻译',
+      'voice_cloning': '语音克隆', 'stitch': '音频拼接', 'export': '视频导出'
+    };
+    return stageNames[stage] || stage;
+  };
 
   // 当检测到有运行中的说话人识别任务时，自动启动轮询
   useEffect(() => {
@@ -2117,6 +2209,48 @@ const App: React.FC = () => {
               <RotateCcw size={18} />
               <span>重置</span>
             </button>
+          </div>
+
+          {/* 批量处理按钮 */}
+          <div className="flex items-center space-x-2">
+            {batchStatus?.is_running ? (
+              <>
+                {/* 运行中状态显示 */}
+                <div className="flex items-center space-x-2 bg-blue-900/50 text-blue-200 px-3 py-2 rounded-lg border border-blue-700">
+                  <Loader2 size={16} className="animate-spin" />
+                  <span className="text-sm">
+                    {batchStatus.current_language && batchStatus.current_stage
+                      ? `${getLanguageNameForBatch(batchStatus.current_language)} - ${getStageNameForBatch(batchStatus.current_stage)}`
+                      : '批量处理中...'}
+                  </span>
+                  {batchStatus.total_stages > 0 && (
+                    <span className="text-xs text-blue-300">
+                      ({batchStatus.completed_stages}/{batchStatus.total_stages})
+                    </span>
+                  )}
+                </div>
+                {/* 停止按钮 */}
+                <button
+                  onClick={handleStopBatch}
+                  disabled={batchStatus.state === 'stopping'}
+                  className="flex items-center space-x-2 bg-red-600 hover:bg-red-500 disabled:bg-red-800 text-white px-4 py-2.5 rounded-lg transition-all duration-200 font-medium"
+                  title="停止批量处理"
+                >
+                  <StopCircle size={18} />
+                  <span>{batchStatus.state === 'stopping' ? '停止中...' : '停止'}</span>
+                </button>
+              </>
+            ) : (
+              /* 开始批量处理按钮 */
+              <button
+                onClick={handleStartBatchSingleTask}
+                className="flex items-center space-x-2 bg-gradient-to-r from-green-600 to-green-500 text-white px-4 py-2.5 rounded-lg hover:shadow-lg hover:shadow-green-500/50 transition-all duration-200 font-medium"
+                title="批量处理当前任务（说话人识别→翻译→语音克隆→拼接→导出）"
+              >
+                <PlayCircle size={18} />
+                <span>批量处理</span>
+              </button>
+            )}
           </div>
 
           {/* 简洁时间轴 */}

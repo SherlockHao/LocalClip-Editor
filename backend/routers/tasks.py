@@ -119,8 +119,8 @@ async def list_tasks(
     limit: int = 100,
     db: Session = Depends(get_db)
 ):
-    """获取任务列表"""
-    tasks = db.query(TaskModel).order_by(TaskModel.created_at.desc()).offset(skip).limit(limit).all()
+    """获取任务列表（按创建时间升序，最早的在前）"""
+    tasks = db.query(TaskModel).order_by(TaskModel.created_at.asc()).offset(skip).limit(limit).all()
     return tasks
 
 @router.get("/{task_id}", response_model=TaskResponse)

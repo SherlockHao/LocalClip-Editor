@@ -32,7 +32,7 @@ from srt_parser import SRTParser
 
 # 导入批量任务管理相关模块
 from database import init_db
-from routers import tasks, websocket, processing
+from routers import tasks, websocket, processing, batch
 
 # 语言代码到中文名称的映射
 def get_language_name(language_code: str) -> str:
@@ -76,6 +76,7 @@ async def startup_event():
 app.include_router(tasks.router)
 app.include_router(websocket.router)
 app.include_router(processing.router)
+app.include_router(batch.router)
 
 # 添加CORS中间件
 app.add_middleware(
@@ -408,6 +409,39 @@ async def get_global_running_task():
             "has_running_task": False,
             "running_task": None
         }
+
+
+# ==================== 任务取消 API ====================
+
+@app.post("/api/cancel-current-task")
+async def cancel_current_task():
+    """
+    取消当前正在运行的任务
+
+    Returns:
+        是否成功请求取消
+    """
+    success = running_task_tracker.request_cancel()
+    if success:
+        return {
+            "success": True,
+            "message": "已请求取消当前任务"
+        }
+    else:
+        return {
+            "success": False,
+            "message": "没有正在运行的任务"
+        }
+
+
+@app.get("/api/cancel-status")
+async def get_cancel_status():
+    """
+    获取取消状态
+    """
+    return {
+        "cancel_requested": running_task_tracker.is_cancel_requested()
+    }
 
 
 @app.post("/api/open-folder")
