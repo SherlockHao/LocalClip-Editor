@@ -342,6 +342,74 @@ async def root():
     return {"message": "LocalClip Editor API"}
 
 
+# 导入运行任务追踪器
+from running_task_tracker import running_task_tracker
+
+
+@app.get("/api/tasks/{task_id}/running-task")
+async def get_running_task(task_id: str):
+    """
+    获取指定任务当前正在运行的子任务
+
+    用于:
+    1. 前端进入编辑页面时检查是否有运行中的任务
+    2. 切换语言时检查是否需要阻止操作
+    3. 恢复任务执行状态
+    """
+    running_task = running_task_tracker.get_running_task(task_id)
+
+    if running_task:
+        return {
+            "has_running_task": True,
+            "running_task": running_task_tracker.to_dict(running_task)
+        }
+    else:
+        return {
+            "has_running_task": False,
+            "running_task": None
+        }
+
+
+@app.get("/api/running-tasks")
+async def get_all_running_tasks():
+    """
+    获取所有正在运行的任务
+
+    用于任务仪表盘显示哪些任务正在执行
+    """
+    all_running = running_task_tracker.get_all_running_tasks()
+
+    return {
+        "running_tasks": {
+            task_id: running_task_tracker.to_dict(task)
+            for task_id, task in all_running.items()
+        }
+    }
+
+
+@app.get("/api/global-running-task")
+async def get_global_running_task():
+    """
+    获取全局正在运行的任务
+
+    用于:
+    1. 前端检查是否有任何任务在运行（跨所有视频任务）
+    2. 决定是否阻止启动新任务
+    """
+    running_task = running_task_tracker.get_global_running_task()
+
+    if running_task:
+        return {
+            "has_running_task": True,
+            "running_task": running_task_tracker.to_dict(running_task)
+        }
+    else:
+        return {
+            "has_running_task": False,
+            "running_task": None
+        }
+
+
 @app.post("/api/open-folder")
 async def open_folder(request: Request):
     """

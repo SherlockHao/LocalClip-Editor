@@ -202,30 +202,7 @@ const SubtitleTimeline: React.FC<SubtitleTimelineProps> = ({
           <span className="text-xs text-slate-500">
             {zoom > 1 ? `缩放: ${zoom.toFixed(1)}x | 拖拽移动 • 滚轮缩放` : '拖拽移动 • 滚轮缩放'}
           </span>
-          {hasClonedAudio && onStitchAudio && (
-            <button
-              onClick={onStitchAudio}
-              disabled={stitching || isRegeneratingVoices}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                stitching || isRegeneratingVoices
-                  ? 'bg-emerald-600/30 text-emerald-400/50 cursor-not-allowed'
-                  : 'bg-emerald-600/40 text-emerald-100 hover:bg-emerald-600/60 shadow-md hover:shadow-lg'
-              }`}
-              title={isRegeneratingVoices ? '正在重新生成音色...' : ''}
-            >
-              {stitching ? (
-                <>
-                  <Loader2 size={14} className="animate-spin" />
-                  拼接中...
-                </>
-              ) : (
-                <>
-                  <Wand2 size={14} />
-                  生成完整音频
-                </>
-              )}
-            </button>
-          )}
+          {/* 生成完整音频按钮已移至右侧操作栏 */}
         </div>
       </div>
 

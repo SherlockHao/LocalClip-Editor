@@ -1,5 +1,5 @@
 import React from 'react';
-import { Settings, Download, Users, Zap, Info, FileText, Mic, Music, FolderOpen } from 'lucide-react';
+import { Settings, Download, Users, Zap, Info, FileText, Mic, Music, FolderOpen, Loader2 } from 'lucide-react';
 
 interface VideoFile {
   filename: string;
@@ -50,6 +50,24 @@ interface PropertiesPanelProps {
   exportVideoProgress?: { message: string; progress: number } | null;
   exportedVideoDir?: string | null;
   onOpenExportFolder?: () => void;
+  // 新增：运行任务状态（当前任务的运行状态，用于显示进度）
+  runningTask?: {
+    task_id?: string;
+    language: string;
+    stage: string;
+    started_at: string;
+    message?: string;
+    progress?: number;
+  } | null;
+  // 新增：全局运行任务状态（可能是其他任务，用于禁用按钮）
+  globalRunningTask?: {
+    task_id: string;
+    language: string;
+    stage: string;
+    started_at: string;
+    message?: string;
+    progress?: number;
+  } | null;
 }
 
 const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
@@ -80,8 +98,50 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
   exportVideoCompleted = false,
   exportVideoProgress = null,
   exportedVideoDir = null,
-  onOpenExportFolder
+  onOpenExportFolder,
+  runningTask = null,
+  globalRunningTask = null
 }) => {
+
+  // 检查是否有全局任务正在运行（用于禁用按钮）
+  // 只要有任何任务在运行，就禁用所有按钮
+  const hasOtherRunningTask = globalRunningTask !== null;
+  const runningTaskInfo = globalRunningTask
+    ? `(${globalRunningTask.task_id}/${globalRunningTask.language}/${globalRunningTask.stage})`
+    : '';
+
+  // 获取阶段的中文名称
+  const getStageName = (stage: string): string => {
+    const stageNames: Record<string, string> = {
+      'speaker_diarization': '说话人识别',
+      'translation': '翻译',
+      'voice_cloning': '语音克隆',
+      'stitch': '音频拼接',
+      'export': '视频导出'
+    };
+    return stageNames[stage] || stage;
+  };
+
+  // 获取语言的中文名称
+  const getLanguageName = (language: string): string => {
+    if (language === 'default') return '';
+    const languageNames: Record<string, string> = {
+      'en': '英语',
+      'ko': '韩语',
+      'ja': '日语',
+      'fr': '法语',
+      'de': '德语',
+      'es': '西班牙语',
+      'id': '印尼语'
+    };
+    return languageNames[language] || language;
+  };
+
+  // 检查是否需要显示顶部的"任务运行中"进度条
+  // 条件：有任务运行，且不是说话人识别（说话人识别有自己的进度条）
+  // 翻译和语音克隆任务统一在顶部显示进度，不在按钮下方显示
+  const shouldShowTaskProgress = runningTask !== null &&
+    runningTask.stage !== 'speaker_diarization';
 
   // 判断语音克隆按钮是否可用
   const isVoiceCloningEnabled = speakerDiarizationCompleted &&
@@ -141,6 +201,39 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
           </div>
         )}
 
+        {/* 任务运行中提示 - 翻译/语音克隆/拼接/导出任务统一在此显示进度 */}
+        {shouldShowTaskProgress && runningTask && (
+          <div className="mb-6 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+            <div className="flex items-center gap-2 mb-3">
+              <Loader2 size={16} className="text-blue-400 animate-spin" />
+              <h3 className="text-sm font-bold text-blue-300">任务运行中</h3>
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs text-blue-200">
+                {getStageName(runningTask.stage)}
+                {runningTask.language !== 'default' && ` (${getLanguageName(runningTask.language)})`}
+              </p>
+              {runningTask.message && (
+                <p className="text-xs text-blue-300/80">{runningTask.message}</p>
+              )}
+              {runningTask.progress !== undefined && runningTask.progress > 0 && (
+                <div className="mt-2">
+                  <div className="w-full bg-slate-700 rounded-full h-1.5">
+                    <div
+                      className="bg-gradient-to-r from-blue-500 to-blue-400 h-1.5 rounded-full transition-all duration-300"
+                      style={{ width: `${runningTask.progress}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-blue-300 text-right mt-1">{runningTask.progress}%</p>
+                </div>
+              )}
+              <p className="text-xs text-blue-300/60 mt-2">
+                请等待当前任务完成后再执行其他操作
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* 说话人识别区域 */}
         <div className="mb-6">
           <div className="flex items-center gap-2 mb-3">
@@ -150,9 +243,10 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
           <button
             onClick={onRunSpeakerDiarization}
-            disabled={isProcessingSpeakerDiarization}
+            disabled={isProcessingSpeakerDiarization || hasOtherRunningTask}
+            title={hasOtherRunningTask ? `有任务正在运行 ${runningTaskInfo}` : undefined}
             className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-medium transition-all duration-200 ${
-              isProcessingSpeakerDiarization
+              isProcessingSpeakerDiarization || hasOtherRunningTask
                 ? 'bg-slate-600 text-slate-400 cursor-not-allowed opacity-75'
                 : speakerDiarizationCompleted
                 ? 'bg-gradient-to-r from-green-600 to-green-500 text-white hover:shadow-lg hover:shadow-green-500/50'
@@ -258,9 +352,10 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               </label>
               <button
                 onClick={onTranslateSubtitles}
-                disabled={!speakerDiarizationCompleted || !targetLanguage || isTranslating}
+                disabled={!speakerDiarizationCompleted || !targetLanguage || isTranslating || hasOtherRunningTask}
+                title={hasOtherRunningTask ? `有任务正在运行 ${runningTaskInfo}` : undefined}
                 className={`flex items-center justify-center w-full px-4 py-2.5 rounded-lg font-medium transition-all duration-200 ${
-                  speakerDiarizationCompleted && targetLanguage && !isTranslating
+                  speakerDiarizationCompleted && targetLanguage && !isTranslating && !hasOtherRunningTask
                     ? 'bg-gradient-to-r from-purple-600 to-purple-500 text-white hover:shadow-lg hover:shadow-purple-500/50'
                     : 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-60'
                 }`}
@@ -289,31 +384,19 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
                   <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                   </svg>
-                  已翻译为{targetLanguage === 'en' ? '英语' : targetLanguage === 'ko' ? '韩语' : targetLanguage === 'ja' ? '日语' : '法语'}
+                  已翻译为{targetLanguage === 'en' ? '英语' : targetLanguage === 'ko' ? '韩语' : targetLanguage === 'ja' ? '日语' : targetLanguage === 'fr' ? '法语' : targetLanguage === 'de' ? '德语' : targetLanguage === 'es' ? '西班牙语' : targetLanguage === 'id' ? '印尼语' : targetLanguage}
                 </p>
               )}
-              {isTranslating && translationProgress && (
-                <div className="mt-2">
-                  <div className="flex justify-between text-xs text-slate-400 mb-1">
-                    <span>{translationProgress.message}</span>
-                    <span>{translationProgress.progress}%</span>
-                  </div>
-                  <div className="w-full bg-slate-700 rounded-full h-1.5">
-                    <div
-                      className="bg-gradient-to-r from-purple-600 to-purple-400 h-1.5 rounded-full transition-all duration-300"
-                      style={{ width: `${translationProgress.progress}%` }}
-                    ></div>
-                  </div>
-                </div>
-              )}
+              {/* 翻译进度条已移至顶部统一显示 */}
             </div>
 
             {/* 语音克隆按钮 */}
             <button
               onClick={onRunVoiceCloning}
-              disabled={!isVoiceCloningEnabled || isProcessingVoiceCloning}
+              disabled={!isVoiceCloningEnabled || isProcessingVoiceCloning || hasOtherRunningTask}
+              title={hasOtherRunningTask ? `有任务正在运行 ${runningTaskInfo}` : undefined}
               className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-medium transition-all duration-200 ${
-                isProcessingVoiceCloning
+                isProcessingVoiceCloning || hasOtherRunningTask
                   ? 'bg-slate-600 text-slate-400 cursor-not-allowed opacity-75'
                   : voiceCloningCompleted
                   ? 'bg-gradient-to-r from-green-600 to-green-500 text-white hover:shadow-lg hover:shadow-green-500/50'
@@ -342,24 +425,9 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               )}
             </button>
 
-            {voiceCloningProgress && (
-              <div className="mt-2.5 p-2.5 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-                <p className="text-xs text-blue-300 text-center font-medium mb-2">
-                  {voiceCloningProgress.message}
-                </p>
-                <div className="w-full bg-slate-700 rounded-full h-1.5">
-                  <div
-                    className="bg-gradient-to-r from-blue-500 to-blue-400 h-1.5 rounded-full transition-all duration-300"
-                    style={{ width: `${voiceCloningProgress.progress}%` }}
-                  ></div>
-                </div>
-                <p className="text-xs text-blue-300 text-center mt-1">
-                  {voiceCloningProgress.progress}%
-                </p>
-              </div>
-            )}
+            {/* 语音克隆进度条已移至顶部统一显示 */}
 
-            {voiceCloningCompleted && !isProcessingVoiceCloning && !voiceCloningProgress && (
+            {voiceCloningCompleted && !isProcessingVoiceCloning && (
               <p className="text-xs text-green-400 mt-1.5 flex items-center gap-1">
                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
@@ -392,9 +460,10 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
               <div className="mt-3 pt-3 border-t border-slate-600">
                 <button
                   onClick={onStitchAudio}
-                  disabled={isStitchingAudio}
+                  disabled={isStitchingAudio || hasOtherRunningTask}
+                  title={hasOtherRunningTask ? `有任务正在运行 ${runningTaskInfo}` : undefined}
                   className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-medium transition-all duration-200 ${
-                    isStitchingAudio
+                    isStitchingAudio || hasOtherRunningTask
                       ? 'bg-slate-600 text-slate-400 cursor-not-allowed opacity-75'
                       : stitchedAudioReady
                       ? 'bg-gradient-to-r from-green-600 to-green-500 text-white hover:shadow-lg hover:shadow-green-500/50'
@@ -440,9 +509,10 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
         <div className="flex gap-2">
           <button
             onClick={onExportVideo}
-            disabled={!isExportVideoEnabled || isExportingVideo}
+            disabled={!isExportVideoEnabled || isExportingVideo || hasOtherRunningTask}
+            title={hasOtherRunningTask ? `有任务正在运行 ${runningTaskInfo}` : undefined}
             className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-semibold transition-all duration-200 ${
-              isExportingVideo
+              isExportingVideo || hasOtherRunningTask
                 ? 'bg-slate-600 text-slate-400 cursor-not-allowed opacity-75'
                 : exportVideoCompleted
                 ? 'bg-gradient-to-r from-green-600 to-green-500 text-white hover:shadow-lg hover:shadow-green-500/50'

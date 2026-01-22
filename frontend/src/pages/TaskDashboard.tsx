@@ -28,6 +28,16 @@ interface Task {
   created_at: string;
 }
 
+// 运行任务信息接口
+interface RunningTaskInfo {
+  task_id: string;
+  language: string;
+  stage: string;
+  started_at: string;
+  message?: string;
+  progress?: number;
+}
+
 const TaskDashboard: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -35,22 +45,101 @@ const TaskDashboard: React.FC = () => {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [subtitleFile, setSubtitleFile] = useState<File | null>(null);
+  const [runningTasks, setRunningTasks] = useState<Record<string, RunningTaskInfo>>({});
   const navigate = useNavigate();
+
+  // 用于追踪是否曾经成功加载过任务
+  const hasLoadedRef = useRef(false);
+  // 用于追踪重试次数
+  const retryCountRef = useRef(0);
 
   useEffect(() => {
     fetchTasks();
+    fetchRunningTasks();
+
+    // 每3秒刷新一次运行任务状态和任务列表（更频繁以确保及时更新）
+    const runningTasksInterval = setInterval(fetchRunningTasks, 3000);
+    const tasksInterval = setInterval(() => {
+      // 静默刷新任务列表，不设置 loading 状态
+      fetchTasksSilent();
+    }, 3000);
+
+    return () => {
+      clearInterval(runningTasksInterval);
+      clearInterval(tasksInterval);
+    };
   }, []);
 
   const fetchTasks = async () => {
     try {
       setLoading(true);
-      const response = await axios.get('/api/tasks/');
-      setTasks(response.data);
+      const response = await axios.get('/api/tasks/', { timeout: 10000 });
+      setTasks(response.data || []);
+      hasLoadedRef.current = true;
+      retryCountRef.current = 0;
     } catch (error) {
       console.error('Failed to fetch tasks:', error);
+      // 如果首次加载失败，尝试重试
+      if (!hasLoadedRef.current && retryCountRef.current < 3) {
+        retryCountRef.current++;
+        console.log(`Retrying fetchTasks (attempt ${retryCountRef.current})...`);
+        setTimeout(fetchTasks, 1000);
+        return; // 不设置 loading 为 false，继续重试
+      }
     } finally {
       setLoading(false);
     }
+  };
+
+  // 静默刷新任务列表（不显示loading状态）
+  const fetchTasksSilent = async () => {
+    try {
+      const response = await axios.get('/api/tasks/', { timeout: 10000 });
+      // 无论返回什么都更新任务列表（包括空数组）
+      if (response.data !== undefined) {
+        setTasks(response.data || []);
+        hasLoadedRef.current = true;
+      }
+    } catch (error) {
+      // 静默失败，不做任何处理
+      console.log('Silent fetch tasks failed:', error);
+    }
+  };
+
+  const fetchRunningTasks = async () => {
+    try {
+      const response = await axios.get('/api/running-tasks', { timeout: 5000 });
+      setRunningTasks(response.data.running_tasks || {});
+    } catch (error) {
+      console.log('Failed to fetch running tasks (API may not be available yet):', error);
+    }
+  };
+
+  // 获取阶段的中文名称
+  const getStageName = (stage: string): string => {
+    const stageNames: Record<string, string> = {
+      'speaker_diarization': '说话人识别',
+      'translation': '翻译',
+      'voice_cloning': '语音克隆',
+      'stitch': '音频拼接',
+      'export': '视频导出'
+    };
+    return stageNames[stage] || stage;
+  };
+
+  // 获取语言的中文名称
+  const getLanguageName = (language: string): string => {
+    if (language === 'default') return '';
+    const languageNames: Record<string, string> = {
+      'en': '英语',
+      'ko': '韩语',
+      'ja': '日语',
+      'fr': '法语',
+      'de': '德语',
+      'es': '西班牙语',
+      'id': '印尼语'
+    };
+    return languageNames[language] || language;
   };
 
   const handleUploadSubmit = async () => {
@@ -144,6 +233,9 @@ const TaskDashboard: React.FC = () => {
                 task={task}
                 onOpen={() => navigate(`/tasks/${task.task_id}`)}
                 onDelete={(e) => handleDelete(task.task_id, e)}
+                runningTask={runningTasks[task.task_id] || null}
+                getStageName={getStageName}
+                getLanguageName={getLanguageName}
               />
             ))}
           </div>
@@ -257,9 +349,12 @@ interface TaskCardProps {
   task: Task;
   onOpen: () => void;
   onDelete: (e: React.MouseEvent) => void;
+  runningTask: RunningTaskInfo | null;
+  getStageName: (stage: string) => string;
+  getLanguageName: (language: string) => string;
 }
 
-const TaskCard: React.FC<TaskCardProps> = ({ task, onOpen, onDelete }) => {
+const TaskCard: React.FC<TaskCardProps> = ({ task, onOpen, onDelete, runningTask, getStageName, getLanguageName }) => {
   const languages = ['en', 'ko', 'ja', 'fr', 'de', 'es', 'id'];
   const languageNames: Record<string, string> = {
     en: '英语', ko: '韩语', ja: '日语', fr: '法语',
@@ -347,6 +442,30 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onOpen, onDelete }) => {
             </span>
           )}
         </div>
+
+        {/* 运行任务指示 */}
+        {runningTask && (
+          <div className="mt-3 p-2 rounded-lg bg-blue-500/10 border border-blue-500/30">
+            <div className="flex items-center gap-2">
+              <Loader2 size={14} className="text-blue-400 animate-spin" />
+              <span className="text-xs text-blue-300 font-medium">
+                正在执行: {getStageName(runningTask.stage)}
+                {runningTask.language !== 'default' && ` (${getLanguageName(runningTask.language)})`}
+              </span>
+            </div>
+            {runningTask.progress !== undefined && runningTask.progress > 0 && (
+              <div className="mt-2">
+                <div className="w-full bg-slate-700 rounded-full h-1">
+                  <div
+                    className="bg-blue-500 h-1 rounded-full transition-all duration-300"
+                    style={{ width: `${runningTask.progress}%` }}
+                  />
+                </div>
+                <p className="text-xs text-blue-300 text-right mt-1">{runningTask.progress}%</p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 语言进度 */}

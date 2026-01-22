@@ -9,6 +9,7 @@ from routers.websocket import manager
 from sqlalchemy.orm.attributes import flag_modified
 import json
 from datetime import datetime
+from running_task_tracker import running_task_tracker
 
 
 async def update_task_progress(
@@ -35,6 +36,9 @@ async def update_task_progress(
     db = SessionLocal()
     try:
         print(f"[进度更新] {task_id} - {language} - {stage}: {progress}% - {message}", flush=True)
+
+        # 0. 更新运行任务追踪器的进度
+        running_task_tracker.update_progress(task_id, progress, message)
 
         # 1. 更新数据库
         task = db.query(Task).filter(Task.task_id == task_id).first()

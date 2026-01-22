@@ -89,6 +89,30 @@ const App: React.FC = () => {
   const [exportedVideoDir, setExportedVideoDir] = useState<string | null>(null);
   const exportVideoProgressTimer = useRef<NodeJS.Timeout | null>(null);
 
+  // 运行任务状态 - 用于阻止同时启动多个任务
+  // 这是当前 taskId 的运行任务
+  const [runningTask, setRunningTask] = useState<{
+    task_id?: string;
+    language: string;
+    stage: string;
+    started_at: string;
+    message?: string;
+    progress?: number;
+  } | null>(null);
+
+  // 全局运行任务状态 - 可能是其他 taskId 的任务
+  const [globalRunningTask, setGlobalRunningTask] = useState<{
+    task_id: string;
+    language: string;
+    stage: string;
+    started_at: string;
+    message?: string;
+    progress?: number;
+  } | null>(null);
+
+  // 用于防止语言切换时的竞态条件
+  const currentLanguageRef = useRef<string>('');
+
   // 默认音色库和音色映射状态
   const [defaultVoices, setDefaultVoices] = useState<Array<{id: string, name: string, audio_url: string, reference_text: string}>>([]);
   const [speakerVoiceMapping, setSpeakerVoiceMapping] = useState<{[speakerId: string]: string}>({});
@@ -188,6 +212,294 @@ const App: React.FC = () => {
     };
   }, []);
 
+  // 定期刷新全局运行任务状态
+  useEffect(() => {
+    if (!taskId) return;
+
+    // 刷新全局运行任务状态的函数
+    const refreshGlobalRunningTask = async () => {
+      try {
+        const response = await axios.get('/api/global-running-task', { timeout: 5000 });
+        const data = response.data;
+        if (data.has_running_task && data.running_task) {
+          const rt = data.running_task;
+          // 更新全局运行任务
+          setGlobalRunningTask(prev => {
+            if (!prev || prev.task_id !== rt.task_id || prev.language !== rt.language ||
+                prev.stage !== rt.stage || prev.progress !== rt.progress || prev.message !== rt.message) {
+              return {
+                task_id: rt.task_id,
+                language: rt.language,
+                stage: rt.stage,
+                started_at: rt.started_at,
+                message: rt.message,
+                progress: rt.progress
+              };
+            }
+            return prev;
+          });
+
+          // 如果是当前任务，同时更新 runningTask
+          if (rt.task_id === taskId) {
+            setRunningTask(prev => {
+              if (!prev || prev.language !== rt.language || prev.stage !== rt.stage ||
+                  prev.progress !== rt.progress || prev.message !== rt.message) {
+                return {
+                  task_id: rt.task_id,
+                  language: rt.language,
+                  stage: rt.stage,
+                  started_at: rt.started_at,
+                  message: rt.message,
+                  progress: rt.progress
+                };
+              }
+              return prev;
+            });
+
+            // 只有当运行任务的语言与当前显示的语言匹配时，才更新个别进度状态
+            // 使用 ref 确保获取最新的 targetLanguage 值
+            const currentLang = currentLanguageRef.current;
+            if (rt.language === currentLang) {
+              // 当前显示的语言正在执行任务，更新对应的进度状态
+              if (rt.stage === 'translation') {
+                setIsTranslating(true);
+                setTranslationProgress({ message: rt.message || '', progress: rt.progress || 0 });
+              } else if (rt.stage === 'voice_cloning') {
+                setIsProcessingVoiceCloning(true);
+                setVoiceCloningProgress({ message: rt.message || '', progress: rt.progress || 0 });
+              } else if (rt.stage === 'stitch') {
+                setIsStitchingAudio(true);
+              } else if (rt.stage === 'export') {
+                setIsExportingVideo(true);
+                setExportVideoProgress({ message: rt.message || '', progress: rt.progress || 0 });
+              }
+            }
+            // 注意：当 rt.language !== currentLang 时，不需要做任何事
+            // 因为 restoreLanguageStatus 已经清除了这些状态
+            // runningTask 会显示在 "其他任务运行中" 提示框中
+          } else {
+            // 不是当前任务，清除 runningTask
+            setRunningTask(null);
+          }
+        } else {
+          setGlobalRunningTask(null);
+          setRunningTask(null);
+        }
+      } catch (error) {
+        // 忽略错误，保持当前状态
+      }
+    };
+
+    // 立即刷新一次
+    refreshGlobalRunningTask();
+
+    // 每 2 秒刷新一次
+    const interval = setInterval(refreshGlobalRunningTask, 2000);
+
+    return () => clearInterval(interval);
+  }, [taskId]);
+
+  // 当检测到有运行中的说话人识别任务时，自动启动轮询
+  useEffect(() => {
+    if (isProcessingSpeakerDiarization && speakerDiarizationTaskId && taskId) {
+      console.log('[自动恢复] 开始轮询说话人识别状态...');
+      // 定义轮询函数
+      const startPolling = () => {
+        // 延迟一小段时间再开始轮询，确保状态已经设置完毕
+        setTimeout(() => {
+          // pollSpeakerDiarizationStatus 会在后面定义，这里用 fetch 实现简单版本
+          const poll = async () => {
+            try {
+              const response = await fetch(`/api/tasks/${speakerDiarizationTaskId}/speaker-diarization/status`);
+              const status = await response.json();
+              console.log('[自动恢复] 说话人识别状态:', status);
+
+              // 更新进度显示
+              setSpeakerDiarizationProgress({
+                message: status.message || '处理中...',
+                progress: status.progress || 0
+              });
+
+              if (status.status === 'completed') {
+                // 完成处理
+                if (status.speaker_labels) {
+                  setSubtitles(prevSubtitles => prevSubtitles.map((subtitle, index) => ({
+                    ...subtitle,
+                    speaker_id: status.speaker_labels[index] ?? subtitle.speaker_id
+                  })));
+                }
+                if (status.speaker_name_mapping) {
+                  setSpeakerNameMapping(status.speaker_name_mapping);
+                }
+                setIsProcessingSpeakerDiarization(false);
+                setSpeakerDiarizationTaskId(null);
+                setSpeakerDiarizationProgress({ message: '', progress: 0 });
+                setRunningTask(null);
+
+                const durationInfo = status.duration_str ? ` (耗时: ${status.duration_str})` : '';
+                setNotificationData({
+                  title: '说话人识别完成',
+                  message: `已成功完成说话人识别并标记到字幕中。${durationInfo}`,
+                  uniqueSpeakers: status.unique_speakers
+                });
+                setShowNotification(true);
+              } else if (status.status === 'failed') {
+                setIsProcessingSpeakerDiarization(false);
+                setSpeakerDiarizationTaskId(null);
+                setSpeakerDiarizationProgress({ message: '', progress: 0 });
+                setRunningTask(null);
+
+                setNotificationData({
+                  title: '说话人识别失败',
+                  message: status.message || '处理过程中发生错误',
+                  uniqueSpeakers: undefined
+                });
+                setShowNotification(true);
+              } else {
+                // 继续轮询
+                setTimeout(poll, 2000);
+              }
+            } catch (error) {
+              console.error('[自动恢复] 轮询失败:', error);
+              // 发生错误时继续轮询
+              setTimeout(poll, 2000);
+            }
+          };
+          poll();
+        }, 500);
+      };
+      startPolling();
+    }
+  }, [isProcessingSpeakerDiarization, speakerDiarizationTaskId]);
+
+  // 当检测到有运行中的翻译任务时，自动启动轮询
+  useEffect(() => {
+    if (isTranslating && taskId && targetLanguage) {
+      console.log('[自动恢复] 开始轮询翻译状态...');
+      const poll = async () => {
+        try {
+          const response = await fetch(`/api/tasks/${taskId}/languages/${targetLanguage}/translate/status`);
+          const status = await response.json();
+          console.log('[自动恢复] 翻译状态:', status);
+
+          setTranslationProgress({
+            message: status.message || '翻译中...',
+            progress: status.progress || 0
+          });
+
+          if (status.status === 'completed') {
+            setTranslationProgress({ message: '翻译完成', progress: 100 });
+            setTargetSrtFilename(status.target_srt_filename || 'translated.srt');
+            setIsTranslating(false);
+            setRunningTask(null);
+            setTimeout(() => setTranslationProgress(null), 2000);
+          } else if (status.status === 'failed') {
+            setIsTranslating(false);
+            setTranslationProgress(null);
+            setRunningTask(null);
+            alert('翻译失败: ' + (status.message || '未知错误'));
+          } else {
+            setTimeout(poll, 1000);
+          }
+        } catch (error) {
+          console.error('[自动恢复] 翻译轮询失败:', error);
+          setTimeout(poll, 2000);
+        }
+      };
+      setTimeout(poll, 500);
+    }
+  }, [isTranslating, taskId, targetLanguage]);
+
+  // 当检测到有运行中的语音克隆任务时，自动启动轮询
+  useEffect(() => {
+    if (isProcessingVoiceCloning && voiceCloningTaskId && targetLanguage) {
+      console.log('[自动恢复] 开始轮询语音克隆状态...');
+      const poll = async () => {
+        try {
+          const response = await fetch(`/api/tasks/${voiceCloningTaskId}/languages/${targetLanguage}/voice-cloning/status`);
+          const status = await response.json();
+          console.log('[自动恢复] 语音克隆状态:', status);
+
+          setVoiceCloningProgress({
+            message: status.message || '语音克隆中...',
+            progress: status.progress || 0
+          });
+
+          if (status.status === 'completed') {
+            setVoiceCloningProgress({ message: '语音克隆完成', progress: 100 });
+            setIsProcessingVoiceCloning(false);
+            setRunningTask(null);
+            if (status.cloned_results && Array.isArray(status.cloned_results)) {
+              setSubtitles(prevSubtitles => prevSubtitles.map((subtitle, index) => {
+                const clonedResult = status.cloned_results.find((r: any) => r.index === index);
+                if (clonedResult) {
+                  return {
+                    ...subtitle,
+                    target_text: clonedResult.target_text,
+                    cloned_audio_path: clonedResult.cloned_audio_path,
+                    cloned_speaker_id: clonedResult.speaker_id
+                  };
+                }
+                return subtitle;
+              }));
+            }
+            setTimeout(() => setVoiceCloningProgress(null), 2000);
+          } else if (status.status === 'failed') {
+            setIsProcessingVoiceCloning(false);
+            setVoiceCloningProgress(null);
+            setVoiceCloningTaskId(null);
+            setRunningTask(null);
+            alert('语音克隆失败: ' + (status.message || '未知错误'));
+          } else {
+            setTimeout(poll, 1000);
+          }
+        } catch (error) {
+          console.error('[自动恢复] 语音克隆轮询失败:', error);
+          setTimeout(poll, 2000);
+        }
+      };
+      setTimeout(poll, 500);
+    }
+  }, [isProcessingVoiceCloning, voiceCloningTaskId, targetLanguage]);
+
+  // 当检测到有运行中的视频导出任务时，自动启动轮询
+  useEffect(() => {
+    if (isExportingVideo && taskId && targetLanguage) {
+      console.log('[自动恢复] 开始轮询视频导出状态...');
+      const poll = async () => {
+        try {
+          const response = await fetch(`/api/tasks/${taskId}/languages/${targetLanguage}/export-video/status`);
+          const status = await response.json();
+          console.log('[自动恢复] 视频导出状态:', status);
+
+          setExportVideoProgress({
+            message: status.message || '导出中...',
+            progress: status.progress || 0
+          });
+
+          if (status.status === 'completed' || status.file_exists) {
+            setIsExportingVideo(false);
+            setExportVideoCompleted(true);
+            setExportedVideoDir(status.output_dir || null);
+            setExportVideoProgress(null);
+            setRunningTask(null);
+          } else if (status.status === 'failed') {
+            setIsExportingVideo(false);
+            setExportVideoProgress(null);
+            setRunningTask(null);
+            alert('视频导出失败: ' + (status.message || '未知错误'));
+          } else {
+            setTimeout(poll, 1000);
+          }
+        } catch (error) {
+          console.error('[自动恢复] 视频导出轮询失败:', error);
+          setTimeout(poll, 2000);
+        }
+      };
+      setTimeout(poll, 500);
+    }
+  }, [isExportingVideo, taskId, targetLanguage]);
+
   const handleProgressBarMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     setIsDraggingProgress(true);
 
@@ -216,8 +528,98 @@ const App: React.FC = () => {
     const loadTaskData = async () => {
       if (!taskId) return;
 
+      // 重置所有运行状态（进入新任务时清除旧状态）
+      console.log('[任务加载] 重置运行状态...');
+      setRunningTask(null);
+      setGlobalRunningTask(null);
+      setIsProcessingSpeakerDiarization(false);
+      setSpeakerDiarizationTaskId(null);
+      setSpeakerDiarizationProgress({ message: '', progress: 0 });
+      setIsTranslating(false);
+      setTranslationProgress(null);
+      setIsProcessingVoiceCloning(false);
+      setVoiceCloningProgress(null);
+      setVoiceCloningTaskId(null);
+      setIsStitchingAudio(false);
+      setIsExportingVideo(false);
+      setExportVideoProgress(null);
+      // 重置语言相关状态
+      setTargetLanguage('');
+      setTargetSrtFilename(null);
+      setStitchedAudioPath(null);
+      setUseStitchedAudio(false);
+      setExportVideoCompleted(false);
+      setExportedVideoDir(null);
+
       try {
         console.log('[任务加载] 加载任务数据:', taskId);
+
+        // 首先检查全局是否有正在运行的任务
+        try {
+          const globalRunningResponse = await axios.get('/api/global-running-task');
+          const globalRunningData = globalRunningResponse.data;
+          console.log('[任务加载] 全局运行任务状态:', globalRunningData);
+
+          if (globalRunningData.has_running_task && globalRunningData.running_task) {
+            const rt = globalRunningData.running_task;
+            setGlobalRunningTask({
+              task_id: rt.task_id,
+              language: rt.language,
+              stage: rt.stage,
+              started_at: rt.started_at,
+              message: rt.message,
+              progress: rt.progress
+            });
+
+            // 如果运行的是当前任务
+            if (rt.task_id === taskId) {
+              setRunningTask({
+                task_id: rt.task_id,
+                language: rt.language,
+                stage: rt.stage,
+                started_at: rt.started_at,
+                message: rt.message,
+                progress: rt.progress
+              });
+              console.log(`[任务加载] 发现当前任务正在运行: ${rt.language}/${rt.stage}`);
+
+              // 如果是说话人识别正在运行，自动恢复到说话人识别状态
+              if (rt.stage === 'speaker_diarization') {
+                console.log('[任务加载] 说话人识别正在运行，恢复轮询...');
+                setIsProcessingSpeakerDiarization(true);
+                setSpeakerDiarizationTaskId(taskId);
+              }
+
+              // 如果是其他语言任务正在运行，设置目标语言并恢复状态
+              if (rt.language !== 'default' && rt.stage !== 'speaker_diarization') {
+                setTargetLanguage(rt.language);
+
+                // 根据阶段设置对应的处理状态
+                if (rt.stage === 'translation') {
+                  setIsTranslating(true);
+                } else if (rt.stage === 'voice_cloning') {
+                  setIsProcessingVoiceCloning(true);
+                  setVoiceCloningTaskId(taskId);
+                } else if (rt.stage === 'stitch') {
+                  setIsStitchingAudio(true);
+                } else if (rt.stage === 'export') {
+                  setIsExportingVideo(true);
+                }
+              }
+            } else {
+              console.log(`[任务加载] 其他任务正在运行: ${rt.task_id} - ${rt.language}/${rt.stage}`);
+              // 其他任务在运行，当前任务的 runningTask 为 null
+              setRunningTask(null);
+            }
+          } else {
+            setGlobalRunningTask(null);
+            setRunningTask(null);
+          }
+        } catch (err) {
+          console.log('[任务加载] 获取全局运行任务状态失败:', err);
+          setGlobalRunningTask(null);
+          setRunningTask(null);
+        }
 
         // 获取任务信息
         const taskResponse = await axios.get(`/api/tasks/${taskId}`);
@@ -359,17 +761,65 @@ const App: React.FC = () => {
 
   // 当目标语言改变时，检查并恢复该语言的翻译、语音克隆和拼接状态
   useEffect(() => {
+    // 更新 ref 用于防止竞态条件
+    currentLanguageRef.current = targetLanguage;
+
     const restoreLanguageStatus = async () => {
       if (!taskId || !targetLanguage) return;
 
-      console.log(`[语言状态恢复] 开始恢复 ${targetLanguage} 的状态...`);
+      // 保存当前语言，用于检查竞态条件
+      const requestedLanguage = targetLanguage;
+      console.log(`[语言状态恢复] 开始恢复 ${requestedLanguage} 的状态...`);
 
-      // 先重置所有语言相关的状态，避免显示上一个语言的状态
+      // 重要：当切换语言时，始终先清除所有语言相关的运行状态
+      // 这些状态只在当前语言正在执行任务时才应该为 true
+      // 如果有运行中的任务且不是当前语言，这些应该为 false，进度由 runningTask 显示
+      setIsTranslating(false);
+      setTranslationProgress(null);
+      setIsProcessingVoiceCloning(false);
+      setVoiceCloningProgress(null);
+      setIsStitchingAudio(false);
+      setIsExportingVideo(false);
+      setExportVideoProgress(null);
+
+      // 检查是否有正在运行的任务属于当前切换到的语言
+      // 如果有，恢复对应的状态
+      try {
+        const globalRunningResponse = await axios.get('/api/global-running-task', { timeout: 3000 });
+        const globalRunningData = globalRunningResponse.data;
+
+        if (globalRunningData.has_running_task && globalRunningData.running_task) {
+          const rt = globalRunningData.running_task;
+
+          // 只有当正在运行的任务是当前任务且是当前语言时，才恢复运行状态
+          if (rt.task_id === taskId && rt.language === requestedLanguage) {
+            console.log(`[语言状态恢复] 恢复 ${requestedLanguage} 的运行状态: ${rt.stage}`);
+            if (rt.stage === 'translation') {
+              setIsTranslating(true);
+              setTranslationProgress({ message: rt.message || '', progress: rt.progress || 0 });
+            } else if (rt.stage === 'voice_cloning') {
+              setIsProcessingVoiceCloning(true);
+              setVoiceCloningProgress({ message: rt.message || '', progress: rt.progress || 0 });
+              setVoiceCloningTaskId(taskId);
+            } else if (rt.stage === 'stitch') {
+              setIsStitchingAudio(true);
+            } else if (rt.stage === 'export') {
+              setIsExportingVideo(true);
+              setExportVideoProgress({ message: rt.message || '', progress: rt.progress || 0 });
+            }
+          }
+        }
+      } catch (err) {
+        console.log('[语言状态恢复] 获取全局运行任务状态失败:', err);
+      }
+
+      // 重置语言相关的完成状态（会在下面恢复）
       setTargetSrtFilename(null);
       setStitchedAudioPath(null);
       setUseStitchedAudio(false);
       setExportVideoCompleted(false);
       setExportedVideoDir(null);
+
       // 清除字幕中的克隆信息（会在下面恢复）
       setSubtitles(prevSubtitles => prevSubtitles.map(subtitle => ({
         ...subtitle,
@@ -826,6 +1276,7 @@ const App: React.FC = () => {
         setIsProcessingSpeakerDiarization(false);
         setSpeakerDiarizationTaskId(null);
         setSpeakerDiarizationProgress({ message: '', progress: 0 }); // 重置进度
+        setRunningTask(null); // 清除运行任务状态
 
         // 显示成功通知，包含处理时间
         const durationInfo = status.duration_str ? ` (耗时: ${status.duration_str})` : '';
@@ -856,6 +1307,7 @@ const App: React.FC = () => {
         setIsProcessingSpeakerDiarization(false);
         setSpeakerDiarizationTaskId(null);
         setSpeakerDiarizationProgress({ message: '', progress: 0 }); // 重置进度
+        setRunningTask(null); // 清除运行任务状态
       } else {
         setTimeout(() => pollSpeakerDiarizationStatus(taskId), 2000);
       }
@@ -996,6 +1448,7 @@ const App: React.FC = () => {
         setTranslationProgress({ message: '翻译完成', progress: 100 });
         setTargetSrtFilename(result.target_srt_filename || 'translated.srt');
         setIsTranslating(false);
+        setRunningTask(null); // 清除运行任务状态
 
         // 显示完成通知，包含耗时信息
         const totalItems = result.total_items || 0;
@@ -1040,6 +1493,7 @@ const App: React.FC = () => {
       alert('翻译失败: ' + (error as Error).message);
       setIsTranslating(false);
       setTranslationProgress(null);
+      setRunningTask(null); // 清除运行任务状态
     }
   };
 
@@ -1351,10 +1805,12 @@ const App: React.FC = () => {
         }
 
         alert(`拼接成功！已生成完整音频，共 ${result.segments_count} 个片段，总时长 ${result.total_duration.toFixed(2)}s${result.replanned_segments > 0 ? `，其中 ${result.replanned_segments} 个片段使用了智能时间轴规划` : ''}`);
+        setRunningTask(null); // 清除运行任务状态
       }
     } catch (error) {
       console.error('拼接音频失败:', error);
       alert('拼接音频失败: ' + (error as Error).message);
+      setRunningTask(null); // 清除运行任务状态
     } finally {
       setIsStitchingAudio(false);
     }
@@ -1426,6 +1882,7 @@ const App: React.FC = () => {
         setExportVideoCompleted(true);
         setExportedVideoDir(status.output_dir || null);
         setExportVideoProgress(null);
+        setRunningTask(null); // 清除运行任务状态
 
         // 清除轮询定时器
         if (exportVideoProgressTimer.current) {
@@ -1438,6 +1895,7 @@ const App: React.FC = () => {
         // 导出失败
         setIsExportingVideo(false);
         setExportVideoProgress(null);
+        setRunningTask(null); // 清除运行任务状态
 
         if (exportVideoProgressTimer.current) {
           clearInterval(exportVideoProgressTimer.current);
@@ -1522,6 +1980,7 @@ const App: React.FC = () => {
 
         setVoiceCloningProgress({ message: '语音克隆完成', progress: 100 });
         setIsProcessingVoiceCloning(false);
+        setRunningTask(null); // 清除运行任务状态
 
         // 更新字幕数据，添加目标语言文本和克隆音频路径
         if (status.cloned_results && Array.isArray(status.cloned_results)) {
@@ -1590,6 +2049,7 @@ const App: React.FC = () => {
         setIsProcessingVoiceCloning(false);
         setVoiceCloningProgress(null);
         setVoiceCloningTaskId(null);
+        setRunningTask(null); // 清除运行任务状态
       } else {
         setTimeout(() => pollVoiceCloningStatus(pollTaskId, language), 1000);
       }
@@ -1605,6 +2065,7 @@ const App: React.FC = () => {
       setIsProcessingVoiceCloning(false);
       setVoiceCloningProgress(null);
       setVoiceCloningTaskId(null);
+      setRunningTask(null); // 清除运行任务状态
     }
   };
 
@@ -1882,6 +2343,8 @@ const App: React.FC = () => {
           exportVideoProgress={exportVideoProgress}
           exportedVideoDir={exportedVideoDir}
           onOpenExportFolder={handleOpenExportFolder}
+          runningTask={runningTask}
+          globalRunningTask={globalRunningTask}
         />
       </div>
     </div>

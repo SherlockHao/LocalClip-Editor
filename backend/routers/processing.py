@@ -21,6 +21,7 @@ from database import get_db
 from models.task import Task
 from progress_manager import update_task_progress, mark_task_failed, mark_task_completed
 from path_utils import task_path_manager
+from running_task_tracker import running_task_tracker
 
 router = APIRouter(prefix="/api/tasks", tags=["processing"])
 
@@ -99,6 +100,17 @@ async def process_speaker_diarization(
 
     print(f"[说话人识别] 视频路径: {video_path}", flush=True)
     print(f"[说话人识别] 字幕路径: {subtitle_path}", flush=True)
+
+    # 检查是否有正在运行的任务
+    if running_task_tracker.has_running_task(task_id):
+        running = running_task_tracker.get_running_task(task_id)
+        raise HTTPException(
+            status_code=409,
+            detail=f"任务 {task_id} 已有正在运行的任务: {running.language}/{running.stage}"
+        )
+
+    # 注册运行任务
+    running_task_tracker.start_task(task_id, "default", "speaker_diarization")
 
     # 启动后台任务，并添加异常回调以捕获错误
     task = asyncio.create_task(run_speaker_diarization_task(
@@ -332,6 +344,8 @@ async def run_speaker_diarization_task(
             json.dump(speaker_data, f, ensure_ascii=False, indent=2)
 
         await mark_task_completed(task_id, "default", "speaker_diarization")
+        # 完成时停止追踪
+        running_task_tracker.complete_task(task_id, "default", "speaker_diarization")
         print(f"[说话人识别] ✅ 任务完成: {task_id}", flush=True)
         print(f"[说话人识别] ⏱️  总耗时: {duration_str}", flush=True)
 
@@ -346,6 +360,8 @@ async def run_speaker_diarization_task(
         import traceback
         traceback.print_exc()
         await mark_task_failed(task_id, "default", "speaker_diarization", str(e))
+        # 失败时停止追踪
+        running_task_tracker.fail_task(task_id, str(e))
 
 
 # ==================== 翻译 API ====================
@@ -377,6 +393,14 @@ async def process_translation(
     if not source_subtitle_path.exists():
         raise HTTPException(status_code=400, detail="原始字幕文件不存在")
 
+    # 检查是否有正在运行的任务
+    if running_task_tracker.has_running_task(task_id):
+        running = running_task_tracker.get_running_task(task_id)
+        raise HTTPException(
+            status_code=409,
+            detail=f"任务 {task_id} 已有正在运行的任务: {running.language}/{running.stage}"
+        )
+
     # 添加到目标语言列表
     config = task.config or {}
     target_languages = config.get('target_languages', [])
@@ -385,6 +409,9 @@ async def process_translation(
         config['target_languages'] = target_languages
         task.config = config
         db.commit()
+
+    # 注册运行任务
+    running_task_tracker.start_task(task_id, language, "translation")
 
     # 启动后台任务
     background_tasks.add_task(
@@ -456,6 +483,8 @@ async def run_translation_task(
                 "total_items": result['total_items']
             }
         )
+        # 完成时停止追踪
+        running_task_tracker.complete_task(task_id, target_language, "translation")
         print(f"[翻译] ✅ 任务完成: {task_id} -> {target_language}", flush=True)
         print(f"[翻译] 翻译文件: {result['target_file']}", flush=True)
         print(f"[翻译] 总条数: {result['total_items']}, 耗时: {result['elapsed_time']}秒", flush=True)
@@ -465,6 +494,8 @@ async def run_translation_task(
         import traceback
         traceback.print_exc()
         await mark_task_failed(task_id, target_language, "translation", str(e))
+        # 失败时停止追踪
+        running_task_tracker.fail_task(task_id, str(e))
 
 
 # ==================== 翻译状态查询 API ====================
@@ -558,6 +589,17 @@ async def process_voice_cloning(
     if not speaker_data_path.exists():
         raise HTTPException(status_code=400, detail="请先完成说话人识别")
 
+    # 检查是否有正在运行的任务
+    if running_task_tracker.has_running_task(task_id):
+        running = running_task_tracker.get_running_task(task_id)
+        raise HTTPException(
+            status_code=409,
+            detail=f"任务 {task_id} 已有正在运行的任务: {running.language}/{running.stage}"
+        )
+
+    # 注册运行任务
+    running_task_tracker.start_task(task_id, language, "voice_cloning")
+
     # 启动后台任务
     asyncio.create_task(run_voice_cloning_task(
         task_id=task_id,
@@ -630,6 +672,8 @@ async def run_voice_cloning_task(
                 "successful_items": result.get('successful_segments', 0)
             }
         )
+        # 完成时停止追踪
+        running_task_tracker.complete_task(task_id, language, "voice_cloning")
         print(f"[语音克隆] ✅ 任务完成: {task_id} -> {language}", flush=True)
         print(f"[语音克隆] 输出目录: {result['output_dir']}", flush=True)
         print(f"[语音克隆] 成功生成 {result.get('successful_segments', 0)}/{result.get('total_segments', 0)} 个音频", flush=True)
@@ -639,6 +683,8 @@ async def run_voice_cloning_task(
         import traceback
         traceback.print_exc()
         await mark_task_failed(task_id, language, "voice_cloning", str(e))
+        # 失败时停止追踪
+        running_task_tracker.fail_task(task_id, str(e))
 
 
 @router.get("/{task_id}/languages/{language}/voice-cloning/status")
@@ -1160,6 +1206,17 @@ async def stitch_cloned_audio(
         if not task:
             raise HTTPException(status_code=404, detail="任务不存在")
 
+        # 检查是否有正在运行的任务
+        if running_task_tracker.has_running_task(task_id):
+            running = running_task_tracker.get_running_task(task_id)
+            raise HTTPException(
+                status_code=409,
+                detail=f"任务 {task_id} 已有正在运行的任务: {running.language}/{running.stage}"
+            )
+
+        # 注册运行任务
+        running_task_tracker.start_task(task_id, language, "stitch")
+
         # 获取路径
         cloned_audio_dir = task_path_manager.get_cloned_audio_dir(task_id, language)
         stitched_audio_path = task_path_manager.get_stitched_audio_path(task_id, language)
@@ -1445,6 +1502,8 @@ async def stitch_cloned_audio(
                 "stitch_duration": stitch_duration
             }
         )
+        # 完成时停止追踪
+        running_task_tracker.complete_task(task_id, language, "stitch")
 
         return {
             "success": True,
@@ -1458,11 +1517,15 @@ async def stitch_cloned_audio(
         }
 
     except HTTPException:
+        # 失败时停止追踪
+        running_task_tracker.fail_task(task_id, "HTTPException")
         raise
     except Exception as e:
         print(f"[音频拼接] ❌ 失败: {str(e)}", flush=True)
         import traceback
         traceback.print_exc()
+        # 失败时停止追踪
+        running_task_tracker.fail_task(task_id, str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1796,6 +1859,17 @@ async def export_video(
         print(f"[视频导出] 拼接音频: {stitched_audio_path}", flush=True)
         print(f"[视频导出] 输出视频: {output_video_path}", flush=True)
 
+        # 检查是否有正在运行的任务
+        if running_task_tracker.has_running_task(task_id):
+            running = running_task_tracker.get_running_task(task_id)
+            raise HTTPException(
+                status_code=409,
+                detail=f"任务 {task_id} 已有正在运行的任务: {running.language}/{running.stage}"
+            )
+
+        # 注册运行任务
+        running_task_tracker.start_task(task_id, language, "export")
+
         # 更新状态为处理中
         await update_task_progress(task_id, language, "export", 0, "开始导出视频...")
 
@@ -1879,6 +1953,8 @@ async def export_video_task(
         if process.returncode != 0:
             print(f"[视频导出] FFmpeg 错误: {stderr}", flush=True)
             await mark_task_failed(task_id, language, "export", f"FFmpeg 错误: {stderr[:500]}")
+            # 失败时停止追踪
+            running_task_tracker.fail_task(task_id, f"FFmpeg 错误")
             return
 
         # 验证输出文件
@@ -1886,11 +1962,15 @@ async def export_video_task(
         output_path = Path(output_video_path)
         if not output_path.exists():
             await mark_task_failed(task_id, language, "export", "输出视频文件未生成")
+            # 失败时停止追踪
+            running_task_tracker.fail_task(task_id, "输出视频文件未生成")
             return
 
         file_size = output_path.stat().st_size
         if file_size == 0:
             await mark_task_failed(task_id, language, "export", "输出视频文件为空")
+            # 失败时停止追踪
+            running_task_tracker.fail_task(task_id, "输出视频文件为空")
             return
 
         # 计算耗时
@@ -1908,12 +1988,16 @@ async def export_video_task(
                 "duration": duration
             }
         )
+        # 完成时停止追踪
+        running_task_tracker.complete_task(task_id, language, "export")
 
     except Exception as e:
         print(f"[视频导出] ❌ 任务失败: {str(e)}", flush=True)
         import traceback
         traceback.print_exc()
         await mark_task_failed(task_id, language, "export", str(e))
+        # 失败时停止追踪
+        running_task_tracker.fail_task(task_id, str(e))
 
 
 @router.get("/{task_id}/languages/{language}/export-video/status")
