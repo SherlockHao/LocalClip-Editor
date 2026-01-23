@@ -763,27 +763,25 @@ async def _clone_fish_speech_voices(
     progress_callback: Optional[Callable],
     start_time: float
 ) -> Dict:
-    """Fish-Speech 语音克隆"""
+    """
+    混合语音克隆：CosyVoice3 + Fish-Speech
+
+    - 原音色 (default): 使用 CosyVoice3 直接克隆（支持双 GPU 并行）
+    - 默认音色 (preset): 使用 Fish-Speech 预置 npy
+    """
     print("\n" + "=" * 70, flush=True)
-    print("[Fish-Speech] 使用 Fish-Speech 进行语音克隆...", flush=True)
+    print("[语音克隆] 混合模式: CosyVoice3 (原音色) + Fish-Speech (默认音色)", flush=True)
     print("=" * 70, flush=True)
 
     if progress_callback:
-        await progress_callback(20, "正在初始化 Fish-Speech...")
+        await progress_callback(20, "正在分析音色配置...")
 
-    from fish_simple_cloner import SimpleFishCloner
-    batch_cloner = SimpleFishCloner()
-
-    # 批量编码说话人参考音频
-    if progress_callback:
-        await progress_callback(22, "正在编码说话人参考音频...")
-
-    encode_output_dir = os.path.join(audio_dir, "encoded")
-    os.makedirs(encode_output_dir, exist_ok=True)
-
-    # 分离需要编码的说话人和使用默认音色的说话人
-    speakers_to_encode = {}
-    speaker_npy_files = {}
+    # ========== 第一步：分离说话人到不同引擎 ==========
+    # CosyVoice speakers: 使用原音色的说话人 (selected_voice == "default")
+    # Fish speakers: 使用默认音色的说话人 (有预置 npy)
+    cosyvoice_speakers = {}  # {speaker_id: ref_data}
+    fish_speakers = {}  # {speaker_id: npy_path}
+    fish_ref_texts = {}  # Fish-Speech 需要的 reference_text
 
     print(f"\n📋 处理音色映射:", flush=True)
     for speaker_id, ref_data in speaker_references.items():
@@ -792,55 +790,56 @@ async def _clone_fish_speech_voices(
         print(f"  说话人 {speaker_id}: 选择音色='{selected_voice}'", flush=True)
 
         if selected_voice == "default":
-            speakers_to_encode[speaker_id] = ref_data
-            print(f"    → 使用原音色，需要编码", flush=True)
+            # 原音色 → CosyVoice3
+            cosyvoice_speakers[speaker_id] = ref_data
+            print(f"    → 使用 CosyVoice3 克隆原音色", flush=True)
         else:
+            # 默认音色 → Fish-Speech
             default_voice = next((v for v in DEFAULT_VOICES if v["id"] == selected_voice), None)
             if default_voice:
                 npy_path = str(DEFAULT_VOICES_DIR / default_voice["npy_file"])
-                speaker_npy_files[speaker_id] = npy_path
-                print(f"    → 使用默认音色: {default_voice['name']}", flush=True)
+                fish_speakers[speaker_id] = npy_path
+                fish_ref_texts[speaker_id] = default_voice["reference_text"]
+                # 更新 speaker_references 中的 reference_text（Fish-Speech 需要）
                 speaker_references[speaker_id]["reference_text"] = default_voice["reference_text"]
+                print(f"    → 使用 Fish-Speech 默认音色: {default_voice['name']}", flush=True)
             else:
-                speakers_to_encode[speaker_id] = ref_data
-                print(f"    ⚠️ 未找到音色 {selected_voice}，使用原音色", flush=True)
+                # 未找到预置音色，回退到 CosyVoice3
+                cosyvoice_speakers[speaker_id] = ref_data
+                print(f"    ⚠️ 未找到音色 {selected_voice}，回退到 CosyVoice3", flush=True)
 
     print(f"\n📊 处理结果:", flush=True)
-    print(f"  使用默认音色: {len(speaker_npy_files)} 个说话人", flush=True)
-    print(f"  需要编码: {len(speakers_to_encode)} 个说话人", flush=True)
+    print(f"  CosyVoice3 (原音色): {len(cosyvoice_speakers)} 个说话人", flush=True)
+    print(f"  Fish-Speech (默认音色): {len(fish_speakers)} 个说话人", flush=True)
 
-    if speakers_to_encode:
-        encoded_npy_files = batch_cloner.batch_encode_speakers(
-            speakers_to_encode, encode_output_dir
-        )
-        speaker_npy_files.update(encoded_npy_files)
-
-    if progress_callback:
-        await progress_callback(25, "正在准备克隆任务...")
-
-    # 准备批量生成任务
+    # ========== 第二步：准备任务列表 ==========
     cloned_audio_dir = str(cloned_audio_output_dir)
     os.makedirs(cloned_audio_dir, exist_ok=True)
 
-    tasks = []
+    cosyvoice_tasks = []
+    fish_tasks = []
     cloned_results = []
 
-    # 修复类型不匹配问题：将 speaker_npy_files 的键统一转换为整数
-    # 因为 speaker_labels 中的 speaker_id 是整数，而编码器返回的键可能是字符串
-    speaker_npy_files_int_keys = {}
-    for k, v in speaker_npy_files.items():
-        try:
-            speaker_npy_files_int_keys[int(k)] = v
-        except (ValueError, TypeError):
-            speaker_npy_files_int_keys[k] = v
+    # 转换键为整数
+    cosyvoice_speaker_ids = set(int(k) if isinstance(k, str) else k for k in cosyvoice_speakers.keys())
+    fish_speaker_ids = set(int(k) if isinstance(k, str) else k for k in fish_speakers.keys())
 
-    print(f"[DEBUG] speaker_npy_files keys (已转换为整数): {list(speaker_npy_files_int_keys.keys())}", flush=True)
+    print(f"[DEBUG] cosyvoice_speaker_ids: {cosyvoice_speaker_ids}", flush=True)
+    print(f"[DEBUG] fish_speaker_ids: {fish_speaker_ids}", flush=True)
     print(f"[DEBUG] speaker_labels sample: {speaker_labels[:5] if speaker_labels else []}", flush=True)
 
     for idx, (speaker_id, target_sub) in enumerate(zip(speaker_labels, target_subtitles)):
         target_text = target_sub["text"]
+        task_data = {
+            "speaker_id": speaker_id,
+            "target_text": target_text,
+            "segment_index": idx,
+            "start_time": target_sub.get("start_time", 0),
+            "end_time": target_sub.get("end_time", 0)
+        }
 
-        if speaker_id is None or speaker_id not in speaker_npy_files_int_keys:
+        if speaker_id is None:
+            # 无效的说话人
             cloned_results.append({
                 "index": idx,
                 "speaker_id": speaker_id,
@@ -849,42 +848,130 @@ async def _clone_fish_speech_voices(
                 "start_time": target_sub.get("start_time", 0),
                 "end_time": target_sub.get("end_time", 0)
             })
+        elif speaker_id in cosyvoice_speaker_ids:
+            cosyvoice_tasks.append(task_data)
+        elif speaker_id in fish_speaker_ids:
+            fish_tasks.append(task_data)
         else:
-            tasks.append({
+            # 未知说话人
+            cloned_results.append({
+                "index": idx,
                 "speaker_id": speaker_id,
                 "target_text": target_text,
-                "segment_index": idx,
+                "cloned_audio_path": None,
+                "error": "未知说话人",
                 "start_time": target_sub.get("start_time", 0),
                 "end_time": target_sub.get("end_time", 0)
             })
 
-    print(f"\n🚀 批量生成 {len(tasks)} 个语音片段...", flush=True)
+    total_tasks = len(cosyvoice_tasks) + len(fish_tasks)
+    print(f"\n📊 任务分配:", flush=True)
+    print(f"  CosyVoice3 任务: {len(cosyvoice_tasks)} 个片段", flush=True)
+    print(f"  Fish-Speech 任务: {len(fish_tasks)} 个片段", flush=True)
+    print(f"  总计: {total_tasks} 个片段", flush=True)
 
-    # 进度回调
-    def voice_cloning_progress_callback(current, total):
+    generated_audio_files = {}
+    cosyvoice_completed = 0
+    fish_completed = 0
+
+    # ========== 第三步：CosyVoice3 生成（支持双 GPU 并行）==========
+    if cosyvoice_tasks:
+        print(f"\n🔊 [CosyVoice3] 开始生成 {len(cosyvoice_tasks)} 个原音色片段...", flush=True)
+
         if progress_callback:
-            progress = 25 + int((current / total) * 70)  # 25-95%
-            asyncio.create_task(progress_callback(progress, f"正在生成语音... ({current}/{total})"))
+            await progress_callback(25, f"正在初始化 CosyVoice3（双 GPU 模式）...")
 
-    # 生成脚本目录
-    script_dir = os.path.join(audio_dir, "scripts")
+        from cosyvoice_cloner import get_cosyvoice_cloner
+        # 使用双 GPU：GPU 0 和 GPU 1
+        cosyvoice_cloner = get_cosyvoice_cloner(use_gpu=True, gpu_ids=[0, 1])
 
-    # 在线程池中运行语音生成
-    def run_batch_generation():
-        return batch_cloner.batch_generate_audio(
-            tasks,
-            speaker_npy_files_int_keys,  # 使用转换后的整数键字典
-            speaker_references,
-            cloned_audio_dir,
-            script_dir=script_dir,
-            progress_callback=voice_cloning_progress_callback
-        )
+        # 进度回调
+        def cosyvoice_progress_callback(current, total):
+            if progress_callback:
+                # CosyVoice 占用 25-60% 的进度
+                base_progress = 25
+                cosyvoice_ratio = len(cosyvoice_tasks) / total_tasks if total_tasks > 0 else 0.5
+                max_progress = 25 + int(70 * cosyvoice_ratio)
+                progress = base_progress + int((current / total) * (max_progress - base_progress))
+                asyncio.create_task(progress_callback(progress, f"[CosyVoice] 生成中... ({current}/{total})"))
 
-    loop = asyncio.get_event_loop()
-    generated_audio_files = await loop.run_in_executor(None, run_batch_generation)
+        # 转换 speaker_references 键为整数
+        cosyvoice_speaker_refs = {}
+        for k, v in speaker_references.items():
+            try:
+                cosyvoice_speaker_refs[int(k)] = v
+            except (ValueError, TypeError):
+                cosyvoice_speaker_refs[k] = v
 
-    # 更新结果
-    for task in tasks:
+        # 在线程池中运行 CosyVoice 生成（双 GPU 并行）
+        def run_cosyvoice_generation():
+            return cosyvoice_cloner.batch_generate_audio(
+                cosyvoice_tasks,
+                cosyvoice_speaker_refs,
+                cloned_audio_dir,
+                target_language=language,
+                progress_callback=cosyvoice_progress_callback
+            )
+
+        loop = asyncio.get_event_loop()
+        cosyvoice_generated = await loop.run_in_executor(None, run_cosyvoice_generation)
+        generated_audio_files.update(cosyvoice_generated)
+        cosyvoice_completed = len(cosyvoice_generated)
+
+        print(f"✅ [CosyVoice3] 完成 {cosyvoice_completed}/{len(cosyvoice_tasks)} 个片段", flush=True)
+
+    # ========== 第四步：Fish-Speech 生成 ==========
+    if fish_tasks:
+        print(f"\n🐟 [Fish-Speech] 开始生成 {len(fish_tasks)} 个默认音色片段...", flush=True)
+
+        if progress_callback:
+            cosyvoice_ratio = len(cosyvoice_tasks) / total_tasks if total_tasks > 0 else 0
+            fish_start_progress = 25 + int(70 * cosyvoice_ratio)
+            await progress_callback(fish_start_progress, f"正在初始化 Fish-Speech...")
+
+        from fish_simple_cloner import SimpleFishCloner
+        fish_cloner = SimpleFishCloner()
+
+        # 转换 fish_speakers 键为整数
+        fish_npy_files_int = {}
+        for k, v in fish_speakers.items():
+            try:
+                fish_npy_files_int[int(k)] = v
+            except (ValueError, TypeError):
+                fish_npy_files_int[k] = v
+
+        # 进度回调
+        def fish_progress_callback(current, total):
+            if progress_callback:
+                cosyvoice_ratio = len(cosyvoice_tasks) / total_tasks if total_tasks > 0 else 0
+                base_progress = 25 + int(70 * cosyvoice_ratio)
+                max_progress = 95
+                progress = base_progress + int((current / total) * (max_progress - base_progress))
+                asyncio.create_task(progress_callback(progress, f"[Fish] 生成中... ({current}/{total})"))
+
+        # 在线程池中运行 Fish-Speech 生成
+        script_dir = os.path.join(audio_dir, "scripts")
+
+        def run_fish_generation():
+            return fish_cloner.batch_generate_audio(
+                fish_tasks,
+                fish_npy_files_int,
+                speaker_references,
+                cloned_audio_dir,
+                script_dir=script_dir,
+                progress_callback=fish_progress_callback
+            )
+
+        loop = asyncio.get_event_loop()
+        fish_generated = await loop.run_in_executor(None, run_fish_generation)
+        generated_audio_files.update(fish_generated)
+        fish_completed = len(fish_generated)
+
+        print(f"✅ [Fish-Speech] 完成 {fish_completed}/{len(fish_tasks)} 个片段", flush=True)
+
+    # ========== 第五步：整合结果 ==========
+    all_tasks = cosyvoice_tasks + fish_tasks
+    for task in all_tasks:
         segment_index = task["segment_index"]
         if segment_index in generated_audio_files:
             audio_filename = f"segment_{segment_index}.wav"
@@ -921,13 +1008,17 @@ async def _clone_fish_speech_voices(
         await progress_callback(100, f"语音克隆完成 (耗时: {duration_str})")
 
     print(f"\n✅ 语音克隆任务 {task_id} 成功完成！", flush=True)
+    print(f"  CosyVoice3: {cosyvoice_completed}/{len(cosyvoice_tasks)} 个片段", flush=True)
+    print(f"  Fish-Speech: {fish_completed}/{len(fish_tasks)} 个片段", flush=True)
     print(f"⏱️ 总耗时: {duration_str}", flush=True)
 
     return {
         "status": "completed",
         "output_dir": cloned_audio_dir,
-        "total_segments": len(tasks),
+        "total_segments": total_tasks,
         "successful_segments": len(generated_audio_files),
+        "cosyvoice_segments": cosyvoice_completed,
+        "fish_segments": fish_completed,
         "cloned_results": cloned_results,
         "total_duration": total_duration,
         "duration_str": duration_str
