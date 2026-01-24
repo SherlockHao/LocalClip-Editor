@@ -43,6 +43,7 @@ interface SubtitleDetailsProps {
   isProcessingVoiceCloning?: boolean;
   isStitchingAudio?: boolean;
   targetLanguage?: string;
+  hasRunningTask?: boolean;
 }
 
 const getUniqueSpeakers = (subtitles: Subtitle[]): number[] => {
@@ -74,7 +75,8 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
   isRegeneratingVoices = false,
   isProcessingVoiceCloning = false,
   isStitchingAudio = false,
-  targetLanguage = ''
+  targetLanguage = '',
+  hasRunningTask = false
 }) => {
   const activeSubtitleRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -464,13 +466,16 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
                 return (
                   <div key={speaker.id} className="flex-shrink-0 flex items-center space-x-1">
                     <button
-                      onClick={() => toggleSpeakerFilter(speaker.id)}
-                      className={`px-3 py-1.5 rounded-lg border-2 text-xs font-semibold transition-all cursor-pointer ${
-                        isFiltered
-                          ? `${colors.badge} ${colors.border} ring-2 ring-blue-400 shadow-lg`
+                      onClick={() => !hasRunningTask && toggleSpeakerFilter(speaker.id)}
+                      disabled={hasRunningTask}
+                      className={`px-3 py-1.5 rounded-lg border-2 text-xs font-semibold transition-all ${
+                        hasRunningTask
+                          ? 'bg-slate-700/30 border-slate-600/30 text-slate-500 opacity-40 cursor-not-allowed'
+                          : isFiltered
+                          ? `${colors.badge} ${colors.border} ring-2 ring-blue-400 shadow-lg cursor-pointer`
                           : isDimmed
-                          ? 'bg-slate-700/30 border-slate-600/30 text-slate-500 opacity-40'
-                          : `${colors.badge} ${colors.border} hover:ring-2 hover:ring-blue-400/50`
+                          ? 'bg-slate-700/30 border-slate-600/30 text-slate-500 opacity-40 cursor-pointer'
+                          : `${colors.badge} ${colors.border} hover:ring-2 hover:ring-blue-400/50 cursor-pointer`
                       }`}
                     >
                       {speaker.name}
@@ -478,6 +483,7 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
                     <button
                       ref={(el) => { voiceButtonRefs.current[speaker.id] = el; }}
                       onClick={(e) => {
+                        if (hasRunningTask) return;
                         e.stopPropagation();
                         if (openVoiceMenuSpeakerId === speaker.id) {
                           setOpenVoiceMenuSpeakerId(null);
@@ -491,19 +497,42 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
                           setOpenVoiceMenuSpeakerId(speaker.id);
                         }
                       }}
-                      className="w-5 h-5 rounded bg-slate-700/50 hover:bg-slate-600 flex items-center justify-center text-slate-400 hover:text-slate-200 transition-all"
-                      title="选择音色"
+                      disabled={hasRunningTask}
+                      className={`w-5 h-5 rounded flex items-center justify-center transition-all ${
+                        hasRunningTask
+                          ? 'bg-slate-700/30 text-slate-600 cursor-not-allowed'
+                          : 'bg-slate-700/50 hover:bg-slate-600 text-slate-400 hover:text-slate-200'
+                      }`}
+                      title={hasRunningTask ? '任务运行中，请稍候' : '选择音色'}
                     >
                       <ChevronDown size={12} />
                     </button>
                   </div>
                 );
               })}
-              <button onClick={() => onAddSpeaker?.('male')} className="flex-shrink-0 w-7 h-7 rounded-lg border-2 border-dashed border-blue-600/50 bg-blue-700/20 hover:bg-blue-700/40 text-blue-400 flex items-center justify-center" title="添加男声">
+              <button
+                onClick={() => !hasRunningTask && onAddSpeaker?.('male')}
+                disabled={hasRunningTask}
+                className={`flex-shrink-0 w-7 h-7 rounded-lg border-2 border-dashed flex items-center justify-center ${
+                  hasRunningTask
+                    ? 'border-slate-600/30 bg-slate-700/20 text-slate-600 cursor-not-allowed'
+                    : 'border-blue-600/50 bg-blue-700/20 hover:bg-blue-700/40 text-blue-400'
+                }`}
+                title={hasRunningTask ? '任务运行中，请稍候' : '添加男声'}
+              >
                 <Plus size={14} />
               </button>
               {maleSpeakers.length > 0 && (
-                <button onClick={() => handleRemoveSpeaker('male')} className="flex-shrink-0 w-7 h-7 rounded-lg border-2 border-dashed border-red-600/50 bg-red-700/20 hover:bg-red-700/40 text-red-400 flex items-center justify-center" title="删除最后一个男声">
+                <button
+                  onClick={() => !hasRunningTask && handleRemoveSpeaker('male')}
+                  disabled={hasRunningTask}
+                  className={`flex-shrink-0 w-7 h-7 rounded-lg border-2 border-dashed flex items-center justify-center ${
+                    hasRunningTask
+                      ? 'border-slate-600/30 bg-slate-700/20 text-slate-600 cursor-not-allowed'
+                      : 'border-red-600/50 bg-red-700/20 hover:bg-red-700/40 text-red-400'
+                  }`}
+                  title={hasRunningTask ? '任务运行中，请稍候' : '删除最后一个男声'}
+                >
                   <Minus size={14} />
                 </button>
               )}
@@ -519,13 +548,16 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
                 return (
                   <div key={speaker.id} className="flex-shrink-0 flex items-center space-x-1">
                     <button
-                      onClick={() => toggleSpeakerFilter(speaker.id)}
-                      className={`px-3 py-1.5 rounded-lg border-2 text-xs font-semibold transition-all cursor-pointer ${
-                        isFiltered
-                          ? `${colors.badge} ${colors.border} ring-2 ring-pink-400 shadow-lg`
+                      onClick={() => !hasRunningTask && toggleSpeakerFilter(speaker.id)}
+                      disabled={hasRunningTask}
+                      className={`px-3 py-1.5 rounded-lg border-2 text-xs font-semibold transition-all ${
+                        hasRunningTask
+                          ? 'bg-slate-700/30 border-slate-600/30 text-slate-500 opacity-40 cursor-not-allowed'
+                          : isFiltered
+                          ? `${colors.badge} ${colors.border} ring-2 ring-pink-400 shadow-lg cursor-pointer`
                           : isDimmed
-                          ? 'bg-slate-700/30 border-slate-600/30 text-slate-500 opacity-40'
-                          : `${colors.badge} ${colors.border} hover:ring-2 hover:ring-pink-400/50`
+                          ? 'bg-slate-700/30 border-slate-600/30 text-slate-500 opacity-40 cursor-pointer'
+                          : `${colors.badge} ${colors.border} hover:ring-2 hover:ring-pink-400/50 cursor-pointer`
                       }`}
                     >
                       {speaker.name}
@@ -533,6 +565,7 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
                     <button
                       ref={(el) => { voiceButtonRefs.current[speaker.id] = el; }}
                       onClick={(e) => {
+                        if (hasRunningTask) return;
                         e.stopPropagation();
                         if (openVoiceMenuSpeakerId === speaker.id) {
                           setOpenVoiceMenuSpeakerId(null);
@@ -546,19 +579,42 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
                           setOpenVoiceMenuSpeakerId(speaker.id);
                         }
                       }}
-                      className="w-5 h-5 rounded bg-slate-700/50 hover:bg-slate-600 flex items-center justify-center text-slate-400 hover:text-slate-200 transition-all"
-                      title="选择音色"
+                      disabled={hasRunningTask}
+                      className={`w-5 h-5 rounded flex items-center justify-center transition-all ${
+                        hasRunningTask
+                          ? 'bg-slate-700/30 text-slate-600 cursor-not-allowed'
+                          : 'bg-slate-700/50 hover:bg-slate-600 text-slate-400 hover:text-slate-200'
+                      }`}
+                      title={hasRunningTask ? '任务运行中，请稍候' : '选择音色'}
                     >
                       <ChevronDown size={12} />
                     </button>
                   </div>
                 );
               })}
-              <button onClick={() => onAddSpeaker?.('female')} className="flex-shrink-0 w-7 h-7 rounded-lg border-2 border-dashed border-pink-600/50 bg-pink-700/20 hover:bg-pink-700/40 text-pink-400 flex items-center justify-center" title="添加女声">
+              <button
+                onClick={() => !hasRunningTask && onAddSpeaker?.('female')}
+                disabled={hasRunningTask}
+                className={`flex-shrink-0 w-7 h-7 rounded-lg border-2 border-dashed flex items-center justify-center ${
+                  hasRunningTask
+                    ? 'border-slate-600/30 bg-slate-700/20 text-slate-600 cursor-not-allowed'
+                    : 'border-pink-600/50 bg-pink-700/20 hover:bg-pink-700/40 text-pink-400'
+                }`}
+                title={hasRunningTask ? '任务运行中，请稍候' : '添加女声'}
+              >
                 <Plus size={14} />
               </button>
               {femaleSpeakers.length > 0 && (
-                <button onClick={() => handleRemoveSpeaker('female')} className="flex-shrink-0 w-7 h-7 rounded-lg border-2 border-dashed border-red-600/50 bg-red-700/20 hover:bg-red-700/40 text-red-400 flex items-center justify-center" title="删除最后一个女声">
+                <button
+                  onClick={() => !hasRunningTask && handleRemoveSpeaker('female')}
+                  disabled={hasRunningTask}
+                  className={`flex-shrink-0 w-7 h-7 rounded-lg border-2 border-dashed flex items-center justify-center ${
+                    hasRunningTask
+                      ? 'border-slate-600/30 bg-slate-700/20 text-slate-600 cursor-not-allowed'
+                      : 'border-red-600/50 bg-red-700/20 hover:bg-red-700/40 text-red-400'
+                  }`}
+                  title={hasRunningTask ? '任务运行中，请稍候' : '删除最后一个女声'}
+                >
                   <Minus size={14} />
                 </button>
               )}
@@ -570,9 +626,9 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
             <div className="mt-3 pt-3 border-t border-slate-700">
               <button
                 onClick={onRegenerateVoices}
-                disabled={!hasVoiceMappingChanged || isRegeneratingVoices || isProcessingVoiceCloning || isStitchingAudio}
+                disabled={!hasVoiceMappingChanged || isRegeneratingVoices || isProcessingVoiceCloning || isStitchingAudio || hasRunningTask}
                 className={`w-full flex items-center justify-center space-x-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                  hasVoiceMappingChanged && !isRegeneratingVoices && !isProcessingVoiceCloning && !isStitchingAudio
+                  hasVoiceMappingChanged && !isRegeneratingVoices && !isProcessingVoiceCloning && !isStitchingAudio && !hasRunningTask
                     ? 'bg-gradient-to-r from-purple-600 to-purple-500 hover:from-purple-500 hover:to-purple-400 text-white shadow-lg hover:shadow-purple-500/50'
                     : 'bg-slate-700/50 text-slate-500 cursor-not-allowed'
                 }`}
@@ -617,9 +673,14 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
             >
               {/* 右上角删除按钮 */}
               <button
-                onClick={(e) => { e.stopPropagation(); handleDeleteSubtitle(index); }}
-                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs bg-red-600/30 border border-red-500/40 text-red-300 px-1.5 py-1 rounded hover:bg-red-600/50"
-                title="删除"
+                onClick={(e) => { e.stopPropagation(); !hasRunningTask && handleDeleteSubtitle(index); }}
+                disabled={hasRunningTask}
+                className={`absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-xs px-1.5 py-1 rounded ${
+                  hasRunningTask
+                    ? 'bg-slate-600/30 border border-slate-500/40 text-slate-500 cursor-not-allowed'
+                    : 'bg-red-600/30 border border-red-500/40 text-red-300 hover:bg-red-600/50'
+                }`}
+                title={hasRunningTask ? '任务运行中，请稍候' : '删除'}
               >
                 <Trash2 size={11} />
               </button>
@@ -639,16 +700,25 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
                   <textarea
                     value={editingSourceText}
                     onChange={(e) => setEditingSourceText(e.target.value)}
-                    className="w-full text-xs leading-relaxed bg-slate-700/50 text-slate-100 border border-blue-500/50 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500/50 resize-none"
+                    disabled={hasRunningTask}
+                    className={`w-full text-xs leading-relaxed rounded px-2 py-1.5 focus:outline-none resize-none ${
+                      hasRunningTask
+                        ? 'bg-slate-700/30 text-slate-500 border border-slate-600 cursor-not-allowed'
+                        : 'bg-slate-700/50 text-slate-100 border border-blue-500/50 focus:ring-2 focus:ring-blue-500/50'
+                    }`}
                     rows={2}
                     autoFocus
                   />
                 </div>
               ) : (
                 <p
-                  className={`text-xs leading-relaxed mb-1 cursor-text hover:bg-slate-700/30 rounded px-1 py-0.5 -mx-1 ${isPlaying ? 'text-slate-100 font-semibold' : 'text-slate-300'}`}
-                  onClick={(e) => { e.stopPropagation(); handleStartEdit(index, 'text'); }}
-                  title="点击编辑原文"
+                  className={`text-xs leading-relaxed mb-1 rounded px-1 py-0.5 -mx-1 ${
+                    hasRunningTask
+                      ? 'cursor-not-allowed'
+                      : 'cursor-text hover:bg-slate-700/30'
+                  } ${isPlaying ? 'text-slate-100 font-semibold' : 'text-slate-300'}`}
+                  onClick={(e) => { e.stopPropagation(); !hasRunningTask && handleStartEdit(index, 'text'); }}
+                  title={hasRunningTask ? '任务运行中，请稍候' : '点击编辑原文'}
                 >
                   {subtitle.text}
                 </p>
@@ -660,16 +730,25 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
                   <textarea
                     value={editingTargetText}
                     onChange={(e) => setEditingTargetText(e.target.value)}
-                    className="w-full text-xs leading-relaxed bg-slate-700/50 text-cyan-100 border border-cyan-500/50 rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-cyan-500/50 resize-none"
+                    disabled={hasRunningTask}
+                    className={`w-full text-xs leading-relaxed rounded px-2 py-1.5 focus:outline-none resize-none ${
+                      hasRunningTask
+                        ? 'bg-slate-700/30 text-slate-500 border border-slate-600 cursor-not-allowed'
+                        : 'bg-slate-700/50 text-cyan-100 border border-cyan-500/50 focus:ring-2 focus:ring-cyan-500/50'
+                    }`}
                     rows={2}
                     autoFocus
                   />
                 </div>
               ) : subtitle.target_text && (
                 <p
-                  className="text-xs leading-relaxed mb-2 text-cyan-300 italic border-l-2 border-cyan-500/50 pl-2 bg-cyan-900/10 py-1 cursor-text hover:bg-cyan-900/20"
-                  onClick={(e) => { e.stopPropagation(); handleStartEdit(index, 'target_text'); }}
-                  title="点击编辑译文"
+                  className={`text-xs leading-relaxed mb-2 text-cyan-300 italic border-l-2 border-cyan-500/50 pl-2 bg-cyan-900/10 py-1 ${
+                    hasRunningTask
+                      ? 'cursor-not-allowed'
+                      : 'cursor-text hover:bg-cyan-900/20'
+                  }`}
+                  onClick={(e) => { e.stopPropagation(); !hasRunningTask && handleStartEdit(index, 'target_text'); }}
+                  title={hasRunningTask ? '任务运行中，请稍候' : '点击编辑译文'}
                 >
                   {subtitle.target_text}
                 </p>
@@ -678,10 +757,26 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
               {/* 保存/取消编辑按钮 */}
               {editingIndex === index && (
                 <div className="flex gap-1.5 mb-2" onClick={(e) => e.stopPropagation()}>
-                  <button onClick={() => handleSaveEdit(index)} className="flex-1 flex items-center justify-center gap-1 text-xs font-semibold bg-green-600/30 border border-green-500/40 text-green-300 px-2 py-1.5 rounded hover:bg-green-600/50 transition-colors">
+                  <button
+                    onClick={() => !hasRunningTask && handleSaveEdit(index)}
+                    disabled={hasRunningTask}
+                    className={`flex-1 flex items-center justify-center gap-1 text-xs font-semibold px-2 py-1.5 rounded transition-colors ${
+                      hasRunningTask
+                        ? 'bg-slate-600/30 border border-slate-500/40 text-slate-500 cursor-not-allowed'
+                        : 'bg-green-600/30 border border-green-500/40 text-green-300 hover:bg-green-600/50'
+                    }`}
+                  >
                     <Save size={12} />保存
                   </button>
-                  <button onClick={handleCancelEdit} className="flex-1 flex items-center justify-center gap-1 text-xs font-semibold bg-gray-600/30 border border-gray-500/40 text-gray-300 px-2 py-1.5 rounded hover:bg-gray-600/50 transition-colors">
+                  <button
+                    onClick={() => !hasRunningTask && handleCancelEdit()}
+                    disabled={hasRunningTask}
+                    className={`flex-1 flex items-center justify-center gap-1 text-xs font-semibold px-2 py-1.5 rounded transition-colors ${
+                      hasRunningTask
+                        ? 'bg-slate-600/30 border border-slate-500/40 text-slate-500 cursor-not-allowed'
+                        : 'bg-gray-600/30 border border-gray-500/40 text-gray-300 hover:bg-gray-600/50'
+                    }`}
+                  >
                     <X size={12} />取消
                   </button>
                 </div>
@@ -693,8 +788,16 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
                   {/* 说话人下拉菜单 */}
                   <select
                     value={subtitle.speaker_id ?? ''}
-                    onChange={(e) => handleSpeakerChange(index, e.target.value ? Number(e.target.value) : undefined)}
-                    className={`text-xs font-semibold px-2 py-1 rounded border-2 ${subtitle.speaker_id !== undefined ? `${colors.badge} border-transparent` : 'bg-slate-700/50 text-slate-400 border-slate-600'} hover:border-blue-400/50 focus:outline-none cursor-pointer`}
+                    onChange={(e) => !hasRunningTask && handleSpeakerChange(index, e.target.value ? Number(e.target.value) : undefined)}
+                    disabled={hasRunningTask}
+                    className={`text-xs font-semibold px-2 py-1 rounded border-2 focus:outline-none ${
+                      hasRunningTask
+                        ? 'bg-slate-700/30 text-slate-500 border-slate-600 cursor-not-allowed'
+                        : subtitle.speaker_id !== undefined
+                        ? `${colors.badge} border-transparent hover:border-blue-400/50 cursor-pointer`
+                        : 'bg-slate-700/50 text-slate-400 border-slate-600 hover:border-blue-400/50 cursor-pointer'
+                    }`}
+                    title={hasRunningTask ? '任务运行中，请稍候' : ''}
                   >
                     <option value="">选择说话人</option>
                     {sortedSpeakers.map(speakerId => (
@@ -709,28 +812,28 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
 
                   {/* 播放按钮 */}
                   <button
-                    onClick={(e) => { e.stopPropagation(); handlePlayClonedAudio(subtitle.cloned_audio_path!); }}
-                    disabled={regeneratingIndex === index || isRegeneratingVoices}
+                    onClick={(e) => { e.stopPropagation(); !hasRunningTask && handlePlayClonedAudio(subtitle.cloned_audio_path!); }}
+                    disabled={regeneratingIndex === index || isRegeneratingVoices || hasRunningTask}
                     className={`flex items-center justify-center text-xs px-2 py-1 rounded transition-colors ${
-                      regeneratingIndex === index || isRegeneratingVoices
+                      regeneratingIndex === index || isRegeneratingVoices || hasRunningTask
                         ? 'bg-emerald-600/20 border border-emerald-500/20 text-emerald-400/50 cursor-not-allowed'
                         : 'bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-600/50'
                     }`}
-                    title={isRegeneratingVoices ? "正在重新生成音色..." : "播放克隆音频"}
+                    title={hasRunningTask ? '任务运行中，请稍候' : isRegeneratingVoices ? "正在重新生成音色..." : "播放克隆音频"}
                   >
                     {regeneratingIndex === index ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}
                   </button>
 
                   {/* 重新生成按钮 */}
                   <button
-                    onClick={(e) => { e.stopPropagation(); handleRegenerateSegment(index); }}
-                    disabled={regeneratingIndex === index || isRegeneratingVoices}
+                    onClick={(e) => { e.stopPropagation(); !hasRunningTask && handleRegenerateSegment(index); }}
+                    disabled={regeneratingIndex === index || isRegeneratingVoices || hasRunningTask}
                     className={`flex items-center justify-center text-xs px-2 py-1 rounded transition-colors ${
-                      regeneratingIndex === index || isRegeneratingVoices
+                      regeneratingIndex === index || isRegeneratingVoices || hasRunningTask
                         ? 'bg-orange-600/20 border border-orange-500/20 text-orange-400/50 cursor-not-allowed'
                         : 'bg-orange-600/30 border border-orange-500/40 text-orange-300 hover:bg-orange-600/50'
                     }`}
-                    title={isRegeneratingVoices ? "正在重新生成音色..." : "重新生成"}
+                    title={hasRunningTask ? '任务运行中，请稍候' : isRegeneratingVoices ? "正在重新生成音色..." : "重新生成"}
                   >
                     {regeneratingIndex === index ? <Loader2 size={11} className="animate-spin" /> : <RotateCw size={11} />}
                   </button>
@@ -773,13 +876,20 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
                   {!isIndonesian && (
                     <button
                       onClick={() => {
+                        if (hasRunningTask) return;
                         handleVoiceSelect(openVoiceMenuSpeakerId, 'default');
                         setOpenVoiceMenuSpeakerId(null);
                         setVoiceMenuPosition(null);
                       }}
-                      className={`w-full px-3 py-2 text-xs text-left hover:bg-slate-700 transition-colors ${
-                        selectedVoice === 'default' ? 'bg-slate-700 text-blue-400' : 'text-slate-300'
+                      disabled={hasRunningTask}
+                      className={`w-full px-3 py-2 text-xs text-left transition-colors ${
+                        hasRunningTask
+                          ? 'text-slate-600 cursor-not-allowed'
+                          : selectedVoice === 'default'
+                          ? 'bg-slate-700 text-blue-400 hover:bg-slate-700'
+                          : 'text-slate-300 hover:bg-slate-700'
                       }`}
+                      title={hasRunningTask ? '任务运行中，请稍候' : ''}
                     >
                       原音色
                     </button>
@@ -798,27 +908,38 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
                     .map(voice => (
                     <div
                       key={voice.id}
-                      className={`w-full px-3 py-2 text-xs hover:bg-slate-700 transition-colors flex items-center justify-between ${
-                        selectedVoice === voice.id ? 'bg-slate-700 text-blue-400' : 'text-slate-300'
+                      className={`w-full px-3 py-2 text-xs transition-colors flex items-center justify-between ${
+                        hasRunningTask
+                          ? 'text-slate-600 cursor-not-allowed'
+                          : selectedVoice === voice.id
+                          ? 'bg-slate-700 text-blue-400 hover:bg-slate-700'
+                          : 'text-slate-300 hover:bg-slate-700'
                       }`}
                     >
                       <span
                         onClick={() => {
+                          if (hasRunningTask) return;
                           handleVoiceSelect(openVoiceMenuSpeakerId, voice.id);
                           setOpenVoiceMenuSpeakerId(null);
                           setVoiceMenuPosition(null);
                         }}
-                        className="flex-1 cursor-pointer"
+                        className={hasRunningTask ? 'flex-1 cursor-not-allowed' : 'flex-1 cursor-pointer'}
+                        title={hasRunningTask ? '任务运行中，请稍候' : ''}
                       >
                         {voice.name}
                       </span>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          handlePlayDefaultVoice(voice.audio_url);
+                          !hasRunningTask && handlePlayDefaultVoice(voice.audio_url);
                         }}
-                        className="ml-2 w-4 h-4 flex items-center justify-center hover:text-blue-400 flex-shrink-0"
-                        title="试听"
+                        disabled={hasRunningTask}
+                        className={`ml-2 w-4 h-4 flex items-center justify-center flex-shrink-0 ${
+                          hasRunningTask
+                            ? 'text-slate-600 cursor-not-allowed'
+                            : 'hover:text-blue-400'
+                        }`}
+                        title={hasRunningTask ? '任务运行中，请稍候' : '试听'}
                       >
                         <Volume2 size={12} />
                       </button>

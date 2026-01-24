@@ -7,6 +7,7 @@
 2. 按顺序执行任务：说话人识别 -> 各语言(翻译->语音克隆->拼接->导出)
 3. 跳过已完成的任务
 4. 支持任务取消和状态回滚
+5. 支持动态添加任务到队列（批量处理运行中也可添加新任务）
 """
 
 import asyncio
@@ -27,6 +28,21 @@ class BatchProcessorState(Enum):
 
 
 @dataclass
+class QueuedTask:
+    """队列中的任务"""
+    task_id: str
+    languages: List[str]
+    added_at: datetime = field(default_factory=datetime.utcnow)
+
+    def to_dict(self) -> Dict:
+        return {
+            "task_id": self.task_id,
+            "languages": self.languages,
+            "added_at": self.added_at.isoformat()
+        }
+
+
+@dataclass
 class BatchProgress:
     """批量处理进度"""
     state: BatchProcessorState = BatchProcessorState.IDLE
@@ -40,6 +56,7 @@ class BatchProgress:
     message: str = ""
     started_at: Optional[datetime] = None
     error: Optional[str] = None
+    queued_tasks: List[QueuedTask] = field(default_factory=list)  # 等待队列中的任务
 
 
 class BatchProcessor:
@@ -75,6 +92,9 @@ class BatchProcessor:
         self._cancel_requested = False
         self._processing_lock = None  # 延迟初始化，避免在非异步上下文中创建
         self._current_task = None  # 当前正在执行的 asyncio Task
+        self._task_queue: List[QueuedTask] = []  # 动态任务队列
+        self._queue_lock = threading.Lock()  # 队列操作锁
+        self._callbacks: Optional[Dict[str, Callable]] = None  # 保存回调函数供队列任务使用
 
     @property
     def progress(self) -> BatchProgress:
@@ -91,6 +111,92 @@ class BatchProcessor:
         """是否请求了取消"""
         return self._cancel_requested
 
+    @property
+    def queued_task_count(self) -> int:
+        """获取队列中等待的任务数量"""
+        with self._queue_lock:
+            return len(self._task_queue)
+
+    def get_queued_tasks(self) -> List[Dict]:
+        """获取队列中等待的任务列表"""
+        with self._queue_lock:
+            return [task.to_dict() for task in self._task_queue]
+
+    def add_task_to_queue(self, task_id: str, languages: List[str] = None) -> bool:
+        """
+        添加任务到批量处理队列
+
+        如果批量处理正在运行，任务会在当前任务完成后执行
+        如果批量处理未运行，返回 False（需要先启动批量处理）
+
+        Args:
+            task_id: 任务ID
+            languages: 要处理的语言列表，None 表示使用默认语言列表
+
+        Returns:
+            是否成功添加到队列
+        """
+        if not self.is_running:
+            print(f"[BatchProcessor] ⚠️ 批量处理未运行，无法添加任务到队列: {task_id}", flush=True)
+            return False
+
+        with self._queue_lock:
+            # 检查任务是否已在队列中
+            for queued_task in self._task_queue:
+                if queued_task.task_id == task_id:
+                    print(f"[BatchProcessor] ⚠️ 任务已在队列中: {task_id}", flush=True)
+                    return False
+
+            # 检查是否是当前正在处理的任务
+            if self._progress.current_task_id == task_id:
+                print(f"[BatchProcessor] ⚠️ 任务正在处理中: {task_id}", flush=True)
+                return False
+
+            # 添加到队列
+            queued_task = QueuedTask(
+                task_id=task_id,
+                languages=languages or self.SUPPORTED_LANGUAGES
+            )
+            self._task_queue.append(queued_task)
+
+            # 更新进度信息
+            self._progress.total_tasks += 1
+            self._progress.queued_tasks = list(self._task_queue)
+
+            print(f"[BatchProcessor] ✅ 任务已添加到队列: {task_id}, 队列长度: {len(self._task_queue)}", flush=True)
+            return True
+
+    def remove_task_from_queue(self, task_id: str) -> bool:
+        """
+        从队列中移除任务
+
+        Args:
+            task_id: 任务ID
+
+        Returns:
+            是否成功移除
+        """
+        with self._queue_lock:
+            for i, queued_task in enumerate(self._task_queue):
+                if queued_task.task_id == task_id:
+                    self._task_queue.pop(i)
+                    self._progress.total_tasks -= 1
+                    self._progress.queued_tasks = list(self._task_queue)
+                    print(f"[BatchProcessor] ✅ 任务已从队列移除: {task_id}", flush=True)
+                    return True
+
+            print(f"[BatchProcessor] ⚠️ 任务不在队列中: {task_id}", flush=True)
+            return False
+
+    def _pop_next_task(self) -> Optional[QueuedTask]:
+        """从队列中取出下一个任务"""
+        with self._queue_lock:
+            if self._task_queue:
+                task = self._task_queue.pop(0)
+                self._progress.queued_tasks = list(self._task_queue)
+                return task
+            return None
+
     def get_status(self) -> Dict:
         """获取批量处理状态"""
         return {
@@ -105,7 +211,9 @@ class BatchProcessor:
             "completed_stages": self._progress.completed_stages,
             "message": self._progress.message,
             "started_at": self._progress.started_at.isoformat() if self._progress.started_at else None,
-            "error": self._progress.error
+            "error": self._progress.error,
+            "queued_tasks": self.get_queued_tasks(),
+            "queued_count": self.queued_task_count
         }
 
     async def start_batch_for_task(self, task_id: str, languages: List[str], callbacks: Dict[str, Callable]) -> bool:
@@ -169,6 +277,8 @@ class BatchProcessor:
         """
         为多个任务启动批量处理（任务看板使用）
 
+        支持动态队列：处理过程中新添加的任务会自动加入处理队列
+
         Args:
             task_ids: 任务ID列表
             callbacks: 回调函数字典
@@ -181,29 +291,56 @@ class BatchProcessor:
             return False
 
         self._cancel_requested = False
+        self._callbacks = callbacks  # 保存回调函数供队列任务使用
+
+        # 初始化队列（将初始任务列表加入队列）
+        with self._queue_lock:
+            self._task_queue = []
+            for task_id in task_ids:
+                self._task_queue.append(QueuedTask(
+                    task_id=task_id,
+                    languages=self.SUPPORTED_LANGUAGES
+                ))
+
         self._progress = BatchProgress(
             state=BatchProcessorState.RUNNING,
             total_tasks=len(task_ids),
             completed_tasks=0,
             message="开始批量处理所有任务...",
-            started_at=datetime.utcnow()
+            started_at=datetime.utcnow(),
+            queued_tasks=list(self._task_queue)
         )
 
-        print(f"[BatchProcessor] ✅ 开始多任务批量处理, 共 {len(task_ids)} 个任务", flush=True)
+        print(f"[BatchProcessor] ✅ 开始多任务批量处理, 初始队列: {len(task_ids)} 个任务", flush=True)
 
         failed_tasks = []
+        processed_count = 0
 
-        for i, task_id in enumerate(task_ids):
+        # 循环处理队列中的任务，支持动态添加
+        while True:
             if self._cancel_requested:
-                print(f"[BatchProcessor] ⚠️ 批量处理被取消，已完成 {i}/{len(task_ids)} 个任务", flush=True)
+                print(f"[BatchProcessor] ⚠️ 批量处理被取消，已完成 {processed_count} 个任务", flush=True)
                 break
 
+            # 从队列中获取下一个任务
+            queued_task = self._pop_next_task()
+            if queued_task is None:
+                # 队列为空，处理完成
+                print(f"[BatchProcessor] ✅ 队列已清空，所有任务处理完成", flush=True)
+                break
+
+            task_id = queued_task.task_id
+            languages = queued_task.languages
+
             self._progress.current_task_id = task_id
-            self._progress.message = f"处理任务 {i+1}/{len(task_ids)}: {task_id}"
+            self._progress.message = f"处理任务 {processed_count + 1}/{self._progress.total_tasks}: {task_id} (队列剩余: {self.queued_task_count})"
+
+            print(f"[BatchProcessor] 📋 开始处理任务: {task_id}, 语言: {languages}, 队列剩余: {self.queued_task_count}", flush=True)
 
             try:
-                # 获取任务的语言列表
-                languages = await self._get_task_languages(task_id, callbacks)
+                # 获取任务的语言列表（如果回调提供）
+                if 'get_task_languages' in callbacks:
+                    languages = await callbacks['get_task_languages'](task_id)
 
                 success = await self._process_single_task(task_id, languages, callbacks)
                 if not success:
@@ -212,21 +349,43 @@ class BatchProcessor:
             except Exception as e:
                 # 单个任务失败，记录错误但继续处理下一个任务
                 print(f"[BatchProcessor] ❌ 任务 {task_id} 处理异常: {e}", flush=True)
+                import traceback
+                traceback.print_exc()
                 failed_tasks.append(task_id)
 
             if not self._cancel_requested:
-                self._progress.completed_tasks = i + 1
+                processed_count += 1
+                self._progress.completed_tasks = processed_count
+
+        # 清理
+        self._callbacks = None
+
+        # 清空队列（确保没有遗留任务）
+        with self._queue_lock:
+            self._task_queue = []
 
         if not self._cancel_requested:
+            # 批量处理正常完成，重置状态
             self._progress.state = BatchProcessorState.IDLE
+            self._progress.current_task_id = None
+            self._progress.current_language = None
+            self._progress.current_stage = None
+            self._progress.queued_tasks = []
+
             if failed_tasks:
                 self._progress.message = f"批量处理完成，{len(failed_tasks)} 个任务失败"
                 self._progress.error = f"失败的任务: {', '.join(failed_tasks)}"
             else:
-                self._progress.message = "所有任务批量处理完成"
-            print(f"[BatchProcessor] ✅ 批量处理完成，成功: {len(task_ids) - len(failed_tasks)}, 失败: {len(failed_tasks)}", flush=True)
+                self._progress.message = f"所有任务批量处理完成 (共 {processed_count} 个)"
+
+            print(f"[BatchProcessor] ✅ 批量处理完成，成功: {processed_count - len(failed_tasks)}, 失败: {len(failed_tasks)}", flush=True)
+            print(f"[BatchProcessor] ✅ 批量处理已自动停止", flush=True)
         else:
             self._progress.state = BatchProcessorState.STOPPED
+            self._progress.current_task_id = None
+            self._progress.current_language = None
+            self._progress.current_stage = None
+            self._progress.queued_tasks = []
             self._progress.message = "批量处理已停止"
 
         return len(failed_tasks) == 0
@@ -359,6 +518,9 @@ class BatchProcessor:
     def reset(self):
         """重置批量处理器状态"""
         self._cancel_requested = False
+        with self._queue_lock:
+            self._task_queue = []
+        self._callbacks = None
         self._progress = BatchProgress()
         print(f"[BatchProcessor] 已重置批量处理器状态", flush=True)
 

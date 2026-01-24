@@ -19,29 +19,32 @@ class SRTParser:
             subtitles = []
             for block in blocks:
                 lines = block.strip().split('\n')
-                if len(lines) < 3:
+                # 至少需要2行：序号/时间戳 + 时间戳/文本（文本可以为空）
+                if len(lines) < 2:
                     continue
-                
+
                 # 第一行是序号（可选）
                 first_line = lines[0].strip()
-                
+
                 # 检查是否是序号
                 if first_line.isdigit():
+                    if len(lines) < 2:
+                        continue
                     time_line = lines[1].strip()
-                    text_lines = lines[2:]
+                    text_lines = lines[2:] if len(lines) > 2 else []
                 else:
                     time_line = first_line
-                    text_lines = lines[1:]
-                
+                    text_lines = lines[1:] if len(lines) > 1 else []
+
                 # 解析时间
                 time_match = self.time_pattern.match(time_line)
                 if not time_match:
                     continue
-                
+
                 start_time = self._time_to_seconds(time_match.group(1), time_match.group(2), time_match.group(3), time_match.group(4))
                 end_time = self._time_to_seconds(time_match.group(5), time_match.group(6), time_match.group(7), time_match.group(8))
-                
-                # 合并字幕文本
+
+                # 合并字幕文本（允许为空）
                 subtitle_text = ' '.join(text.strip() for text in text_lines if text.strip())
                 
                 subtitles.append({

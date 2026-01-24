@@ -243,10 +243,10 @@ const PropertiesPanel: React.FC<PropertiesPanelProps> = ({
 
           <button
             onClick={onRunSpeakerDiarization}
-            disabled={isProcessingSpeakerDiarization || hasOtherRunningTask}
-            title={hasOtherRunningTask ? `有任务正在运行 ${runningTaskInfo}` : undefined}
+            disabled={!currentVideo || isProcessingSpeakerDiarization || hasOtherRunningTask}
+            title={hasOtherRunningTask ? `有任务正在运行 ${runningTaskInfo}` : !currentVideo ? '请先上传视频' : undefined}
             className={`w-full flex items-center justify-center gap-2 py-3 px-4 rounded-lg font-medium transition-all duration-200 ${
-              isProcessingSpeakerDiarization || hasOtherRunningTask
+              !currentVideo || isProcessingSpeakerDiarization || hasOtherRunningTask
                 ? 'bg-slate-600 text-slate-400 cursor-not-allowed opacity-75'
                 : speakerDiarizationCompleted
                 ? 'bg-gradient-to-r from-green-600 to-green-500 text-white hover:shadow-lg hover:shadow-green-500/50'

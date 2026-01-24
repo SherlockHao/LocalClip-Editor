@@ -346,7 +346,7 @@ const App: React.FC = () => {
       const response = await axios.post(`/api/batch/start/${taskId}`, {
         languages: languages,
         speaker_voice_mapping: speakerVoiceMapping
-      });
+      }, { timeout: 10000 });
 
       if (response.data.success) {
         console.log('单任务批量处理已启动:', response.data.message);
@@ -363,7 +363,7 @@ const App: React.FC = () => {
   // 停止批量处理
   const handleStopBatch = async () => {
     try {
-      const response = await axios.post('/api/batch/stop');
+      const response = await axios.post('/api/batch/stop', {}, { timeout: 10000 });
       if (response.data.success) {
         console.log('已请求停止批量处理');
       }
@@ -648,7 +648,7 @@ const App: React.FC = () => {
 
         // 首先检查全局是否有正在运行的任务
         try {
-          const globalRunningResponse = await axios.get('/api/global-running-task');
+          const globalRunningResponse = await axios.get('/api/global-running-task', { timeout: 5000 });
           const globalRunningData = globalRunningResponse.data;
           console.log('[任务加载] 全局运行任务状态:', globalRunningData);
 
@@ -714,7 +714,7 @@ const App: React.FC = () => {
         }
 
         // 获取任务信息
-        const taskResponse = await axios.get(`/api/tasks/${taskId}`);
+        const taskResponse = await axios.get(`/api/tasks/${taskId}`, { timeout: 10000 });
         const task = taskResponse.data;
 
         console.log('[任务加载] 任务数据:', task);
@@ -726,7 +726,7 @@ const App: React.FC = () => {
           console.log('[任务加载] 加载视频:', videoPath);
 
           // 获取视频信息
-          const videoInfoResponse = await axios.get(`/api/tasks/${taskId}/video-info`);
+          const videoInfoResponse = await axios.get(`/api/tasks/${taskId}/video-info`, { timeout: 15000 });
           const videoInfo = videoInfoResponse.data;
 
           const videoFile: VideoFile = {
@@ -743,7 +743,7 @@ const App: React.FC = () => {
         // 加载字幕（如果存在）
         if (task.config?.source_subtitle_filename) {
           console.log('[任务加载] 加载字幕:', task.config.source_subtitle_filename);
-          const subtitleResponse = await axios.get(`/api/tasks/${taskId}/subtitle`);
+          const subtitleResponse = await axios.get(`/api/tasks/${taskId}/subtitle`, { timeout: 10000 });
           setSubtitles(subtitleResponse.data.subtitles || []);
           setSubtitleFilename(task.config.source_subtitle_filename);
         }
@@ -757,13 +757,13 @@ const App: React.FC = () => {
           console.log('[任务加载] 说话人识别已完成，恢复状态...');
           try {
             // 获取说话人识别结果
-            const speakerStatusResponse = await axios.get(`/api/tasks/${taskId}/speaker-diarization/status`);
+            const speakerStatusResponse = await axios.get(`/api/tasks/${taskId}/speaker-diarization/status`, { timeout: 10000 });
             const speakerResult = speakerStatusResponse.data;
             console.log('[任务加载] 说话人识别结果:', speakerResult);
 
             // 如果有说话人标签，更新字幕
             if (speakerResult.speaker_labels && speakerResult.speaker_labels.length > 0) {
-              const subtitleResponse = await axios.get(`/api/tasks/${taskId}/subtitle`);
+              const subtitleResponse = await axios.get(`/api/tasks/${taskId}/subtitle`, { timeout: 10000 });
               const loadedSubtitles = subtitleResponse.data.subtitles || [];
               const updatedSubtitles = loadedSubtitles.map((subtitle: Subtitle, index: number) => {
                 const speakerId = index < speakerResult.speaker_labels.length
@@ -924,7 +924,8 @@ const App: React.FC = () => {
       try {
         // 1. 检查翻译状态
         const translationResponse = await axios.get(
-          `/api/tasks/${taskId}/languages/${targetLanguage}/translate/status`
+          `/api/tasks/${taskId}/languages/${targetLanguage}/translate/status`,
+          { timeout: 8000 }
         );
         const translationStatus = translationResponse.data;
         console.log(`[语言状态恢复] ${targetLanguage} 翻译状态:`, translationStatus);
@@ -940,7 +941,8 @@ const App: React.FC = () => {
 
         // 2. 检查语音克隆状态
         const voiceCloningResponse = await axios.get(
-          `/api/tasks/${taskId}/languages/${targetLanguage}/voice-cloning/status`
+          `/api/tasks/${taskId}/languages/${targetLanguage}/voice-cloning/status`,
+          { timeout: 8000 }
         );
         const voiceCloningStatus = voiceCloningResponse.data;
         console.log(`[语言状态恢复] ${targetLanguage} 语音克隆状态:`, voiceCloningStatus);
@@ -974,7 +976,8 @@ const App: React.FC = () => {
         // 3. 检查拼接音频状态 - 使用专门的状态 API
         try {
           const stitchStatusResponse = await axios.get(
-            `/api/tasks/${taskId}/languages/${targetLanguage}/stitch-audio/status`
+            `/api/tasks/${taskId}/languages/${targetLanguage}/stitch-audio/status`,
+            { timeout: 8000 }
           );
           const stitchStatus = stitchStatusResponse.data;
           console.log(`[语言状态恢复] ${targetLanguage} 拼接状态:`, stitchStatus);
@@ -1034,7 +1037,8 @@ const App: React.FC = () => {
         // 4. 检查视频导出状态
         try {
           const exportStatusResponse = await axios.get(
-            `/api/tasks/${taskId}/languages/${targetLanguage}/export-video/status`
+            `/api/tasks/${taskId}/languages/${targetLanguage}/export-video/status`,
+            { timeout: 8000 }
           );
           const exportStatus = exportStatusResponse.data;
           console.log(`[语言状态恢复] ${targetLanguage} 导出状态:`, exportStatus);
@@ -1130,11 +1134,8 @@ const App: React.FC = () => {
     const now = Date.now();
     const timeSinceLastCall = now - lastPlayPauseTime.current;
 
-    console.log('[handlePlayPause] 调用, 当前 isPlaying:', isPlaying, 'timeSinceLastCall:', timeSinceLastCall);
-
     // 防止 200ms 内重复触发
     if (timeSinceLastCall < 200) {
-      console.log('[handlePlayPause] 200ms 内重复调用，跳过');
       return;
     }
 
@@ -1142,13 +1143,10 @@ const App: React.FC = () => {
 
     if (videoRef.current) {
       if (isPlaying) {
-        console.log('[handlePlayPause] 暂停视频');
         videoRef.current.pause();
       } else {
-        console.log('[handlePlayPause] 播放视频');
         videoRef.current.play();
       }
-      console.log('[handlePlayPause] setIsPlaying:', !isPlaying);
       setIsPlaying(!isPlaying);
     }
   };
@@ -1166,17 +1164,11 @@ const App: React.FC = () => {
   };
 
   const handleSeek = (time: number) => {
-    console.log('[handleSeek] 收到 seek 请求, time:', time);
-
     if (videoRef.current) {
       const video = videoRef.current;
 
-      console.log('[handleSeek] video.readyState:', video.readyState);
-      console.log('[handleSeek] video.currentTime (before):', video.currentTime);
-
       // 检查视频是否已经加载足够的数据
       if (video.readyState < 2) {
-        console.log('[handleSeek] readyState < 2，退出');
         return;
       }
 
@@ -1185,18 +1177,14 @@ const App: React.FC = () => {
 
       // 设置视频时间
       video.currentTime = time;
-      console.log('[handleSeek] 已设置 video.currentTime =', time);
 
       // 监听 seeked 事件来更新状态
       const handleSeeked = () => {
-        console.log('[handleSeek] seeked 事件触发, video.currentTime:', video.currentTime);
         setCurrentTime(video.currentTime);
         isSeekingRef.current = false;
         video.removeEventListener('seeked', handleSeeked);
       };
       video.addEventListener('seeked', handleSeeked, { once: true });
-    } else {
-      console.log('[handleSeek] videoRef.current 为空');
     }
   };
 
@@ -1655,14 +1643,12 @@ const App: React.FC = () => {
 
   // 播放克隆音频
   const handlePlayClonedAudio = (audioPath: string) => {
-    console.log('[播放音频] 输入路径:', audioPath);
     // 构建完整的音频URL，添加额外的随机参数确保不使用缓存
     const separator = audioPath.includes('?') ? '&' : '?';
     // 新的任务系统路径已经包含 /api 前缀
     const audioUrl = audioPath.startsWith('/api')
       ? `${audioPath}${separator}_=${Date.now()}`
-      : `/api${audioPath}${separator}_=${Date.now()}`;
-    console.log('[播放音频] 实际URL:', audioUrl);
+      : `/api/${audioPath}${separator}_=${Date.now()}`;
     const audio = new Audio();
     // 设置不使用缓存
     audio.preload = 'none';
@@ -2196,7 +2182,13 @@ const App: React.FC = () => {
           <div className="flex items-center space-x-3">
             <button
               onClick={handlePlayPause}
-              className="flex items-center space-x-2 bg-gradient-to-r from-blue-600 to-blue-500 text-white px-4 py-2.5 rounded-lg hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-200 font-medium"
+              disabled={!currentVideo || isProcessingSpeakerDiarization || isProcessingVoiceCloning}
+              className={`flex items-center space-x-2 px-4 py-2.5 rounded-lg transition-all duration-200 font-medium ${
+                !currentVideo || isProcessingSpeakerDiarization || isProcessingVoiceCloning
+                  ? 'bg-slate-600 text-slate-400 cursor-not-allowed'
+                  : 'bg-gradient-to-r from-blue-600 to-blue-500 text-white hover:shadow-lg hover:shadow-blue-500/50'
+              }`}
+              title={!currentVideo ? '请先上传视频' : isProcessingSpeakerDiarization || isProcessingVoiceCloning ? '处理中，请稍候' : ''}
             >
               {isPlaying ? <Pause size={18} /> : <Play size={18} />}
               <span>{isPlaying ? '暂停' : '播放'}</span>
@@ -2204,7 +2196,13 @@ const App: React.FC = () => {
 
             <button
               onClick={() => handleSeek(0)}
-              className="flex items-center space-x-2 bg-slate-700 text-slate-100 px-4 py-2.5 rounded-lg hover:bg-slate-600 transition-all duration-200 font-medium"
+              disabled={!currentVideo || isProcessingSpeakerDiarization || isProcessingVoiceCloning}
+              className={`flex items-center space-x-2 px-4 py-2.5 rounded-lg transition-all duration-200 font-medium ${
+                !currentVideo || isProcessingSpeakerDiarization || isProcessingVoiceCloning
+                  ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                  : 'bg-slate-700 text-slate-100 hover:bg-slate-600'
+              }`}
+              title={!currentVideo ? '请先上传视频' : isProcessingSpeakerDiarization || isProcessingVoiceCloning ? '处理中，请稍候' : ''}
             >
               <RotateCcw size={18} />
               <span>重置</span>
@@ -2233,7 +2231,7 @@ const App: React.FC = () => {
                 <button
                   onClick={handleStopBatch}
                   disabled={batchStatus.state === 'stopping'}
-                  className="flex items-center space-x-2 bg-red-600 hover:bg-red-500 disabled:bg-red-800 text-white px-4 py-2.5 rounded-lg transition-all duration-200 font-medium"
+                  className="flex items-center space-x-2 bg-red-600 hover:bg-red-500 disabled:bg-red-800 disabled:cursor-not-allowed text-white px-4 py-2.5 rounded-lg transition-all duration-200 font-medium"
                   title="停止批量处理"
                 >
                   <StopCircle size={18} />
@@ -2244,8 +2242,13 @@ const App: React.FC = () => {
               /* 开始批量处理按钮 */
               <button
                 onClick={handleStartBatchSingleTask}
-                className="flex items-center space-x-2 bg-gradient-to-r from-green-600 to-green-500 text-white px-4 py-2.5 rounded-lg hover:shadow-lg hover:shadow-green-500/50 transition-all duration-200 font-medium"
-                title="批量处理当前任务（说话人识别→翻译→语音克隆→拼接→导出）"
+                disabled={!currentVideo || isProcessingSpeakerDiarization || isProcessingVoiceCloning || isTranslating || isStitchingAudio || isExportingVideo || !!globalRunningTask || !!runningTask}
+                className={`flex items-center space-x-2 px-4 py-2.5 rounded-lg transition-all duration-200 font-medium ${
+                  !currentVideo || isProcessingSpeakerDiarization || isProcessingVoiceCloning || isTranslating || isStitchingAudio || isExportingVideo || !!globalRunningTask || !!runningTask
+                    ? 'bg-slate-600 text-slate-400 cursor-not-allowed'
+                    : 'bg-gradient-to-r from-green-600 to-green-500 text-white hover:shadow-lg hover:shadow-green-500/50'
+                }`}
+                title={!currentVideo ? '请先上传视频' : (isProcessingSpeakerDiarization || isProcessingVoiceCloning || isTranslating || isStitchingAudio || isExportingVideo || globalRunningTask || runningTask) ? '有任务正在运行，请稍候' : '批量处理当前任务（说话人识别→翻译→语音克隆→拼接→导出）'}
               >
                 <PlayCircle size={18} />
                 <span>批量处理</span>
@@ -2333,6 +2336,7 @@ const App: React.FC = () => {
                 isProcessingVoiceCloning={isProcessingVoiceCloning}
                 isStitchingAudio={isStitchingAudio}
                 targetLanguage={targetLanguage}
+                hasRunningTask={isProcessingSpeakerDiarization || isProcessingVoiceCloning || isTranslating || isStitchingAudio || isExportingVideo || !!globalRunningTask || !!runningTask}
               />
 
             {/* 右侧：播放器 + 视频信息 (缩小宽度比例) */}
@@ -2365,6 +2369,13 @@ const App: React.FC = () => {
                       key={taskId ? `/uploads/${taskId}/input/${currentVideo.filename}` : `/uploads/${currentVideo.filename}`}
                       onTimeUpdate={handleTimeUpdate}
                       onLoadedMetadata={handleLoadedMetadata}
+                      onEnded={() => {
+                        setIsPlaying(false);
+                        setCurrentTime(0);
+                        if (videoRef.current) {
+                          videoRef.current.currentTime = 0;
+                        }
+                      }}
                       isPlaying={isPlaying}
                       currentTime={currentTime}
                       duration={duration}
@@ -2379,22 +2390,30 @@ const App: React.FC = () => {
                         <span className="text-xs text-slate-400 font-medium">音频源:</span>
                         <button
                           onClick={() => setUseStitchedAudio(false)}
+                          disabled={isPlaying}
                           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
-                            !useStitchedAudio
+                            isPlaying
+                              ? 'opacity-50 cursor-not-allowed'
+                              : !useStitchedAudio
                               ? 'bg-blue-600 text-white shadow-md'
                               : 'bg-slate-700/50 text-slate-400 hover:bg-slate-700 hover:text-slate-300'
                           }`}
+                          title={isPlaying ? '播放时无法切换音频源' : '使用原始音频'}
                         >
                           <Volume2 size={14} />
                           原音频
                         </button>
                         <button
                           onClick={() => setUseStitchedAudio(true)}
+                          disabled={isPlaying}
                           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
-                            useStitchedAudio
+                            isPlaying
+                              ? 'opacity-50 cursor-not-allowed'
+                              : useStitchedAudio
                               ? 'bg-emerald-600 text-white shadow-md'
                               : 'bg-slate-700/50 text-slate-400 hover:bg-slate-700 hover:text-slate-300'
                           }`}
+                          title={isPlaying ? '播放时无法切换音频源' : '使用克隆音频'}
                         >
                           <Music size={14} />
                           克隆音频

@@ -179,10 +179,11 @@ def translate_batch_group(
 
     # 2. 构建 System Prompt：精简有力
     system_prompt = (
-        f"翻译为{target_language}。这是连续对话片段，需保持:\n"
+        f"你是配音字幕压缩专家。翻译为{target_language}。这是连续对话片段，需保持:\n"
         f"1. 上下文连贯(代词/指代/语气统一)\n"
         f"2. {lang_rule}\n"
-        f"3. 极简表达(口语化/去冗余)，字数极少\n"
+        f"3. 极简表达(最口语的缩略形式/去冗余)，字数极少\n"
+        f"4. 宁可漏译也不要长译\n"
         f"返回JSON: {{\"translations\": [\"译文1\", \"译文2\", ...]}}"
     )
 

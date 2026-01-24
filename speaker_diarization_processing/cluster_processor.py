@@ -18,15 +18,15 @@ except ImportError as e:
 
 
 class SpeakerClusterer:
-    def __init__(self, n_clusters=None, metric='cosine', linkage='average', distance_threshold=0.9):
+    def __init__(self, n_clusters=None, metric='cosine', linkage='average', distance_threshold=None):
         """
         初始化说话人聚类器
-        
+
         Args:
             n_clusters (int, optional): 聚类数量，如果为None则使用distance_threshold
             metric (str): 距离度量方法
             linkage (str): 链接准则
-            distance_threshold (float): 距离阈值，用于确定聚类数量
+            distance_threshold (float, optional): 距离阈值，用于确定聚类数量
         """
         self.clusterer = original_initialize_clustering(
             n_clusters=n_clusters,

@@ -5,8 +5,9 @@
 import os
 import torch
 import librosa
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 from transformers import Wav2Vec2ForSequenceClassification, Wav2Vec2FeatureExtractor
+from audio_silence_trimmer import AudioSilenceTrimmer
 
 
 class GenderClassifier:
@@ -126,7 +127,7 @@ class GenderClassifier:
         min_duration: float = 2.0
     ) -> str:
         """
-        为性别识别选择最佳音频片段
+        为性别识别选择最佳音频片段（原始版本，无静音切割）
         优先选择MOS分最高且时长>min_duration的音频，否则选择MOS分最高的
 
         Args:
@@ -162,10 +163,205 @@ class GenderClassifier:
             print(f"  选择音频: {best_audio} (MOS: {best_mos:.3f})")
         return best_audio
 
+    def select_best_audio_with_silence_trimming(
+        self,
+        scored_segments: List[Tuple[str, float]],
+        min_duration: float = 2.0,
+        min_final_duration: float = 1.5,
+        temp_dir: Optional[str] = None
+    ) -> str:
+        """
+        为性别识别选择最佳音频片段，并进行静音切割预处理
+
+        优化后的流程：
+        1. 按MOS分数从高到低排序
+        2. 循环处理每个片段：
+           a. 对音频进行静音切割
+           b. 如果切割后时长>0，保存到累积列表
+           c. 计算累计时长
+           d. 如果累计时长≥min_final_duration，停止，拼接所有片段并返回
+           e. 否则继续下一个片段
+        3. 如果遍历完所有片段仍不足，拼接所有已有片段（作为fallback）
+
+        Args:
+            scored_segments: MOS评分后的片段列表，每个元素为(音频路径, MOS分数)
+            min_duration: 原始音频的最小时长阈值（秒）
+            min_final_duration: 切割后音频的最小可接受时长（秒）
+            temp_dir: 临时文件目录
+
+        Returns:
+            str: 选中并处理后的音频路径
+        """
+        if not scored_segments:
+            raise ValueError("没有可用的音频片段")
+
+        print(f"\n[音频选择] 开始累积式选择并预处理音频，共 {len(scored_segments)} 个候选片段")
+        print(f"[音频选择] 目标累计时长: ≥{min_final_duration}s")
+
+        # 按MOS分数从高到低排序
+        sorted_segments = sorted(scored_segments, key=lambda x: x[1], reverse=True)
+
+        # 初始化静音切割器
+        trimmer = AudioSilenceTrimmer(
+            threshold_db=-40.0,
+            frame_length_ms=25.0,
+            hop_length_ms=10.0
+        )
+
+        # 累积的音频片段列表
+        accumulated_audios = []
+        accumulated_duration = 0.0
+
+        # 优先处理时长≥min_duration的片段
+        print(f"\n[音频选择] 阶段1: 处理时长≥{min_duration}s的高质量片段")
+        for audio_path, mos_score in sorted_segments:
+            try:
+                duration = librosa.get_duration(path=audio_path)
+
+                if duration >= min_duration:
+                    print(f"\n[音频选择] 尝试片段 {len(accumulated_audios)+1}: {os.path.basename(audio_path)} (时长: {duration:.2f}s, MOS: {mos_score:.3f})")
+
+                    # 尝试静音切割（不验证最小时长，因为我们会累积）
+                    result = trimmer.process_audio_for_gender_classification(
+                        audio_path,
+                        min_final_duration=0.0,  # 设置为0，允许任何长度
+                        temp_dir=temp_dir
+                    )
+
+                    if result is not None:
+                        trimmed_path, trimmed_duration = result
+
+                        if trimmed_duration > 0:
+                            accumulated_audios.append(trimmed_path)
+                            accumulated_duration += trimmed_duration
+                            print(f"[音频选择] ✓ 已累积: {trimmed_duration:.2f}s，总计: {accumulated_duration:.2f}s")
+
+                            # 检查是否达到目标时长
+                            if accumulated_duration >= min_final_duration:
+                                print(f"\n[音频选择] ✓ 达到目标时长 {accumulated_duration:.2f}s ≥ {min_final_duration}s")
+
+                                # 如果只有一个片段，直接返回
+                                if len(accumulated_audios) == 1:
+                                    return accumulated_audios[0]
+
+                                # 多个片段，需要拼接
+                                if temp_dir is None:
+                                    import tempfile
+                                    temp_dir = tempfile.gettempdir()
+
+                                final_path = os.path.join(temp_dir, f"gender_classification_concatenated.wav")
+                                final_path, final_duration = trimmer.concatenate_multiple_audios(
+                                    accumulated_audios,
+                                    final_path,
+                                    silence_duration=0.2
+                                )
+                                print(f"[音频选择] 已拼接 {len(accumulated_audios)} 个片段，最终时长: {final_duration:.2f}s")
+                                return final_path
+                        else:
+                            print(f"[音频选择] ✗ 切割后时长为0，跳过")
+                    else:
+                        print(f"[音频选择] ✗ 处理失败，跳过")
+
+            except Exception as e:
+                print(f"[音频选择] ✗ 处理失败 {audio_path}: {e}")
+                continue
+
+        # 如果时长≥min_duration的还不够，继续处理其他片段
+        if accumulated_duration < min_final_duration:
+            print(f"\n[音频选择] 阶段2: 处理时长<{min_duration}s的片段（当前累计: {accumulated_duration:.2f}s）")
+
+            for audio_path, mos_score in sorted_segments:
+                try:
+                    duration = librosa.get_duration(path=audio_path)
+
+                    # 跳过已处理过的长片段
+                    if duration >= min_duration:
+                        continue
+
+                    print(f"\n[音频选择] 尝试片段 {len(accumulated_audios)+1}: {os.path.basename(audio_path)} (时长: {duration:.2f}s, MOS: {mos_score:.3f})")
+
+                    # 尝试静音切割
+                    result = trimmer.process_audio_for_gender_classification(
+                        audio_path,
+                        min_final_duration=0.0,  # 设置为0，允许任何长度
+                        temp_dir=temp_dir
+                    )
+
+                    if result is not None:
+                        trimmed_path, trimmed_duration = result
+
+                        if trimmed_duration > 0:
+                            accumulated_audios.append(trimmed_path)
+                            accumulated_duration += trimmed_duration
+                            print(f"[音频选择] ✓ 已累积: {trimmed_duration:.2f}s，总计: {accumulated_duration:.2f}s")
+
+                            # 检查是否达到目标时长
+                            if accumulated_duration >= min_final_duration:
+                                print(f"\n[音频选择] ✓ 达到目标时长 {accumulated_duration:.2f}s ≥ {min_final_duration}s")
+
+                                # 如果只有一个片段，直接返回
+                                if len(accumulated_audios) == 1:
+                                    return accumulated_audios[0]
+
+                                # 多个片段，需要拼接
+                                if temp_dir is None:
+                                    import tempfile
+                                    temp_dir = tempfile.gettempdir()
+
+                                final_path = os.path.join(temp_dir, f"gender_classification_concatenated.wav")
+                                final_path, final_duration = trimmer.concatenate_multiple_audios(
+                                    accumulated_audios,
+                                    final_path,
+                                    silence_duration=0.2
+                                )
+                                print(f"[音频选择] 已拼接 {len(accumulated_audios)} 个片段，最终时长: {final_duration:.2f}s")
+                                return final_path
+                        else:
+                            print(f"[音频选择] ✗ 切割后时长为0，跳过")
+                    else:
+                        print(f"[音频选择] ✗ 处理失败，跳过")
+
+                except Exception as e:
+                    print(f"[音频选择] ✗ 处理失败 {audio_path}: {e}")
+                    continue
+
+        # 如果遍历完所有片段仍不足min_final_duration
+        if accumulated_audios:
+            print(f"\n[音频选择] 警告: 所有片段累计时长 {accumulated_duration:.2f}s < {min_final_duration}s")
+            print(f"[音频选择] 使用已累积的 {len(accumulated_audios)} 个片段")
+
+            # 如果只有一个片段，直接返回
+            if len(accumulated_audios) == 1:
+                return accumulated_audios[0]
+
+            # 多个片段，拼接
+            if temp_dir is None:
+                import tempfile
+                temp_dir = tempfile.gettempdir()
+
+            final_path = os.path.join(temp_dir, f"gender_classification_concatenated.wav")
+            final_path, final_duration = trimmer.concatenate_multiple_audios(
+                accumulated_audios,
+                final_path,
+                silence_duration=0.2
+            )
+            print(f"[音频选择] 已拼接 {len(accumulated_audios)} 个片段，最终时长: {final_duration:.2f}s")
+            return final_path
+        else:
+            # 完全没有可用的片段，使用原始方法作为fallback
+            print(f"\n[音频选择] 警告: 没有任何可用的切割后片段，使用原始方法fallback")
+            return self.select_best_audio_for_gender_classification(
+                scored_segments,
+                min_duration=min_duration
+            )
+
     def classify_speakers(
         self,
         scored_segments_dict: Dict[int, List[Tuple[str, float]]],
-        min_duration: float = 2.0
+        min_duration: float = 2.0,
+        use_silence_trimming: bool = True,
+        min_final_duration: float = 1.5,
+        temp_dir: Optional[str] = None
     ) -> Dict[int, str]:
         """
         对所有说话人进行性别分类
@@ -173,6 +369,9 @@ class GenderClassifier:
         Args:
             scored_segments_dict: 字典，key为说话人ID，value为MOS评分后的片段列表
             min_duration: 最小时长阈值
+            use_silence_trimming: 是否使用静音切割预处理
+            min_final_duration: 切割后的最小可接受时长
+            temp_dir: 临时文件目录
 
         Returns:
             Dict[int, str]: 字典，key为说话人ID，value为性别（"male"或"female"）
@@ -184,9 +383,18 @@ class GenderClassifier:
 
             try:
                 # 选择最佳音频
-                best_audio = self.select_best_audio_for_gender_classification(
-                    scored_segments, min_duration
-                )
+                if use_silence_trimming:
+                    best_audio = self.select_best_audio_with_silence_trimming(
+                        scored_segments,
+                        min_duration=min_duration,
+                        min_final_duration=min_final_duration,
+                        temp_dir=temp_dir
+                    )
+                else:
+                    best_audio = self.select_best_audio_for_gender_classification(
+                        scored_segments,
+                        min_duration=min_duration
+                    )
 
                 # 进行性别识别
                 gender = self.get_gender(best_audio)
@@ -197,6 +405,8 @@ class GenderClassifier:
 
             except Exception as e:
                 print(f"  识别失败: {str(e)}")
+                import traceback
+                traceback.print_exc()
                 # 默认为male
                 results[speaker_id] = "male"
 

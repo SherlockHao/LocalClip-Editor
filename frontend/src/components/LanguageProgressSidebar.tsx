@@ -60,10 +60,18 @@ const LanguageProgressSidebar: React.FC<LanguageProgressSidebarProps> = ({
 
   const loadTask = async () => {
     try {
-      const response = await axios.get(`/api/tasks/${taskId}`);
+      const response = await axios.get(`/api/tasks/${taskId}`, { timeout: 8000 });
       setTask(response.data);
     } catch (error) {
       console.error('Failed to load task:', error);
+      // 如果首次加载失败，设置一个默认的空任务对象以避免一直显示加载状态
+      if (!task) {
+        setTask({
+          task_id: taskId || '',
+          status: 'pending',
+          language_status: {}
+        });
+      }
     }
   };
 

@@ -38,6 +38,13 @@ interface RunningTaskInfo {
   progress?: number;
 }
 
+// 队列中的任务信息
+interface QueuedTaskInfo {
+  task_id: string;
+  languages: string[];
+  added_at: string;
+}
+
 // 批量处理状态接口
 interface BatchStatus {
   state: 'idle' | 'running' | 'stopping' | 'stopped';
@@ -52,6 +59,8 @@ interface BatchStatus {
   message: string;
   started_at: string | null;
   error: string | null;
+  queued_tasks: QueuedTaskInfo[];
+  queued_count: number;
 }
 
 const TaskDashboard: React.FC = () => {
@@ -157,7 +166,7 @@ const TaskDashboard: React.FC = () => {
       const response = await axios.post('/api/batch/start', {
         task_ids: tasks.map(t => t.task_id),
         languages: ['en', 'ko', 'ja', 'fr', 'de', 'es', 'id']
-      });
+      }, { timeout: 10000 });
 
       if (response.data.success) {
         console.log('批量处理已启动:', response.data.message);
@@ -175,7 +184,7 @@ const TaskDashboard: React.FC = () => {
   // 停止批量处理
   const handleStopBatch = async () => {
     try {
-      const response = await axios.post('/api/batch/stop');
+      const response = await axios.post('/api/batch/stop', {}, { timeout: 10000 });
       if (response.data.success) {
         console.log('已请求停止批量处理');
         fetchBatchStatus();
@@ -183,6 +192,53 @@ const TaskDashboard: React.FC = () => {
     } catch (error: any) {
       alert('停止批量处理失败: ' + (error.response?.data?.detail || error.message));
     }
+  };
+
+  // 添加任务到批量处理队列
+  const handleAddToQueue = async (taskId: string, event: React.MouseEvent) => {
+    event.stopPropagation(); // 防止触发打开任务
+
+    try {
+      const response = await axios.post(`/api/batch/queue/${taskId}`, {
+        languages: ['en', 'ko', 'ja', 'fr', 'de', 'es', 'id']
+      }, { timeout: 8000 });
+
+      if (response.data.success) {
+        console.log(`任务 ${taskId} 已添加到队列`);
+        fetchBatchStatus();
+      }
+    } catch (error: any) {
+      if (error.response?.status === 409) {
+        alert(error.response?.data?.detail || '无法添加任务到队列');
+      } else {
+        alert('添加到队列失败: ' + (error.response?.data?.detail || error.message));
+      }
+    }
+  };
+
+  // 从队列中移除任务
+  const handleRemoveFromQueue = async (taskId: string, event: React.MouseEvent) => {
+    event.stopPropagation();
+
+    try {
+      const response = await axios.delete(`/api/batch/queue/${taskId}`, { timeout: 8000 });
+      if (response.data.success) {
+        console.log(`任务 ${taskId} 已从队列移除`);
+        fetchBatchStatus();
+      }
+    } catch (error: any) {
+      alert('移除失败: ' + (error.response?.data?.detail || error.message));
+    }
+  };
+
+  // 检查任务是否在队列中
+  const isTaskInQueue = (taskId: string): boolean => {
+    return batchStatus?.queued_tasks?.some(t => t.task_id === taskId) || false;
+  };
+
+  // 检查任务是否正在处理
+  const isTaskProcessing = (taskId: string): boolean => {
+    return batchStatus?.current_task_id === taskId;
   };
 
   // 获取阶段的中文名称
@@ -227,7 +283,8 @@ const TaskDashboard: React.FC = () => {
 
     try {
       const response = await axios.post('/api/tasks/', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 300000  // 5分钟超时，视频上传可能较慢
       });
 
       // 新任务添加到列表最后面
@@ -250,7 +307,7 @@ const TaskDashboard: React.FC = () => {
     if (!confirm('确定删除此任务？所有相关文件将被删除。')) return;
 
     try {
-      await axios.delete(`/api/tasks/${taskId}`);
+      await axios.delete(`/api/tasks/${taskId}`, { timeout: 30000 });
       setTasks(tasks.filter(t => t.task_id !== taskId));
     } catch (error) {
       console.error('Delete failed:', error);
@@ -283,13 +340,13 @@ const TaskDashboard: React.FC = () => {
             {!isBatchRunning ? (
               <button
                 onClick={handleStartBatchAll}
-                disabled={!canStartBatch}
+                disabled={!canStartBatch || loading}
                 className={`flex items-center gap-2 px-5 py-3 rounded-lg font-medium transition-all ${
-                  canStartBatch
+                  canStartBatch && !loading
                     ? 'bg-gradient-to-r from-green-600 to-green-500 text-white hover:shadow-lg hover:shadow-green-500/50'
                     : 'bg-slate-700 text-slate-400 cursor-not-allowed'
                 }`}
-                title={!canStartBatch ? '没有可处理的任务' : '批量处理所有任务'}
+                title={loading ? '正在加载任务列表' : !canStartBatch ? '没有可处理的任务' : '批量处理所有任务'}
               >
                 <PlayCircle size={20} />
                 <span>批量处理</span>
@@ -297,9 +354,9 @@ const TaskDashboard: React.FC = () => {
             ) : (
               <button
                 onClick={handleStopBatch}
-                disabled={isBatchStopping}
+                disabled={isBatchStopping || loading}
                 className={`flex items-center gap-2 px-5 py-3 rounded-lg font-medium transition-all ${
-                  isBatchStopping
+                  isBatchStopping || loading
                     ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
                     : 'bg-gradient-to-r from-red-600 to-red-500 text-white hover:shadow-lg hover:shadow-red-500/50'
                 }`}
@@ -320,8 +377,13 @@ const TaskDashboard: React.FC = () => {
 
             <button
               onClick={() => setShowUploadModal(true)}
-              className="flex items-center gap-2 bg-gradient-to-r from-purple-600 to-purple-500 text-white px-6 py-3 rounded-lg hover:shadow-lg hover:shadow-purple-500/50 transition-all"
-              disabled={uploading}
+              className={`flex items-center gap-2 px-6 py-3 rounded-lg transition-all ${
+                uploading || loading || isBatchRunning
+                  ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                  : 'bg-gradient-to-r from-purple-600 to-purple-500 text-white hover:shadow-lg hover:shadow-purple-500/50'
+              }`}
+              disabled={uploading || loading || isBatchRunning}
+              title={isBatchRunning ? '批量处理运行中，请稍候' : uploading ? '上传中' : loading ? '加载中' : '创建新任务'}
             >
               <Plus size={20} />
               <span>创建新任务</span>
@@ -359,6 +421,9 @@ const TaskDashboard: React.FC = () => {
               <div className="text-right">
                 <p className={`text-sm ${isBatchStopping ? 'text-yellow-300' : 'text-blue-300'}`}>
                   任务: {batchStatus.completed_tasks}/{batchStatus.total_tasks}
+                  {batchStatus.queued_count > 0 && (
+                    <span className="text-green-400 ml-2">(+{batchStatus.queued_count} 队列中)</span>
+                  )}
                 </p>
                 <p className={`text-xs ${isBatchStopping ? 'text-yellow-200' : 'text-blue-200'}`}>
                   阶段: {batchStatus.completed_stages}/{batchStatus.total_stages}
@@ -379,6 +444,29 @@ const TaskDashboard: React.FC = () => {
                 </div>
               </div>
             )}
+            {/* 队列中的任务列表 */}
+            {batchStatus.queued_count > 0 && (
+              <div className="mt-3 pt-3 border-t border-slate-600">
+                <p className="text-xs text-green-400 mb-2">等待队列中的任务:</p>
+                <div className="flex flex-wrap gap-2">
+                  {batchStatus.queued_tasks.map((queuedTask) => (
+                    <span
+                      key={queuedTask.task_id}
+                      className="inline-flex items-center gap-1 text-xs px-2 py-1 bg-green-500/20 text-green-300 rounded"
+                    >
+                      {queuedTask.task_id.slice(-8)}
+                      <button
+                        onClick={(e) => handleRemoveFromQueue(queuedTask.task_id, e)}
+                        className="hover:text-red-400 ml-1"
+                        title="从队列移除"
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -394,18 +482,26 @@ const TaskDashboard: React.FC = () => {
             <p className="text-sm mt-2">点击"上传新视频"创建第一个任务</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {tasks.map(task => (
-              <TaskCard
-                key={task.task_id}
-                task={task}
-                onOpen={() => navigate(`/tasks/${task.task_id}`)}
-                onDelete={(e) => handleDelete(task.task_id, e)}
-                runningTask={runningTasks[task.task_id] || null}
-                getStageName={getStageName}
-                getLanguageName={getLanguageName}
-              />
-            ))}
+          <div className="max-h-[calc(100vh-280px)] overflow-y-auto pr-2">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {tasks.map(task => (
+                <TaskCard
+                  key={task.task_id}
+                  task={task}
+                  onOpen={() => navigate(`/tasks/${task.task_id}`)}
+                  onDelete={(e) => handleDelete(task.task_id, e)}
+                  onAddToQueue={(e) => handleAddToQueue(task.task_id, e)}
+                  onRemoveFromQueue={(e) => handleRemoveFromQueue(task.task_id, e)}
+                  runningTask={runningTasks[task.task_id] || null}
+                  getStageName={getStageName}
+                  getLanguageName={getLanguageName}
+                  isBatchRunning={isBatchRunning}
+                  isInQueue={isTaskInQueue(task.task_id)}
+                  isProcessing={isTaskProcessing(task.task_id)}
+                  loading={loading}
+                />
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -517,12 +613,22 @@ interface TaskCardProps {
   task: Task;
   onOpen: () => void;
   onDelete: (e: React.MouseEvent) => void;
+  onAddToQueue: (e: React.MouseEvent) => void;
+  onRemoveFromQueue: (e: React.MouseEvent) => void;
   runningTask: RunningTaskInfo | null;
   getStageName: (stage: string) => string;
   getLanguageName: (language: string) => string;
+  isBatchRunning: boolean;
+  isInQueue: boolean;
+  isProcessing: boolean;
+  loading: boolean;
 }
 
-const TaskCard: React.FC<TaskCardProps> = ({ task, onOpen, onDelete, runningTask, getStageName, getLanguageName }) => {
+const TaskCard: React.FC<TaskCardProps> = ({
+  task, onOpen, onDelete, onAddToQueue, onRemoveFromQueue,
+  runningTask, getStageName, getLanguageName,
+  isBatchRunning, isInQueue, isProcessing, loading
+}) => {
   const languages = ['en', 'ko', 'ja', 'fr', 'de', 'es', 'id'];
   const languageNames: Record<string, string> = {
     en: '英语', ko: '韩语', ja: '日语', fr: '法语',
@@ -661,18 +767,78 @@ const TaskCard: React.FC<TaskCardProps> = ({ task, onOpen, onDelete, runningTask
         })}
       </div>
 
+      {/* 队列状态指示 */}
+      {isInQueue && (
+        <div className="mb-3 p-2 rounded-lg bg-green-500/10 border border-green-500/30">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Clock size={14} className="text-green-400" />
+              <span className="text-xs text-green-300 font-medium">在队列中等待处理</span>
+            </div>
+            <button
+              onClick={onRemoveFromQueue}
+              disabled={loading}
+              className={`text-xs transition-colors ${
+                loading
+                  ? 'text-slate-400 cursor-not-allowed'
+                  : 'text-green-400 hover:text-red-400'
+              }`}
+              title={loading ? '正在加载任务列表' : '从队列移除'}
+            >
+              移除
+            </button>
+          </div>
+        </div>
+      )}
+
+      {isProcessing && (
+        <div className="mb-3 p-2 rounded-lg bg-blue-500/10 border border-blue-500/30">
+          <div className="flex items-center gap-2">
+            <Loader2 size={14} className="text-blue-400 animate-spin" />
+            <span className="text-xs text-blue-300 font-medium">正在批量处理中...</span>
+          </div>
+        </div>
+      )}
+
       {/* 操作按钮 */}
       <div className="flex gap-2">
         <button
           onClick={onOpen}
-          className="flex-1 flex items-center justify-center gap-2 bg-purple-600 text-white py-2 rounded-lg hover:bg-purple-500 transition-all"
+          disabled={loading}
+          className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg transition-all ${
+            loading
+              ? 'bg-slate-600 text-slate-400 cursor-not-allowed'
+              : 'bg-purple-600 text-white hover:bg-purple-500'
+          }`}
         >
           <Play size={16} />
           <span>打开</span>
         </button>
+
+        {/* 添加到队列按钮（仅在批量处理运行中且任务不在队列/处理中时显示）*/}
+        {isBatchRunning && !isInQueue && !isProcessing && (
+          <button
+            onClick={onAddToQueue}
+            disabled={loading}
+            className={`px-3 py-2 rounded-lg transition-all ${
+              loading
+                ? 'bg-slate-600 text-slate-400 cursor-not-allowed'
+                : 'bg-green-600/20 text-green-400 hover:bg-green-600/30'
+            }`}
+            title={loading ? '正在加载任务列表' : '添加到批量处理队列'}
+          >
+            <Plus size={16} />
+          </button>
+        )}
+
         <button
           onClick={onDelete}
-          className="px-3 py-2 bg-red-600/20 text-red-400 rounded-lg hover:bg-red-600/30 transition-all"
+          disabled={loading}
+          className={`px-3 py-2 rounded-lg transition-all ${
+            loading
+              ? 'bg-slate-600 text-slate-400 cursor-not-allowed'
+              : 'bg-red-600/20 text-red-400 hover:bg-red-600/30'
+          }`}
         >
           <Trash2 size={16} />
         </button>

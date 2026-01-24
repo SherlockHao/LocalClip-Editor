@@ -241,8 +241,37 @@ async def run_speaker_diarization_task(
             55, "说话人聚类分析中...", "processing"
         )
 
+        # 获取视频时长以确定聚类数量
+        import subprocess
+        try:
+            result = subprocess.run(
+                ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                 '-of', 'default=noprint_wrappers=1:nokey=1', video_path],
+                capture_output=True, text=True, timeout=10
+            )
+            video_duration = float(result.stdout.strip())
+            print(f"[说话人识别] 视频时长: {video_duration:.2f}秒 ({video_duration/60:.2f}分钟)", flush=True)
+        except Exception as e:
+            print(f"[说话人识别] 无法获取视频时长: {e}，使用默认聚类数 5", flush=True)
+            video_duration = 300  # 默认5分钟
+
+        # 根据视频时长计算说话人聚类数量
+        duration_minutes = video_duration / 60
+        if duration_minutes <= 2:
+            n_clusters = 4
+        elif duration_minutes <= 5:
+            n_clusters = 5
+        elif duration_minutes <= 10:
+            n_clusters = 6
+        elif duration_minutes <= 20:
+            n_clusters = 7
+        else:
+            n_clusters = 8
+
+        print(f"[说话人识别] 根据视频时长 {duration_minutes:.2f}分钟，设置聚类数量为 {n_clusters}", flush=True)
+
         # 聚类识别说话人
-        clusterer = SpeakerClusterer()
+        clusterer = SpeakerClusterer(n_clusters=n_clusters, distance_threshold=None)
         speaker_labels = clusterer.cluster_embeddings(embeddings)
         num_speakers = clusterer.get_unique_speakers_count(speaker_labels)
 
@@ -278,7 +307,15 @@ async def run_speaker_diarization_task(
         # 性别识别
         from gender_classifier import GenderClassifier, rename_speakers_by_gender
         gender_classifier = GenderClassifier()
-        gender_dict = gender_classifier.classify_speakers(scored_segments, min_duration=2.0)
+
+        # 使用静音切割预处理，临时文件保存在segments_dir
+        gender_dict = gender_classifier.classify_speakers(
+            scored_segments,
+            min_duration=2.0,
+            use_silence_trimming=True,
+            min_final_duration=1.5,
+            temp_dir=str(segments_dir)
+        )
 
         # 根据性别和出现次数重新命名说话人
         print(f"[说话人识别] 根据性别和出现次数重新命名说话人...", flush=True)
@@ -813,6 +850,22 @@ async def serve_cloned_audio(
         headers=headers,
         media_type="audio/wav"
     )
+
+
+# 兼容旧路径格式的路由
+@router.get("/{task_id}/outputs/{language}/cloned_audio/{filename}")
+async def serve_cloned_audio_legacy(
+    task_id: str,
+    language: str,
+    filename: str,
+    request: Request
+):
+    """
+    提供克隆音频文件的流式传输（兼容旧路径格式）
+    重定向到新的路由处理
+    """
+    # 重用新路由的逻辑
+    return await serve_cloned_audio(task_id, language, filename, request)
 
 
 # ==================== 导出 API ====================
@@ -1599,19 +1652,87 @@ async def serve_stitched_audio(
     request: Request
 ):
     """
-    提供拼接后的音频文件
+    提供拼接后的音频文件（支持 Range 请求以实现 seek 功能）
     """
-    from fastapi.responses import FileResponse
+    from fastapi.responses import Response, StreamingResponse
+    import os
 
     stitched_audio_path = task_path_manager.get_stitched_audio_path(task_id, language)
 
     if not stitched_audio_path.exists():
         raise HTTPException(status_code=404, detail="拼接音频不存在")
 
-    return FileResponse(
-        str(stitched_audio_path),
-        media_type="audio/wav",
-        filename=f"stitched_{task_id}_{language}.wav"
+    file_path = str(stitched_audio_path)
+    file_size = os.path.getsize(file_path)
+
+    # 获取 Range 请求头
+    range_header = request.headers.get("range")
+
+    if range_header:
+        # 解析 Range 头，格式: bytes=start-end
+        try:
+            range_spec = range_header.replace("bytes=", "")
+            parts = range_spec.split("-")
+            start = int(parts[0]) if parts[0] else 0
+            end = int(parts[1]) if parts[1] else file_size - 1
+
+            # 确保范围有效
+            if start >= file_size:
+                raise HTTPException(status_code=416, detail="Range Not Satisfiable")
+
+            end = min(end, file_size - 1)
+            content_length = end - start + 1
+
+            def iter_file():
+                with open(file_path, "rb") as f:
+                    f.seek(start)
+                    remaining = content_length
+                    chunk_size = 8192
+                    while remaining > 0:
+                        chunk = f.read(min(chunk_size, remaining))
+                        if not chunk:
+                            break
+                        remaining -= len(chunk)
+                        yield chunk
+
+            headers = {
+                "Content-Range": f"bytes {start}-{end}/{file_size}",
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(content_length),
+                "Content-Type": "audio/wav",
+            }
+
+            return StreamingResponse(
+                iter_file(),
+                status_code=206,
+                headers=headers,
+                media_type="audio/wav"
+            )
+
+        except (ValueError, IndexError) as e:
+            print(f"[音频服务] Range 解析失败: {range_header}, 错误: {e}")
+            # Range 解析失败，返回完整文件
+
+    # 没有 Range 请求或解析失败，返回完整文件（带 Accept-Ranges 头）
+    def iter_full_file():
+        with open(file_path, "rb") as f:
+            chunk_size = 8192
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(file_size),
+        "Content-Type": "audio/wav",
+    }
+
+    return StreamingResponse(
+        iter_full_file(),
+        headers=headers,
+        media_type="audio/wav"
     )
 
 

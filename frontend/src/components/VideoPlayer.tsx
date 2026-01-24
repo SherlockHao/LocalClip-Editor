@@ -11,6 +11,7 @@ interface VideoPlayerProps {
   src: string;
   onTimeUpdate: () => void;
   onLoadedMetadata: () => void;
+  onEnded?: () => void;
   isPlaying: boolean;
   currentTime: number;
   duration: number;
@@ -25,6 +26,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   src,
   onTimeUpdate,
   onLoadedMetadata,
+  onEnded,
   isPlaying,
   currentTime,
   duration,
@@ -34,7 +36,9 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   subtitles = []
 }) => {
   const [hasLoaded, setHasLoaded] = useState(false);
+  const [audioReady, setAudioReady] = useState(false);
   const audioRef = useReactRef<HTMLAudioElement>(null);
+  const pendingSeekRef = useReactRef<number | null>(null);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -45,24 +49,32 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       onLoadedMetadata();
       setHasLoaded(true);
     };
+    const handleEndedEvent = () => {
+      if (onEnded) {
+        onEnded();
+      }
+      // 同时暂停外部音频
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+      }
+    };
 
     video.addEventListener('timeupdate', handleTimeUpdateEvent);
     video.addEventListener('loadedmetadata', handleLoadedMetadataEvent);
+    video.addEventListener('ended', handleEndedEvent);
 
     return () => {
       video.removeEventListener('timeupdate', handleTimeUpdateEvent);
       video.removeEventListener('loadedmetadata', handleLoadedMetadataEvent);
+      video.removeEventListener('ended', handleEndedEvent);
     };
-  }, [videoRef, onTimeUpdate, onLoadedMetadata]);
+  }, [videoRef, onTimeUpdate, onLoadedMetadata, onEnded]);
 
   // 同步视频和音频的播放/暂停
   useEffect(() => {
     const video = videoRef.current;
     const audio = audioRef.current;
-
-    console.log('[VideoPlayer] 播放/暂停 effect 执行, isPlaying:', isPlaying);
-    console.log('[VideoPlayer] video:', !!video, 'audio:', !!audio);
-    console.log('[VideoPlayer] useExternalAudio:', useExternalAudio, 'audioSrc:', audioSrc);
 
     if (!video) return;
 
@@ -80,26 +92,33 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
         const currentAudioTime = audio.currentTime;
         const timeDiff = Math.abs(targetTime - currentAudioTime);
 
-        console.log('[VideoPlayer] 播放时同步音频: video.currentTime:', targetTime, 'audio.currentTime:', currentAudioTime, 'timeDiff:', timeDiff);
+        // 检查音频是否准备好
+        if (audio.readyState < 1) {
+          pendingSeekRef.current = targetTime;
 
-        // 如果时间差距很小，直接播放
-        if (timeDiff < 0.1) {
-          console.log('[VideoPlayer] 时间差小，直接播放音频');
-          audio.play().catch(err => console.error('外部音频播放失败:', err));
+          const handleCanPlayForPlay = () => {
+            audio.currentTime = targetTime;
+            const handleSeekedForPlay = () => {
+              audio.play().catch(() => {});
+              audio.removeEventListener('seeked', handleSeekedForPlay);
+            };
+            audio.addEventListener('seeked', handleSeekedForPlay);
+            audio.removeEventListener('canplay', handleCanPlayForPlay);
+          };
+          audio.addEventListener('canplay', handleCanPlayForPlay);
+        } else if (timeDiff < 0.1) {
+          // 如果时间差距很小，直接播放
+          audio.play().catch(() => {});
         } else {
           // 否则，先设置时间，等待seeked事件后再播放
-          console.log('[VideoPlayer] 时间差大，先 seek 音频到:', targetTime);
           const handleSeeked = () => {
-            console.log('[VideoPlayer] 音频 seeked，开始播放');
-            audio.play().catch(err => console.error('外部音频播放失败:', err));
+            audio.play().catch(() => {});
             audio.removeEventListener('seeked', handleSeeked);
           };
 
           audio.addEventListener('seeked', handleSeeked);
           audio.currentTime = targetTime;
         }
-      } else {
-        console.log('[VideoPlayer] 不使用外部音频或条件不满足');
       }
     } else {
       video.pause();
@@ -109,45 +128,47 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, [isPlaying, useExternalAudio]);
 
+  // 当音频源改变时重置状态
+  useEffect(() => {
+    setAudioReady(false);
+    pendingSeekRef.current = null;
+  }, [audioSrc]);
+
   // 同步外部音频的时间
   useEffect(() => {
     const video = videoRef.current;
     const audio = audioRef.current;
 
-    console.log('[VideoPlayer] 同步音频 effect 执行');
-    console.log('[VideoPlayer] video:', !!video, 'audio:', !!audio);
-    console.log('[VideoPlayer] useExternalAudio:', useExternalAudio, 'audioSrc:', audioSrc);
-
     if (!video || !audio || !useExternalAudio || !audioSrc) {
-      console.log('[VideoPlayer] 条件不满足，跳过音频同步设置');
       return;
     }
 
     const syncAudioTime = () => {
-      console.log('[VideoPlayer] video seeked 事件触发');
-      console.log('[VideoPlayer] video.currentTime:', video.currentTime, 'audio.currentTime:', audio.currentTime);
+      const targetTime = video.currentTime;
+      const timeDiff = Math.abs(audio.currentTime - targetTime);
 
-      const timeDiff = Math.abs(audio.currentTime - video.currentTime);
       if (timeDiff > 0.1) {
         const wasPlaying = !audio.paused;
-        console.log('[VideoPlayer] 同步音频时间:', video.currentTime, 'wasPlaying:', wasPlaying);
-        audio.currentTime = video.currentTime;
-        // 如果音频之前在播放，确保同步后继续播放
-        if (wasPlaying && !video.paused) {
-          audio.play().catch(err => console.error('恢复播放失败:', err));
+
+        // 检查音频是否准备好进行 seek
+        if (audio.readyState >= 1) {
+          audio.currentTime = targetTime;
+          // 如果音频之前在播放，确保同步后继续播放
+          if (wasPlaying && !video.paused) {
+            audio.play().catch(() => {});
+          }
+        } else {
+          // 音频还没准备好，保存待处理的 seek
+          pendingSeekRef.current = targetTime;
         }
-      } else {
-        console.log('[VideoPlayer] 时间差小于0.1s，无需同步');
       }
     };
 
-    console.log('[VideoPlayer] 添加 seeked 事件监听器');
     video.addEventListener('seeked', syncAudioTime);
     return () => {
-      console.log('[VideoPlayer] 移除 seeked 事件监听器');
       video.removeEventListener('seeked', syncAudioTime);
     };
-  }, [videoRef, useExternalAudio, audioSrc]);
+  }, [videoRef, useExternalAudio, audioSrc, audioReady]);
 
   // 处理音频源切换（只负责静音/取消静音视频）
   useEffect(() => {
@@ -283,11 +304,19 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       {/* 外部音频元素 */}
       {audioSrc && (
         <audio
+          key={audioSrc}
           ref={audioRef}
           src={audioSrc}
           preload="auto"
           style={{ display: 'none' }}
-          onError={(e) => console.error('音频加载错误', e)}
+          onCanPlay={() => {
+            setAudioReady(true);
+            // 如果有待处理的 seek，现在执行
+            if (pendingSeekRef.current !== null && audioRef.current) {
+              audioRef.current.currentTime = pendingSeekRef.current;
+              pendingSeekRef.current = null;
+            }
+          }}
         />
       )}
     </div>

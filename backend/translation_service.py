@@ -587,6 +587,26 @@ async def batch_translate_subtitles(
 
             print(f"\n[翻译服务] ===== 质量检查和优化完成 =====\n", flush=True)
 
+            # 7. 最终检查：处理空文本字幕
+            print(f"\n[翻译服务] 开始检查空文本字幕...", flush=True)
+            await update_progress(99, "正在检查空文本...")
+
+            target_subtitles_for_check = srt_parser.parse_srt(target_subtitle_path)
+
+            empty_text_count = 0
+            for idx, subtitle in enumerate(target_subtitles_for_check):
+                if not subtitle["text"] or not subtitle["text"].strip():
+                    # 用 "hmm" 替代空文本（适用于各种语言）
+                    subtitle["text"] = "hmm"
+                    empty_text_count += 1
+                    print(f"  [{idx}] 空文本 -> 'hmm'", flush=True)
+
+            if empty_text_count > 0:
+                print(f"\n✅ 成功处理 {empty_text_count} 条空文本字幕", flush=True)
+                srt_parser.save_srt(target_subtitles_for_check, target_subtitle_path)
+            else:
+                print(f"ℹ️  未发现空文本字幕", flush=True)
+
             # 计算总耗时
             translation_elapsed = time.time() - translation_start_time
             print(f"[翻译服务] ✓ 翻译完成！总耗时: {translation_elapsed:.2f}秒", flush=True)

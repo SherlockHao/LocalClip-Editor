@@ -152,11 +152,11 @@ async def translate_sentence(
     # 构建 prompt - 使用 JSON 格式输出
     # 针对日语添加特殊要求：使用假名
     if '日' in target_language or 'ja' in target_language.lower():
-        prompt = f'将中文翻译成{target_language}。要求：汉字强制用假名、语义尽量保证、输出极简、字数极少。返回 JSON 对象，Key 为 "tr"：\n\n{sentence}'
+        prompt = f'你是配音字幕压缩专家。翻译成{target_language}。要求：汉字强制用假名、最口语的缩略形式、输出极简、字数极少、宁可漏译也不要长译。返回 JSON 对象，Key 为 "tr"：\n\n{sentence}'
     elif '韩' in target_language or 'ko' in target_language.lower():
-        prompt = f'将中文翻译成{target_language}。要求：不含汉字、语义尽量保证、输出极简、字数极少。返回 JSON 对象，Key 为 "tr"：\n\n{sentence}'
+        prompt = f'你是配音字幕压缩专家。翻译成{target_language}。要求：不含汉字、最口语的缩略形式、输出极简、字数极少、宁可漏译也不要长译。返回 JSON 对象，Key 为 "tr"：\n\n{sentence}'
     else:
-        prompt = f'将中文翻译成{target_language}。要求：语义尽量保证、输出极简、字数极少。返回 JSON 对象，Key 为 "tr"：\n\n{sentence}'
+        prompt = f'你是配音字幕压缩专家。翻译成{target_language}。要求：最口语的缩略形式、输出极简、字数极少、宁可漏译也不要长译。返回 JSON 对象，Key 为 "tr"：\n\n{sentence}'
 
     try:
         start_time = time.time()

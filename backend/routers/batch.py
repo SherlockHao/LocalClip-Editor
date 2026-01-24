@@ -166,6 +166,104 @@ async def stop_batch_processing():
         }
 
 
+# ==================== 动态队列 API ====================
+
+class QueueTaskRequest(BaseModel):
+    """添加任务到队列请求"""
+    languages: Optional[List[str]] = None  # 如果为空，使用默认语言列表
+
+
+@router.post("/queue/{task_id}")
+async def add_task_to_queue(
+    task_id: str,
+    request: QueueTaskRequest = None,
+    db: Session = Depends(get_db)
+):
+    """
+    添加任务到批量处理队列
+
+    如果批量处理正在运行，任务将在当前任务完成后执行
+    如果批量处理未运行，返回错误（需要先启动批量处理）
+
+    Args:
+        task_id: 要添加的任务ID
+        request: 可选的语言配置
+    """
+    # 检查任务是否存在
+    task = db.query(Task).filter(Task.task_id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    # 检查批量处理是否在运行
+    if not batch_processor.is_running:
+        raise HTTPException(
+            status_code=409,
+            detail="批量处理未运行，请先启动批量处理"
+        )
+
+    # 获取语言列表
+    languages = None
+    if request and request.languages:
+        languages = request.languages
+
+    # 添加到队列
+    success = batch_processor.add_task_to_queue(task_id, languages)
+
+    if success:
+        return {
+            "success": True,
+            "message": f"任务 {task_id} 已添加到队列",
+            "queued_count": batch_processor.queued_task_count,
+            "queued_tasks": batch_processor.get_queued_tasks()
+        }
+    else:
+        raise HTTPException(
+            status_code=409,
+            detail="无法添加任务到队列（任务可能已在队列中或正在处理）"
+        )
+
+
+@router.delete("/queue/{task_id}")
+async def remove_task_from_queue(task_id: str):
+    """
+    从批量处理队列中移除任务
+
+    只能移除尚未开始处理的队列任务
+
+    Args:
+        task_id: 要移除的任务ID
+    """
+    success = batch_processor.remove_task_from_queue(task_id)
+
+    if success:
+        return {
+            "success": True,
+            "message": f"任务 {task_id} 已从队列移除",
+            "queued_count": batch_processor.queued_task_count,
+            "queued_tasks": batch_processor.get_queued_tasks()
+        }
+    else:
+        raise HTTPException(
+            status_code=404,
+            detail="任务不在队列中"
+        )
+
+
+@router.get("/queue")
+async def get_queue_status():
+    """
+    获取队列状态
+
+    返回当前队列中等待的任务列表
+    """
+    return {
+        "is_running": batch_processor.is_running,
+        "queued_count": batch_processor.queued_task_count,
+        "queued_tasks": batch_processor.get_queued_tasks(),
+        "current_task_id": batch_processor.progress.current_task_id
+    }
+
+
 # ==================== 内部函数 ====================
 
 def _create_callbacks(db: Session, default_languages: List[str]) -> Dict:
