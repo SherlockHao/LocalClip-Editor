@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Play, Trash2, Plus, Video, Clock, Loader2, FileText, Upload, PlayCircle, StopCircle } from 'lucide-react';
+import { Play, Trash2, Plus, Video, Clock, Loader2, FileText, Upload, PlayCircle, StopCircle, CheckCircle, XCircle, Activity, TrendingUp } from 'lucide-react';
 
 interface StageStatus {
   status: string;
@@ -320,20 +320,37 @@ const TaskDashboard: React.FC = () => {
   const isBatchRunning = batchStatus?.is_running || false;
   const isBatchStopping = batchStatus?.state === 'stopping';
 
+  // 计算任务统计
+  const taskStats = React.useMemo(() => {
+    const total = tasks.length;
+    const processing = tasks.filter(t => t.status === 'processing' || runningTasks[t.task_id]).length;
+    const completed = tasks.filter(t => t.status === 'completed').length;
+    const failed = tasks.filter(t => t.status === 'failed').length;
+    const pending = total - processing - completed - failed;
+
+    return { total, processing, completed, failed, pending };
+  }, [tasks, runningTasks]);
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* 头部 */}
-        <div className="flex justify-between items-center mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-white flex items-center gap-3">
-              <div className="p-2 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg">
-                <Video size={28} />
+        {/* Ascendia 品牌头部 */}
+        <div className="mb-8">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="relative">
+                <div className="absolute inset-0 bg-gradient-to-r from-purple-600 to-blue-600 rounded-2xl blur-xl opacity-50 animate-pulse"></div>
+                <div className="relative p-4 bg-gradient-to-br from-purple-600 via-blue-600 to-cyan-600 rounded-2xl shadow-2xl">
+                  <Video size={36} className="text-white" />
+                </div>
               </div>
-              任务看板
-            </h1>
-            <p className="text-slate-400 mt-2">管理您的视频编辑任务</p>
-          </div>
+              <div>
+                <h1 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-blue-400 to-cyan-400">
+                  Ascendia
+                </h1>
+                <p className="text-slate-400 text-sm mt-1 font-medium">AI 驱动的智能视频编辑平台</p>
+              </div>
+            </div>
 
           <div className="flex items-center gap-3">
             {/* 批量处理按钮 */}
@@ -341,10 +358,10 @@ const TaskDashboard: React.FC = () => {
               <button
                 onClick={handleStartBatchAll}
                 disabled={!canStartBatch || loading}
-                className={`flex items-center gap-2 px-5 py-3 rounded-lg font-medium transition-all ${
+                className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold transition-all ${
                   canStartBatch && !loading
-                    ? 'bg-gradient-to-r from-green-600 to-green-500 text-white hover:shadow-lg hover:shadow-green-500/50'
-                    : 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                    ? 'bg-gradient-to-r from-green-600 to-emerald-600 text-white hover:shadow-xl hover:shadow-green-500/40 hover:-translate-y-0.5 border border-green-500/30'
+                    : 'bg-slate-700/50 text-slate-400 cursor-not-allowed border border-slate-600'
                 }`}
                 title={loading ? '正在加载任务列表' : !canStartBatch ? '没有可处理的任务' : '批量处理所有任务'}
               >
@@ -355,10 +372,10 @@ const TaskDashboard: React.FC = () => {
               <button
                 onClick={handleStopBatch}
                 disabled={isBatchStopping || loading}
-                className={`flex items-center gap-2 px-5 py-3 rounded-lg font-medium transition-all ${
+                className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold transition-all ${
                   isBatchStopping || loading
-                    ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
-                    : 'bg-gradient-to-r from-red-600 to-red-500 text-white hover:shadow-lg hover:shadow-red-500/50'
+                    ? 'bg-slate-700/50 text-slate-400 cursor-not-allowed border border-slate-600'
+                    : 'bg-gradient-to-r from-red-600 to-rose-600 text-white hover:shadow-xl hover:shadow-red-500/40 hover:-translate-y-0.5 border border-red-500/30'
                 }`}
               >
                 {isBatchStopping ? (
@@ -377,17 +394,97 @@ const TaskDashboard: React.FC = () => {
 
             <button
               onClick={() => setShowUploadModal(true)}
-              className={`flex items-center gap-2 px-6 py-3 rounded-lg transition-all ${
-                uploading || loading || isBatchRunning
-                  ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
-                  : 'bg-gradient-to-r from-purple-600 to-purple-500 text-white hover:shadow-lg hover:shadow-purple-500/50'
+              className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold transition-all ${
+                uploading || loading
+                  ? 'bg-slate-700/50 text-slate-400 cursor-not-allowed border border-slate-600'
+                  : 'bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 text-white hover:shadow-xl hover:shadow-purple-500/40 hover:-translate-y-0.5 border border-purple-500/30'
               }`}
-              disabled={uploading || loading || isBatchRunning}
-              title={isBatchRunning ? '批量处理运行中，请稍候' : uploading ? '上传中' : loading ? '加载中' : '创建新任务'}
+              disabled={uploading || loading}
+              title={uploading ? '上传中' : loading ? '加载中' : '创建新任务'}
             >
               <Plus size={20} />
               <span>创建新任务</span>
             </button>
+          </div>
+        </div>
+        </div>
+
+        {/* 任务统计看板 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+          {/* 总任务数 */}
+          <div className="bg-gradient-to-br from-slate-800/80 to-slate-800/50 backdrop-blur-sm border border-slate-700/50 rounded-xl p-6 hover:border-slate-600 transition-all hover:shadow-lg hover:shadow-slate-500/10">
+            <div className="flex items-center justify-between mb-2">
+              <div className="p-2 bg-gradient-to-br from-slate-700 to-slate-600 rounded-lg">
+                <Video size={20} className="text-slate-300" />
+              </div>
+              <TrendingUp size={16} className="text-slate-400" />
+            </div>
+            <div className="mt-4">
+              <p className="text-3xl font-bold text-white">{taskStats.total}</p>
+              <p className="text-xs text-slate-400 mt-1">总任务数</p>
+            </div>
+          </div>
+
+          {/* 进行中 */}
+          <div className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 backdrop-blur-sm border border-blue-500/30 rounded-xl p-6 hover:border-blue-400/50 transition-all hover:shadow-lg hover:shadow-blue-500/20">
+            <div className="flex items-center justify-between mb-2">
+              <div className="p-2 bg-gradient-to-br from-blue-600 to-blue-500 rounded-lg">
+                <Activity size={20} className="text-white" />
+              </div>
+              {taskStats.processing > 0 && (
+                <Loader2 size={16} className="text-blue-400 animate-spin" />
+              )}
+            </div>
+            <div className="mt-4">
+              <p className="text-3xl font-bold text-blue-400">{taskStats.processing}</p>
+              <p className="text-xs text-blue-300 mt-1">进行中</p>
+            </div>
+          </div>
+
+          {/* 已完成 */}
+          <div className="bg-gradient-to-br from-green-500/10 to-green-600/5 backdrop-blur-sm border border-green-500/30 rounded-xl p-6 hover:border-green-400/50 transition-all hover:shadow-lg hover:shadow-green-500/20">
+            <div className="flex items-center justify-between mb-2">
+              <div className="p-2 bg-gradient-to-br from-green-600 to-green-500 rounded-lg">
+                <CheckCircle size={20} className="text-white" />
+              </div>
+            </div>
+            <div className="mt-4">
+              <p className="text-3xl font-bold text-green-400">{taskStats.completed}</p>
+              <p className="text-xs text-green-300 mt-1">已完成</p>
+            </div>
+            {taskStats.total > 0 && (
+              <div className="mt-3 pt-3 border-t border-green-500/20">
+                <p className="text-xs text-green-400">
+                  完成率: {Math.round((taskStats.completed / taskStats.total) * 100)}%
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* 失败 */}
+          <div className="bg-gradient-to-br from-red-500/10 to-red-600/5 backdrop-blur-sm border border-red-500/30 rounded-xl p-6 hover:border-red-400/50 transition-all hover:shadow-lg hover:shadow-red-500/20">
+            <div className="flex items-center justify-between mb-2">
+              <div className="p-2 bg-gradient-to-br from-red-600 to-red-500 rounded-lg">
+                <XCircle size={20} className="text-white" />
+              </div>
+            </div>
+            <div className="mt-4">
+              <p className="text-3xl font-bold text-red-400">{taskStats.failed}</p>
+              <p className="text-xs text-red-300 mt-1">失败</p>
+            </div>
+          </div>
+
+          {/* 待处理 */}
+          <div className="bg-gradient-to-br from-yellow-500/10 to-yellow-600/5 backdrop-blur-sm border border-yellow-500/30 rounded-xl p-6 hover:border-yellow-400/50 transition-all hover:shadow-lg hover:shadow-yellow-500/20">
+            <div className="flex items-center justify-between mb-2">
+              <div className="p-2 bg-gradient-to-br from-yellow-600 to-yellow-500 rounded-lg">
+                <Clock size={20} className="text-white" />
+              </div>
+            </div>
+            <div className="mt-4">
+              <p className="text-3xl font-bold text-yellow-400">{taskStats.pending}</p>
+              <p className="text-xs text-yellow-300 mt-1">待处理</p>
+            </div>
           </div>
         </div>
 
@@ -476,10 +573,22 @@ const TaskDashboard: React.FC = () => {
             <Loader2 size={48} className="animate-spin text-blue-400" />
           </div>
         ) : tasks.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 text-slate-400">
-            <Video size={64} className="mb-4 opacity-50" />
-            <p className="text-lg">暂无任务</p>
-            <p className="text-sm mt-2">点击"上传新视频"创建第一个任务</p>
+          <div className="flex flex-col items-center justify-center h-96 text-slate-400">
+            <div className="relative mb-6">
+              <div className="absolute inset-0 bg-gradient-to-r from-purple-600/20 to-blue-600/20 rounded-full blur-2xl"></div>
+              <div className="relative p-6 bg-gradient-to-br from-slate-800 to-slate-700 rounded-full border border-slate-600">
+                <Video size={64} className="text-slate-400" />
+              </div>
+            </div>
+            <h3 className="text-2xl font-bold text-slate-300 mb-2">还没有任务</h3>
+            <p className="text-slate-400 text-center max-w-md">
+              开始您的 AI 视频编辑之旅<br/>
+              点击右上角"创建新任务"按钮上传视频
+            </p>
+            <div className="mt-8 flex items-center gap-2 text-xs text-slate-500">
+              <div className="w-2 h-2 rounded-full bg-gradient-to-r from-purple-500 to-blue-500 animate-pulse"></div>
+              <span>支持多语言翻译 • 智能语音克隆 • 自动视频导出</span>
+            </div>
           </div>
         ) : (
           <div className="max-h-[calc(100vh-280px)] overflow-y-auto pr-2">
@@ -508,28 +617,40 @@ const TaskDashboard: React.FC = () => {
 
       {/* 上传模态框 */}
       {showUploadModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => !uploading && setShowUploadModal(false)}>
-          <div className="bg-slate-800 rounded-lg p-8 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-2xl font-bold text-white mb-6">创建新任务</h2>
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 animate-fadeIn" onClick={() => !uploading && setShowUploadModal(false)}>
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl p-8 max-w-md w-full mx-4 border border-slate-700 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-2 bg-gradient-to-br from-purple-600 to-blue-600 rounded-lg">
+                <Plus size={24} className="text-white" />
+              </div>
+              <h2 className="text-2xl font-bold text-white">创建新任务</h2>
+            </div>
 
             {/* 视频文件上传 */}
             <div className="mb-6">
-              <label className="block text-sm font-medium text-slate-300 mb-2">
+              <label className="block text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
+                <Video size={16} className="text-purple-400" />
                 视频文件 <span className="text-red-400">*</span>
               </label>
-              <label className="flex items-center justify-center w-full px-4 py-8 border-2 border-dashed border-slate-600 rounded-lg cursor-pointer hover:border-purple-500 transition-all bg-slate-700/30">
+              <label className={`group flex items-center justify-center w-full px-4 py-8 border-2 border-dashed rounded-xl cursor-pointer transition-all ${
+                videoFile
+                  ? 'border-purple-500 bg-purple-500/10'
+                  : 'border-slate-600 bg-slate-700/30 hover:border-purple-500 hover:bg-purple-500/5'
+              }`}>
                 <div className="text-center">
                   {videoFile ? (
                     <>
-                      <Video className="mx-auto mb-2 text-purple-400" size={32} />
-                      <p className="text-sm text-white font-medium">{videoFile.name}</p>
-                      <p className="text-xs text-slate-400 mt-1">{(videoFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                      <div className="p-3 bg-gradient-to-br from-purple-600 to-blue-600 rounded-xl inline-block mb-3">
+                        <Video className="text-white" size={32} />
+                      </div>
+                      <p className="text-sm text-white font-semibold">{videoFile.name}</p>
+                      <p className="text-xs text-purple-300 mt-1">{(videoFile.size / 1024 / 1024).toFixed(2)} MB</p>
                     </>
                   ) : (
                     <>
-                      <Upload className="mx-auto mb-2 text-slate-400" size={32} />
-                      <p className="text-sm text-slate-300">点击选择视频文件</p>
-                      <p className="text-xs text-slate-500 mt-1">支持 MP4, MOV, AVI, MKV</p>
+                      <Upload className="mx-auto mb-3 text-slate-400 group-hover:text-purple-400 transition-colors" size={36} />
+                      <p className="text-sm text-slate-300 font-medium group-hover:text-white transition-colors">点击选择视频文件</p>
+                      <p className="text-xs text-slate-500 mt-2">支持 MP4, MOV, AVI, MKV</p>
                     </>
                   )}
                 </div>
@@ -544,22 +665,29 @@ const TaskDashboard: React.FC = () => {
             </div>
 
             {/* 字幕文件上传 (可选) */}
-            <div className="mb-6">
-              <label className="block text-sm font-medium text-slate-300 mb-2">
-                字幕文件 <span className="text-slate-500">(可选)</span>
+            <div className="mb-8">
+              <label className="block text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
+                <FileText size={16} className="text-blue-400" />
+                字幕文件 <span className="text-slate-500 font-normal">(可选)</span>
               </label>
-              <label className="flex items-center justify-center w-full px-4 py-6 border-2 border-dashed border-slate-600 rounded-lg cursor-pointer hover:border-blue-500 transition-all bg-slate-700/30">
+              <label className={`group flex items-center justify-center w-full px-4 py-6 border-2 border-dashed rounded-xl cursor-pointer transition-all ${
+                subtitleFile
+                  ? 'border-blue-500 bg-blue-500/10'
+                  : 'border-slate-600 bg-slate-700/30 hover:border-blue-500 hover:bg-blue-500/5'
+              }`}>
                 <div className="text-center">
                   {subtitleFile ? (
                     <>
-                      <FileText className="mx-auto mb-2 text-blue-400" size={28} />
-                      <p className="text-sm text-white font-medium">{subtitleFile.name}</p>
-                      <p className="text-xs text-slate-400 mt-1">{(subtitleFile.size / 1024).toFixed(2)} KB</p>
+                      <div className="p-2.5 bg-gradient-to-br from-blue-600 to-cyan-600 rounded-lg inline-block mb-2">
+                        <FileText className="text-white" size={24} />
+                      </div>
+                      <p className="text-sm text-white font-semibold">{subtitleFile.name}</p>
+                      <p className="text-xs text-blue-300 mt-1">{(subtitleFile.size / 1024).toFixed(2)} KB</p>
                     </>
                   ) : (
                     <>
-                      <FileText className="mx-auto mb-2 text-slate-400" size={28} />
-                      <p className="text-sm text-slate-300">点击选择字幕文件</p>
+                      <FileText className="mx-auto mb-2 text-slate-400 group-hover:text-blue-400 transition-colors" size={32} />
+                      <p className="text-sm text-slate-300 font-medium group-hover:text-white transition-colors">点击选择字幕文件</p>
                       <p className="text-xs text-slate-500 mt-1">支持 SRT 格式</p>
                     </>
                   )}
@@ -582,23 +710,26 @@ const TaskDashboard: React.FC = () => {
                   setVideoFile(null);
                   setSubtitleFile(null);
                 }}
-                className="flex-1 px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-all"
+                className="flex-1 px-5 py-3 bg-slate-700/50 text-slate-300 rounded-xl hover:bg-slate-600/50 transition-all font-semibold border border-slate-600"
                 disabled={uploading}
               >
                 取消
               </button>
               <button
                 onClick={handleUploadSubmit}
-                className="flex-1 px-4 py-2 bg-gradient-to-r from-purple-600 to-purple-500 text-white rounded-lg hover:shadow-lg hover:shadow-purple-500/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                className="flex-1 px-5 py-3 bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 text-white rounded-xl hover:shadow-xl hover:shadow-purple-500/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
                 disabled={uploading || !videoFile}
               >
                 {uploading ? (
                   <span className="flex items-center justify-center gap-2">
-                    <Loader2 size={16} className="animate-spin" />
+                    <Loader2 size={18} className="animate-spin" />
                     上传中...
                   </span>
                 ) : (
-                  '创建任务'
+                  <span className="flex items-center justify-center gap-2">
+                    <Upload size={18} />
+                    创建任务
+                  </span>
                 )}
               </button>
             </div>
@@ -687,32 +818,43 @@ const TaskCard: React.FC<TaskCardProps> = ({
   return (
     <div
       onClick={onOpen}
-      className="bg-slate-800 border border-slate-700 rounded-lg p-6 hover:border-purple-500 transition-all cursor-pointer hover:shadow-xl hover:shadow-purple-500/20"
+      className="group relative bg-gradient-to-br from-slate-800/90 to-slate-800/50 backdrop-blur-sm border border-slate-700/50 rounded-xl p-6 hover:border-purple-500/50 transition-all cursor-pointer hover:shadow-2xl hover:shadow-purple-500/30 hover:-translate-y-1"
     >
+      {/* 背景渐变光晕 */}
+      <div className="absolute inset-0 bg-gradient-to-br from-purple-500/0 via-blue-500/0 to-cyan-500/0 group-hover:from-purple-500/5 group-hover:via-blue-500/5 group-hover:to-cyan-500/5 rounded-xl transition-all duration-500"></div>
+
+      <div className="relative z-10">
       {/* 视频信息 */}
       <div className="mb-4">
-        <h3 className="text-white font-semibold truncate mb-2 flex items-center gap-2">
-          <Video size={18} className="text-blue-400 flex-shrink-0" />
-          <span className="truncate">{task.video_original_name}</span>
-        </h3>
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          <Clock size={14} />
-          <span>{formatDate(task.created_at)}</span>
+        <div className="flex items-start gap-3 mb-3">
+          <div className="p-2.5 bg-gradient-to-br from-purple-600/20 to-blue-600/20 rounded-lg border border-purple-500/30">
+            <Video size={20} className="text-purple-400" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-white font-bold truncate text-lg group-hover:text-purple-300 transition-colors">
+              {task.video_original_name}
+            </h3>
+            <div className="flex items-center gap-2 text-xs text-slate-400 mt-1">
+              <Clock size={12} />
+              <span>{formatDate(task.created_at)}</span>
+            </div>
+          </div>
         </div>
-        <div className="mt-2 flex flex-wrap gap-2">
-          <span className={`text-xs px-2 py-1 rounded ${
-            task.status === 'completed' ? 'bg-green-500/20 text-green-400' :
-            task.status === 'processing' ? 'bg-blue-500/20 text-blue-400' :
-            task.status === 'failed' ? 'bg-red-500/20 text-red-400' :
-            'bg-slate-500/20 text-slate-400'
+        <div className="flex flex-wrap gap-2">
+          <span className={`text-xs px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 ${
+            task.status === 'completed' ? 'bg-gradient-to-r from-green-500/20 to-green-600/20 text-green-400 border border-green-500/30' :
+            task.status === 'processing' ? 'bg-gradient-to-r from-blue-500/20 to-blue-600/20 text-blue-400 border border-blue-500/30' :
+            task.status === 'failed' ? 'bg-gradient-to-r from-red-500/20 to-red-600/20 text-red-400 border border-red-500/30' :
+            'bg-gradient-to-r from-slate-500/20 to-slate-600/20 text-slate-400 border border-slate-500/30'
           }`}>
-            {task.status === 'completed' ? '已完成' :
-             task.status === 'processing' ? '处理中' :
-             task.status === 'failed' ? '失败' : '待处理'}
+            {task.status === 'completed' ? <><CheckCircle size={12} />已完成</> :
+             task.status === 'processing' ? <><Activity size={12} />处理中</> :
+             task.status === 'failed' ? <><XCircle size={12} />失败</> : '待处理'}
           </span>
           {isSpeakerDiarizationCompleted && (
-            <span className="text-xs px-2 py-1 rounded bg-purple-500/20 text-purple-400">
-              说话人识别 ✓
+            <span className="text-xs px-3 py-1.5 rounded-lg font-semibold bg-gradient-to-r from-purple-500/20 to-purple-600/20 text-purple-400 border border-purple-500/30 flex items-center gap-1">
+              <CheckCircle size={12} />
+              说话人识别
             </span>
           )}
         </div>
@@ -805,14 +947,14 @@ const TaskCard: React.FC<TaskCardProps> = ({
         <button
           onClick={onOpen}
           disabled={loading}
-          className={`flex-1 flex items-center justify-center gap-2 py-2 rounded-lg transition-all ${
+          className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg font-semibold transition-all ${
             loading
-              ? 'bg-slate-600 text-slate-400 cursor-not-allowed'
-              : 'bg-purple-600 text-white hover:bg-purple-500'
+              ? 'bg-slate-600/50 text-slate-400 cursor-not-allowed'
+              : 'bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-500 hover:to-blue-500 hover:shadow-lg hover:shadow-purple-500/30'
           }`}
         >
           <Play size={16} />
-          <span>打开</span>
+          <span>打开任务</span>
         </button>
 
         {/* 添加到队列按钮（仅在批量处理运行中且任务不在队列/处理中时显示）*/}
@@ -820,10 +962,10 @@ const TaskCard: React.FC<TaskCardProps> = ({
           <button
             onClick={onAddToQueue}
             disabled={loading}
-            className={`px-3 py-2 rounded-lg transition-all ${
+            className={`px-3 py-2.5 rounded-lg transition-all border ${
               loading
-                ? 'bg-slate-600 text-slate-400 cursor-not-allowed'
-                : 'bg-green-600/20 text-green-400 hover:bg-green-600/30'
+                ? 'bg-slate-600/50 text-slate-400 border-slate-600 cursor-not-allowed'
+                : 'bg-green-600/10 text-green-400 border-green-500/30 hover:bg-green-600/20 hover:border-green-400/50'
             }`}
             title={loading ? '正在加载任务列表' : '添加到批量处理队列'}
           >
@@ -834,14 +976,16 @@ const TaskCard: React.FC<TaskCardProps> = ({
         <button
           onClick={onDelete}
           disabled={loading}
-          className={`px-3 py-2 rounded-lg transition-all ${
+          className={`px-3 py-2.5 rounded-lg transition-all border ${
             loading
-              ? 'bg-slate-600 text-slate-400 cursor-not-allowed'
-              : 'bg-red-600/20 text-red-400 hover:bg-red-600/30'
+              ? 'bg-slate-600/50 text-slate-400 border-slate-600 cursor-not-allowed'
+              : 'bg-red-600/10 text-red-400 border-red-500/30 hover:bg-red-600/20 hover:border-red-400/50'
           }`}
+          title="删除任务"
         >
           <Trash2 size={16} />
         </button>
+      </div>
       </div>
     </div>
   );
