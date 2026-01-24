@@ -303,7 +303,7 @@ async def batch_translate_subtitles(
             else:
                 max_ratio = 1.2
 
-            # 1. 检查译文长度和中文字符
+            # 1. 第一轮检查：收集问题项（长度、中文、英文）
             too_long_items = []
             chinese_replacement_items = []
 
@@ -334,72 +334,10 @@ async def batch_translate_subtitles(
                     })
                     print(f"  [汉字检查] 第 {idx} 条译文包含汉字: '{target_text}'", flush=True)
 
-            # 2. 重新翻译超长文本
-            if too_long_items:
-                print(f"\n[翻译服务] 发现 {len(too_long_items)} 条超长译文，批量重新翻译...", flush=True)
-                await update_progress(85, f"正在重新翻译 {len(too_long_items)} 条超长文本...")
-
-                retranslate_tasks = []
-                for item in too_long_items:
-                    retranslate_tasks.append({
-                        "task_id": f"item-{item['index']}",
-                        "source": item["source"],
-                        "target_language": target_language,
-                        "max_length": int(item["source_length"] * max_ratio * 0.8)
-                    })
-
-                retranslate_config = {
-                    "tasks": retranslate_tasks,
-                    "model": "qwen2.5:32b",
-                    "output_file": str(target_subtitle_path)
-                }
-
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
-                    json.dump(retranslate_config, f, ensure_ascii=False, indent=2)
-                    retranslate_config_file = f.name
-
-                try:
-                    retranslate_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "batch_retranslate_ollama.py")
-                    process = subprocess.Popen(
-                        [ui_env_python, retranslate_script, retranslate_config_file],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        encoding='utf-8',
-                        bufsize=1
-                    )
-
-                    stdout_lines = []
-                    for line in process.stdout:
-                        print(line, end='', flush=True)
-                        stdout_lines.append(line)
-
-                    returncode = process.wait()
-                    stdout = ''.join(stdout_lines)
-
-                    if returncode == 0 and stdout:
-                        results_match = re.search(r'\[Results\](.*?)\[/Results\]', stdout, re.DOTALL)
-                        if results_match:
-                            results_json = results_match.group(1).strip()
-                            retranslate_results = json.loads(results_json)
-
-                            target_subtitles_for_check = srt_parser.parse_srt(target_subtitle_path)
-                            for result_item in retranslate_results:
-                                idx = int(result_item["task_id"].split('-')[1])
-                                target_subtitles_for_check[idx]["text"] = result_item["translation"]
-
-                            srt_parser.save_srt(target_subtitles_for_check, target_subtitle_path)
-                            print(f"✅ 成功重新翻译 {len(retranslate_results)} 条文本", flush=True)
-                except Exception as e:
-                    print(f"⚠️ 重新翻译出错: {e}", flush=True)
-                finally:
-                    if os.path.exists(retranslate_config_file):
-                        os.remove(retranslate_config_file)
-
-            # 3. 替换中文字符
+            # 2. 替换中文字符（先处理字符替换，减少需要重新翻译的数量）
             if chinese_replacement_items:
                 print(f"\n[翻译服务] 发现 {len(chinese_replacement_items)} 条包含中文的译文，准备替换...", flush=True)
-                await update_progress(88, f"正在替换 {len(chinese_replacement_items)} 条译文中的中文...")
+                await update_progress(85, f"正在替换 {len(chinese_replacement_items)} 条译文中的中文...")
 
                 target_subtitles_for_check = srt_parser.parse_srt(target_subtitle_path)
                 replaced_count = 0
@@ -422,10 +360,11 @@ async def batch_translate_subtitles(
                     srt_parser.save_srt(target_subtitles_for_check, target_subtitle_path)
                     print(f"✅ 成功替换 {replaced_count} 条译文中的中文", flush=True)
 
-            # 4. 英文检测和替换（日语/韩语）
+            # 3. 英文检测和替换（日语/韩语）- 收集符号问题项
+            only_symbols_items = []
             if is_japanese or is_korean:
                 print(f"\n[翻译服务] 检查包含英文的句子...", flush=True)
-                await update_progress(91, "正在替换英文部分...")
+                await update_progress(88, "正在替换英文部分...")
 
                 target_subtitles_for_check = srt_parser.parse_srt(target_subtitle_path)
 
@@ -444,7 +383,6 @@ async def batch_translate_subtitles(
                     print(f"[翻译服务] 发现 {len(english_items)} 条包含英文的句子，准备替换英文部分...", flush=True)
 
                     replaced_count = 0
-                    only_symbols_items = []
 
                     for item in english_items:
                         idx = item["index"]
@@ -472,73 +410,95 @@ async def batch_translate_subtitles(
                         srt_parser.save_srt(target_subtitles_for_check, target_subtitle_path)
                         print(f"✅ 成功替换 {replaced_count} 条译文中的英文", flush=True)
 
-                    # 处理只剩符号的条目 - 需要重新翻译
-                    if only_symbols_items:
-                        print(f"\n[翻译服务] 发现 {len(only_symbols_items)} 条替换后只剩符号，需要重新翻译...", flush=True)
-                        await update_progress(93, f"正在重新翻译 {len(only_symbols_items)} 条符号问题...")
+            # 4. 合并所有需要重新翻译的项，一次性处理（优化：减少模型加载次数）
+            all_retranslate_items = []
 
-                        retranslate_tasks = []
-                        for item in only_symbols_items:
-                            if item["source"]:
-                                retranslate_tasks.append({
-                                    "task_id": f"item-{item['index']}",
-                                    "source": item["source"],
-                                    "target_language": target_language,
-                                    "max_length": int(len(item["source"]) * max_ratio * 0.8)
-                                })
+            # 添加超长文本项
+            if too_long_items:
+                print(f"[翻译服务] 收集到 {len(too_long_items)} 条超长译文需要重新翻译", flush=True)
+                all_retranslate_items.extend(too_long_items)
 
-                        if retranslate_tasks:
-                            retranslate_config = {
-                                "tasks": retranslate_tasks,
-                                "model": "qwen2.5:32b",
-                                "output_file": str(target_subtitle_path)
-                            }
+            # 添加符号问题项
+            if only_symbols_items:
+                print(f"[翻译服务] 收集到 {len(only_symbols_items)} 条符号问题需要重新翻译", flush=True)
+                all_retranslate_items.extend(only_symbols_items)
 
-                            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
-                                json.dump(retranslate_config, f, ensure_ascii=False, indent=2)
-                                retranslate_config_file = f.name
+            # 统一进行重新翻译
+            if all_retranslate_items:
+                print(f"\n[翻译服务] 🔄 开始批量重新翻译 {len(all_retranslate_items)} 条问题文本（优化：一次性处理）", flush=True)
+                await update_progress(90, f"正在重新翻译 {len(all_retranslate_items)} 条文本...")
 
-                            try:
-                                retranslate_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "batch_retranslate_ollama.py")
-                                process = subprocess.Popen(
-                                    [ui_env_python, retranslate_script, retranslate_config_file],
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.STDOUT,
-                                    text=True,
-                                    encoding='utf-8',
-                                    bufsize=1
-                                )
+                retranslate_tasks = []
+                for item in all_retranslate_items:
+                    idx = item["index"]
+                    source_text = item.get("source", source_subtitles_for_check[idx]["text"] if idx < len(source_subtitles_for_check) else "")
 
-                                stdout_lines = []
-                                for line in process.stdout:
-                                    print(line, end='', flush=True)
-                                    stdout_lines.append(line)
+                    if source_text:
+                        # 计算最大长度
+                        if "source_length" in item:
+                            max_length = int(item["source_length"] * max_ratio * 0.8)
+                        else:
+                            max_length = int(len(source_text) * max_ratio * 0.8)
 
-                                returncode = process.wait()
-                                stdout = ''.join(stdout_lines)
+                        retranslate_tasks.append({
+                            "task_id": f"item-{idx}",
+                            "source": source_text,
+                            "target_language": target_language,
+                            "max_length": max_length
+                        })
 
-                                if returncode == 0 and stdout:
-                                    results_match = re.search(r'\[Results\](.*?)\[/Results\]', stdout, re.DOTALL)
-                                    if results_match:
-                                        results_json = results_match.group(1).strip()
-                                        retranslate_results = json.loads(results_json)
+                if retranslate_tasks:
+                    retranslate_config = {
+                        "tasks": retranslate_tasks,
+                        "model": "qwen2.5:32b",
+                        "output_file": str(target_subtitle_path)
+                    }
 
-                                        target_subtitles_for_check = srt_parser.parse_srt(target_subtitle_path)
-                                        for result_item in retranslate_results:
-                                            idx = int(result_item["task_id"].split('-')[1])
-                                            target_subtitles_for_check[idx]["text"] = result_item["translation"]
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False, encoding='utf-8') as f:
+                        json.dump(retranslate_config, f, ensure_ascii=False, indent=2)
+                        retranslate_config_file = f.name
 
-                                        srt_parser.save_srt(target_subtitles_for_check, target_subtitle_path)
-                                        print(f"✅ 成功重新翻译 {len(retranslate_results)} 条符号问题", flush=True)
-                            except Exception as e:
-                                print(f"⚠️ 重新翻译符号问题时出错: {e}", flush=True)
-                            finally:
-                                if os.path.exists(retranslate_config_file):
-                                    os.remove(retranslate_config_file)
+                    try:
+                        retranslate_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "batch_retranslate_ollama.py")
+                        process = subprocess.Popen(
+                            [ui_env_python, retranslate_script, retranslate_config_file],
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            text=True,
+                            encoding='utf-8',
+                            bufsize=1
+                        )
+
+                        stdout_lines = []
+                        for line in process.stdout:
+                            print(line, end='', flush=True)
+                            stdout_lines.append(line)
+
+                        returncode = process.wait()
+                        stdout = ''.join(stdout_lines)
+
+                        if returncode == 0 and stdout:
+                            results_match = re.search(r'\[Results\](.*?)\[/Results\]', stdout, re.DOTALL)
+                            if results_match:
+                                results_json = results_match.group(1).strip()
+                                retranslate_results = json.loads(results_json)
+
+                                target_subtitles_for_check = srt_parser.parse_srt(target_subtitle_path)
+                                for result_item in retranslate_results:
+                                    idx = int(result_item["task_id"].split('-')[1])
+                                    target_subtitles_for_check[idx]["text"] = result_item["translation"]
+
+                                srt_parser.save_srt(target_subtitles_for_check, target_subtitle_path)
+                                print(f"✅ 成功重新翻译 {len(retranslate_results)} 条文本（超长+符号问题）", flush=True)
+                    except Exception as e:
+                        print(f"⚠️ 重新翻译出错: {e}", flush=True)
+                    finally:
+                        if os.path.exists(retranslate_config_file):
+                            os.remove(retranslate_config_file)
 
             # 5. 数字替换：将阿拉伯数字转换为目标语言的发音
             print(f"\n[翻译服务] 开始检测并替换译文中的阿拉伯数字...", flush=True)
-            await update_progress(95, "正在替换数字...")
+            await update_progress(93, "正在替换数字...")
 
             from text_utils import replace_digits_in_text
 
@@ -563,7 +523,7 @@ async def batch_translate_subtitles(
 
             # 6. 标点符号清理：删除句首和句中的标点，保留句末标点
             print(f"\n[翻译服务] 开始清理译文中的多余标点符号...", flush=True)
-            await update_progress(97, "正在清理标点...")
+            await update_progress(95, "正在清理标点...")
 
             from text_utils import clean_punctuation_in_sentence
 
@@ -585,8 +545,6 @@ async def batch_translate_subtitles(
             else:
                 print(f"ℹ️  未发现需要清理的标点", flush=True)
 
-            print(f"\n[翻译服务] ===== 质量检查和优化完成 =====\n", flush=True)
-
             # 7. 最终检查：处理空文本字幕
             print(f"\n[翻译服务] 开始检查空文本字幕...", flush=True)
             await update_progress(99, "正在检查空文本...")
@@ -606,6 +564,8 @@ async def batch_translate_subtitles(
                 srt_parser.save_srt(target_subtitles_for_check, target_subtitle_path)
             else:
                 print(f"ℹ️  未发现空文本字幕", flush=True)
+
+            print(f"\n[翻译服务] ===== 质量检查和优化完成 =====\n", flush=True)
 
             # 计算总耗时
             translation_elapsed = time.time() - translation_start_time
