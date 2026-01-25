@@ -541,13 +541,66 @@ async def batch_translate_subtitles(
                     "cancelled": True
                 }
 
+            # 4.5. 最终长度检查：如果译文超过原文4倍长度，截断到等长
+            print(f"\n[翻译服务] 开始进行最终长度检查...", flush=True)
+            await update_progress(91, "正在进行最终长度检查...")
+
+            # 获取目标语言代码（用于判断按单词还是字符计数）
+            target_lang_code = get_language_code(target_language)
+
+            source_subtitles_final = srt_parser.parse_srt(source_subtitle_path)
+            target_subtitles_final = srt_parser.parse_srt(target_subtitle_path)
+
+            truncated_count = 0
+            for idx, (source_sub, target_sub) in enumerate(zip(source_subtitles_final, target_subtitles_final)):
+                source_text = source_sub["text"]
+                target_text = target_sub["text"]
+
+                # 计算源文本和目标文本的长度
+                # 英语/法语/德语/西班牙语等：按单词数
+                # 中文/日语/韩语：按字符数
+                def count_length(text, lang_code):
+                    """计算文本长度（单词数或字符数）"""
+                    if lang_code in ['en', 'fr', 'de', 'es', 'pt', 'it', 'ru']:
+                        # 拉丁语系：按单词数
+                        return len(text.split())
+                    else:
+                        # 亚洲语言：按字符数
+                        return len(text.strip())
+
+                source_length = count_length(source_text, "zh")  # 源始终是中文
+                target_length = count_length(target_text, target_lang_code)
+
+                # 如果译文长度超过原文的4倍
+                if target_length > source_length * 4:
+                    print(f"  [最终长度检查] 第 {idx} 条译文过长: {target_length} > {source_length} * 4", flush=True)
+
+                    # 截断到与原文等长
+                    if target_lang_code in ['en', 'fr', 'de', 'es', 'pt', 'it', 'ru']:
+                        # 按单词截断
+                        words = target_text.split()
+                        truncated_text = ' '.join(words[:source_length])
+                    else:
+                        # 按字符截断
+                        truncated_text = target_text[:source_length]
+
+                    target_subtitles_final[idx]["text"] = truncated_text
+                    truncated_count += 1
+                    print(f"  [{idx}] '{target_text}' -> '{truncated_text}'", flush=True)
+
+            if truncated_count > 0:
+                print(f"\n✅ 成功截断 {truncated_count} 条过长的译文", flush=True)
+                srt_parser.save_srt(target_subtitles_final, target_subtitle_path)
+            else:
+                print(f"ℹ️  所有译文长度合格", flush=True)
+
             # 5. 数字替换：将阿拉伯数字转换为目标语言的发音
             print(f"\n[翻译服务] 开始检测并替换译文中的阿拉伯数字...", flush=True)
             await update_progress(93, "正在替换数字...")
 
             from text_utils import replace_digits_in_text
 
-            target_lang_code = get_language_code(target_language)
+            # target_lang_code 已在前面的最终长度检查中定义
             target_subtitles_for_check = srt_parser.parse_srt(target_subtitle_path)
 
             digits_replaced_count = 0

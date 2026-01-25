@@ -1308,7 +1308,23 @@ async def stitch_cloned_audio(
 
         print(f"[音频拼接] 开始拼接任务 {task_id} / {language} 的音频片段...", flush=True)
 
-        # 构建 cloned_results
+        # 构建 cloned_results（优先从 cloned_results.json 读取以保留用户修改）
+        cloned_results_path = cloned_audio_dir / "cloned_results.json"
+        existing_cloned_results = {}
+
+        if cloned_results_path.exists():
+            try:
+                with open(cloned_results_path, 'r', encoding='utf-8') as f:
+                    loaded_results = json.load(f)
+                    # 建立索引映射
+                    for item in loaded_results:
+                        idx = item.get("index")
+                        if idx is not None:
+                            existing_cloned_results[idx] = item
+                print(f"[音频拼接] 从 cloned_results.json 加载了 {len(existing_cloned_results)} 条已有数据", flush=True)
+            except Exception as e:
+                print(f"[音频拼接] 警告: 读取 cloned_results.json 失败: {e}", flush=True)
+
         cloned_results = []
         for i, subtitle in enumerate(subtitles):
             # 尝试多种文件名格式
@@ -1320,12 +1336,18 @@ async def stitch_cloned_audio(
                     audio_path = str(path)
                     break
 
+            # 优先使用 cloned_results.json 中的 target_text（保留用户修改）
+            if i in existing_cloned_results:
+                target_text = existing_cloned_results[i].get("target_text", subtitle.get("text", ""))
+            else:
+                target_text = subtitle.get("text", "")
+
             cloned_results.append({
                 "index": i,
                 "start_time": subtitle.get("start_time", 0),
                 "end_time": subtitle.get("end_time", 0),
                 "cloned_audio_path": audio_path,
-                "target_text": subtitle.get("text", "")
+                "target_text": target_text
             })
 
         # 步骤1: 优化过长的音频片段
@@ -1765,13 +1787,19 @@ async def regenerate_segment(
     db: Session = Depends(get_db)
 ):
     """
-    重新生成单个字幕片段的克隆语音（使用不同的说话人音色）
+    重新生成单个字幕片段的克隆语音（支持 CosyVoice3 + Indonesian TTS）
+
+    克隆器选择优先级：
+    1. 印尼语 (language == "id") → Indonesian TTS
+    2. 默认（所有其他语言） → CosyVoice3
     """
     try:
+        print(f"\n[重新生成片段] ===== 收到请求 ===== task_id={task_id}, language={language}", flush=True)
+
         segment_index = request.segment_index
         new_speaker_id = request.new_speaker_id
 
-        print(f"[重新生成片段] task_id={task_id}, language={language}, segment_index={segment_index}, new_speaker_id={new_speaker_id}", flush=True)
+        print(f"[重新生成片段] 参数: segment_index={segment_index}, new_speaker_id={new_speaker_id}", flush=True)
 
         # 验证任务存在
         task = db.query(Task).filter(Task.task_id == task_id).first()
@@ -1804,71 +1832,48 @@ async def regenerate_segment(
             target_text = subtitles[segment_index]["text"]
             print(f"[重新生成片段] 使用原译文: {target_text}", flush=True)
 
-        # 加载说话人数据
-        if not speaker_data_path.exists():
-            raise HTTPException(status_code=400, detail="说话人数据不存在")
+        # 加载说话人数据 - 支持历史任务
+        audio_dir = str(processed_dir)
+        scored_segments = {}
 
-        with open(speaker_data_path, 'r', encoding='utf-8') as f:
-            speaker_data = json.load(f)
+        if speaker_data_path.exists():
+            # 当前任务：从speaker_data.json加载
+            with open(speaker_data_path, 'r', encoding='utf-8') as f:
+                speaker_data = json.load(f)
+            scored_segments = speaker_data.get('scored_segments', {})
+            audio_dir = speaker_data.get('audio_dir', str(processed_dir))
+            print(f"[重新生成片段] 从speaker_data.json加载说话人数据", flush=True)
+        else:
+            # 历史任务：从diarization目录加载
+            print(f"[重新生成片段] speaker_data.json不存在，尝试从diarization目录加载...", flush=True)
+            diarization_dir = task_path_manager.get_diarization_dir(task_id)
+            speaker_segments_dir = diarization_dir / "speaker_segments"
 
-        scored_segments = speaker_data.get('scored_segments', {})
-        audio_dir = speaker_data.get('audio_dir', str(processed_dir))
+            if speaker_segments_dir.exists():
+                audio_dir = str(speaker_segments_dir)
+                print(f"[重新生成片段] 使用diarization目录: {audio_dir}", flush=True)
+            else:
+                print(f"[重新生成片段] ⚠️  未找到说话人数据，将直接使用参考音频", flush=True)
 
-        # 查找编码文件
-        encoded_dir = os.path.join(audio_dir, "encoded")
-        fake_npy_path = None
+        # 获取参考音频路径 - 尝试多个可能的位置
+        reference_output_dir = os.path.join(audio_dir, "references")
+        ref_audio_path = os.path.join(reference_output_dir, f"speaker_{new_speaker_id}_reference.wav")
 
-        # 尝试查找已编码的文件
-        if os.path.exists(encoded_dir):
-            npy_file = os.path.join(encoded_dir, f"speaker_{new_speaker_id}_codes.npy")
-            if os.path.exists(npy_file):
-                fake_npy_path = npy_file
-                print(f"[重新生成片段] ✅ 找到编码文件: {fake_npy_path}", flush=True)
+        if not os.path.exists(ref_audio_path):
+            # 尝试其他可能的路径
+            alt_paths = [
+                os.path.join(str(processed_dir), "speaker_segments", "references", f"speaker_{new_speaker_id}_reference.wav"),
+                os.path.join(str(task_path_manager.get_diarization_dir(task_id)), "speaker_segments", "references", f"speaker_{new_speaker_id}_reference.wav"),
+            ]
 
-        if not fake_npy_path:
-            # 尝试旧格式
-            old_encoded_dir = os.path.join(audio_dir, f"speaker_{new_speaker_id}_encoded")
-            old_npy_file = os.path.join(old_encoded_dir, "fake.npy")
-            if os.path.exists(old_npy_file):
-                fake_npy_path = old_npy_file
-                print(f"[重新生成片段] ✅ 找到旧格式编码文件: {fake_npy_path}", flush=True)
-
-        if not fake_npy_path:
-            # 需要重新编码
-            print(f"[重新生成片段] ❌ 未找到编码文件，需要重新编码...", flush=True)
-
-            # 获取参考音频
-            from speaker_audio_processor import SpeakerAudioProcessor
-            audio_processor = SpeakerAudioProcessor(target_duration=10.0, silence_duration=1.0)
-            reference_output_dir = os.path.join(audio_dir, "references")
-
-            # 将 scored_segments 的键转换为整数
-            scored_segments_int = {}
-            for k, v in scored_segments.items():
-                try:
-                    scored_segments_int[int(k)] = v
-                except (ValueError, TypeError):
-                    scored_segments_int[k] = v
-
-            if new_speaker_id not in scored_segments_int:
-                raise HTTPException(status_code=400, detail=f"说话人 {new_speaker_id} 不存在")
-
-            # 处理单个说话人的音频
-            speaker_segments = scored_segments_int[new_speaker_id]
-            ref_audio_path = os.path.join(reference_output_dir, f"speaker_{new_speaker_id}_reference.wav")
-
-            if not os.path.exists(ref_audio_path):
+            for alt_path in alt_paths:
+                if os.path.exists(alt_path):
+                    ref_audio_path = alt_path
+                    audio_dir = os.path.dirname(os.path.dirname(alt_path))
+                    print(f"[重新生成片段] 找到参考音频: {ref_audio_path}", flush=True)
+                    break
+            else:
                 raise HTTPException(status_code=400, detail=f"说话人 {new_speaker_id} 的参考音频不存在")
-
-            # 编码参考音频
-            from fish_voice_cloner import FishVoiceCloner
-            cloner = FishVoiceCloner()
-
-            speaker_encoded_dir = os.path.join(audio_dir, f"speaker_{new_speaker_id}_encoded")
-            os.makedirs(speaker_encoded_dir, exist_ok=True)
-
-            fake_npy_path = cloner.encode_reference_audio(ref_audio_path, speaker_encoded_dir)
-            print(f"[重新生成片段] ✅ 编码完成: {fake_npy_path}", flush=True)
 
         # 获取参考文本
         from subtitle_text_extractor import SubtitleTextExtractor
@@ -1899,44 +1904,165 @@ async def regenerate_segment(
                     # 其他格式，跳过
                     continue
 
-            speaker_texts = text_extractor.process_all_speakers(
-                {new_speaker_id: segments_for_text},
-                str(source_subtitle_path)
-            )
-            ref_text = speaker_texts.get(new_speaker_id, "")
+            try:
+                speaker_texts = text_extractor.process_all_speakers(
+                    {new_speaker_id: segments_for_text},
+                    str(source_subtitle_path)
+                )
+                ref_text = speaker_texts.get(new_speaker_id, "")
+            except Exception as e:
+                print(f"[重新生成片段] ⚠️ 提取参考文本失败: {e}，使用空文本", flush=True)
+                ref_text = ""
         else:
             ref_text = ""
 
-        print(f"[重新生成片段] 参考文本: {ref_text[:50]}...", flush=True)
+        print(f"[重新生成片段] 参考文本: {ref_text[:50] if ref_text else '(空)'}...", flush=True)
 
-        # 生成输出路径
-        audio_filename = f"cloned_{segment_index}.wav"
+        # 生成输出路径（使用segment_前缀以匹配CosyVoice生成的文件名）
+        audio_filename = f"segment_{segment_index}.wav"
         output_audio = str(cloned_audio_dir / audio_filename)
-        work_dir = os.path.join(audio_dir, f"regen_{segment_index}_{new_speaker_id}")
-        os.makedirs(work_dir, exist_ok=True)
 
         print(f"[重新生成片段] 开始生成: segment_index={segment_index}, new_speaker_id={new_speaker_id}", flush=True)
-        print(f"[重新生成片段] 目标文本: {target_text[:50]}...", flush=True)
+        print(f"[重新生成片段] 目标文本: {target_text[:50] if target_text else '(空)'}...", flush=True)
 
-        # 使用 FishVoiceCloner 生成语音
-        from fish_voice_cloner import FishVoiceCloner
-        cloner = FishVoiceCloner()
+        # ==================== 克隆器选择逻辑 ====================
 
-        # 生成语义 token
-        codes_path = cloner.generate_semantic_tokens(
-            target_text=target_text,
-            ref_text=ref_text,
-            fake_npy_path=fake_npy_path,
-            output_dir=work_dir
-        )
+        # 优先级 1: 检查是否是印尼语
+        if language == "id":
+            print(f"[重新生成片段] 检测到印尼语，使用 Indonesian TTS", flush=True)
 
-        # 解码为音频
-        cloner.decode_to_audio(codes_path, output_audio)
+            from indonesian_tts_cloner import IndonesianTTSCloner
 
-        print(f"[重新生成片段] ✅ 生成完成: {output_audio}", flush=True)
+            # 使用默认说话人名称
+            speaker_name = "ardi"
 
-        # 生成 API 路径
-        api_path = f"/api/tasks/{task_id}/languages/{language}/cloned-audio/{audio_filename}"
+            # 准备印尼语TTS任务
+            indonesian_task = {
+                "segment_index": segment_index,
+                "speaker_name": speaker_name,
+                "target_text": target_text,
+                "output_file": os.path.abspath(output_audio)
+            }
+
+            # 获取印尼语TTS配置文件
+            config_file = os.path.join("backend", "indonesian_tts_config.json")
+            if not os.path.exists(config_file):
+                config_file = "indonesian_tts_config.json"
+
+            if not os.path.exists(config_file):
+                raise HTTPException(status_code=500, detail="印尼语TTS配置文件不存在")
+
+            # 创建印尼语TTS克隆器
+            indonesian_cloner = IndonesianTTSCloner()
+
+            print(f"[重新生成片段] 印尼语TTS生成中... 片段 {segment_index}, 说话人: {speaker_name}", flush=True)
+
+            # 在线程池中运行（避免阻塞事件循环）
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None,
+                indonesian_cloner.batch_generate_audio,
+                [indonesian_task],
+                config_file,
+                None  # progress_callback
+            )
+
+            if segment_index in result:
+                print(f"[重新生成片段] ✅ Indonesian TTS 生成成功: {output_audio}", flush=True)
+            else:
+                raise Exception("Indonesian TTS 生成失败")
+
+        # 优先级 2: 默认使用 CosyVoice3 克隆原音色
+        else:
+            # ========== 使用 CosyVoice3 克隆原音色 ==========
+            print(f"[重新生成片段] 使用 CosyVoice3 克隆原音色", flush=True)
+
+            from cosyvoice_cloner import get_cosyvoice_cloner
+
+            # 准备 CosyVoice 任务
+            cosyvoice_task = {
+                "segment_index": segment_index,
+                "speaker_id": new_speaker_id,
+                "target_text": target_text,
+                "reference_audio": os.path.abspath(ref_audio_path),
+                "target_language": language,
+                "output_file": os.path.abspath(output_audio)
+            }
+
+            # 准备 speaker_references
+            cosyvoice_speaker_refs = {
+                new_speaker_id: {
+                    "reference_audio": ref_audio_path,
+                    "reference_text": ref_text,
+                    "target_language": language
+                }
+            }
+
+            # 获取 CosyVoice 克隆器（使用GPU）
+            cosyvoice_cloner = get_cosyvoice_cloner(use_gpu=True, gpu_ids=[0])
+
+            print(f"[重新生成片段] CosyVoice3 生成中... 片段 {segment_index}", flush=True)
+
+            # 在线程池中运行（避免阻塞事件循环）
+            loop = asyncio.get_running_loop()
+            work_dir_temp = str(cloned_audio_dir)
+            result = await loop.run_in_executor(
+                None,
+                cosyvoice_cloner.batch_generate_audio,
+                [cosyvoice_task],
+                cosyvoice_speaker_refs,
+                work_dir_temp,
+                language,
+                None  # progress_callback
+            )
+
+            if segment_index in result:
+                print(f"[重新生成片段] ✅ CosyVoice3 生成成功: {output_audio}", flush=True)
+            else:
+                raise Exception("CosyVoice3 生成失败")
+
+        # 生成 API 路径（添加时间戳避免缓存）
+        import time
+        timestamp = int(time.time() * 1000)  # 毫秒时间戳
+        api_path = f"/api/tasks/{task_id}/languages/{language}/cloned-audio/{audio_filename}?t={timestamp}"
+
+        # 更新 cloned_results.json 以保存新的 target_text（重要：拼接时会读取这个文件）
+        cloned_results_path = cloned_audio_dir / "cloned_results.json"
+        try:
+            existing_results = []
+            if cloned_results_path.exists():
+                with open(cloned_results_path, 'r', encoding='utf-8') as f:
+                    existing_results = json.load(f)
+
+            # 查找并更新对应的条目
+            found = False
+            for item in existing_results:
+                if item.get("index") == segment_index:
+                    item["target_text"] = target_text
+                    item["cloned_audio_path"] = api_path
+                    item["speaker_id"] = new_speaker_id
+                    found = True
+                    break
+
+            # 如果没找到，添加新条目
+            if not found:
+                existing_results.append({
+                    "index": segment_index,
+                    "target_text": target_text,
+                    "cloned_audio_path": api_path,
+                    "speaker_id": new_speaker_id
+                })
+                # 按 index 排序
+                existing_results.sort(key=lambda x: x.get("index", 0))
+
+            # 保存更新后的结果
+            with open(cloned_results_path, 'w', encoding='utf-8') as f:
+                json.dump(existing_results, f, ensure_ascii=False, indent=2)
+            print(f"[重新生成片段] 已更新 cloned_results.json: segment_index={segment_index}, target_text={target_text[:30]}...", flush=True)
+        except Exception as e:
+            print(f"[重新生成片段] ⚠️ 更新 cloned_results.json 失败: {e}", flush=True)
+
+        print(f"[重新生成片段] ✅ 完成！返回路径: {api_path}", flush=True)
 
         return {
             "success": True,

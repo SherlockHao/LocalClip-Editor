@@ -949,6 +949,8 @@ const App: React.FC = () => {
 
         if (voiceCloningStatus.status === 'completed') {
           console.log(`[语言状态恢复] ${targetLanguage} 语音克隆已完成`);
+          // 设置 voiceCloningTaskId 以支持重新生成功能
+          setVoiceCloningTaskId(taskId);
           // 如果有克隆结果，可以加载字幕的克隆音频路径
           if (voiceCloningStatus.cloned_results && voiceCloningStatus.cloned_results.length > 0) {
             console.log(`[语言状态恢复] cloned_results:`, voiceCloningStatus.cloned_results);
