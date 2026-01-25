@@ -77,6 +77,7 @@ async def batch_translate_subtitles(
     """
     try:
         import asyncio
+        from running_task_tracker import running_task_tracker
 
         async def update_progress(progress: int, message: str):
             """异步更新进度"""
@@ -167,51 +168,39 @@ async def batch_translate_subtitles(
             print(f"[翻译服务] Python: {ui_env_python}", flush=True)
             print(f"[翻译服务] 脚本: {batch_translate_script}", flush=True)
 
-            # 启动翻译进程
+            # 启动翻译进程（使用异步子进程以支持取消）
             env = os.environ.copy()
             env['PYTHONUNBUFFERED'] = '1'
 
-            # 用于在子线程中更新进度的队列
-            progress_queue = asyncio.Queue()
-
-            def run_translation_subprocess():
-                """在线程中运行翻译子进程"""
-                process = subprocess.Popen(
-                    [ui_env_python, batch_translate_script, config_file],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    encoding='utf-8',
-                    cwd=os.path.dirname(__file__),
-                    bufsize=1,
-                    env=env
-                )
-
-                stdout_lines = []
-                stderr_lines = []
-
-                # 实时读取输出
-                for line in process.stdout:
-                    line = line.rstrip('\n')
-                    print(f"[翻译脚本] {line}", flush=True)
-                    stdout_lines.append(line)
-
-                # 等待进程结束
-                return_code = process.wait()
-
-                # 读取 stderr
-                if return_code != 0:
-                    stderr_output = process.stderr.read()
-                    stderr_lines.append(stderr_output)
-
-                return return_code, stdout_lines, stderr_lines
-
-            # 在线程池中运行子进程
-            loop = asyncio.get_event_loop()
-            return_code, stdout_lines, stderr_lines = await loop.run_in_executor(
-                None,
-                run_translation_subprocess
+            # 创建异步子进程
+            process = await asyncio.create_subprocess_exec(
+                ui_env_python, batch_translate_script, config_file,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+                cwd=os.path.dirname(__file__)
             )
+
+            stdout_lines = []
+            stderr_lines = []
+
+            # 异步读取输出（不立即终止，让翻译完成）
+            while True:
+                line = await process.stdout.readline()
+                if not line:
+                    break
+                line_str = line.decode('utf-8', errors='replace').rstrip('\n')
+                print(f"[翻译脚本] {line_str}", flush=True)
+                stdout_lines.append(line_str)
+
+            # 等待进程结束
+            return_code = await process.wait()
+
+            # 读取 stderr
+            if return_code != 0:
+                stderr_output = await process.stderr.read()
+                stderr_output_str = stderr_output.decode('utf-8', errors='replace')
+                stderr_lines.append(stderr_output_str)
 
             if return_code != 0:
                 stderr_output = '\n'.join(stderr_lines)
@@ -273,6 +262,19 @@ async def batch_translate_subtitles(
             save_srt(translated_subtitles, target_subtitle_path)
             print(f"[翻译服务] 翻译完成，保存到: {target_subtitle_path}", flush=True)
 
+            # 检查是否请求取消 - 如果取消，跳过后续优化步骤
+            if running_task_tracker.is_cancel_requested():
+                print(f"[翻译服务] ⚠️ 检测到取消请求，等待当前翻译完成后停止", flush=True)
+                await update_progress(100, "正在停止，翻译已完成...")
+                translation_elapsed = time.time() - translation_start_time
+                return {
+                    "source_file": str(source_subtitle_path),
+                    "target_file": str(target_subtitle_path),
+                    "total_items": len(translated_subtitles),
+                    "elapsed_time": translation_elapsed,
+                    "cancelled": True
+                }
+
             # ===== 质量检查和优化 =====
             print(f"\n[翻译服务] ===== 开始质量检查和优化 =====", flush=True)
             await update_progress(82, "正在进行质量检查...")
@@ -333,6 +335,19 @@ async def batch_translate_subtitles(
                         "target": target_text
                     })
                     print(f"  [汉字检查] 第 {idx} 条译文包含汉字: '{target_text}'", flush=True)
+
+            # 检查是否请求取消 - 跳过后续优化
+            if running_task_tracker.is_cancel_requested():
+                print(f"[翻译服务] ⚠️ 检测到取消请求，等待当前处理完成后停止", flush=True)
+                await update_progress(100, "正在停止，质量检查已完成...")
+                translation_elapsed = time.time() - translation_start_time
+                return {
+                    "source_file": str(source_subtitle_path),
+                    "target_file": str(target_subtitle_path),
+                    "total_items": len(target_subtitles_for_check),
+                    "elapsed_time": translation_elapsed,
+                    "cancelled": True
+                }
 
             # 2. 替换中文字符（先处理字符替换，减少需要重新翻译的数量）
             if chinese_replacement_items:
@@ -423,6 +438,19 @@ async def batch_translate_subtitles(
                 print(f"[翻译服务] 收集到 {len(only_symbols_items)} 条符号问题需要重新翻译", flush=True)
                 all_retranslate_items.extend(only_symbols_items)
 
+            # 检查是否请求取消 - 跳过重新翻译步骤
+            if running_task_tracker.is_cancel_requested():
+                print(f"[翻译服务] ⚠️ 检测到取消请求，等待当前处理完成后停止", flush=True)
+                await update_progress(100, "正在停止，中文替换已完成...")
+                translation_elapsed = time.time() - translation_start_time
+                return {
+                    "source_file": str(source_subtitle_path),
+                    "target_file": str(target_subtitle_path),
+                    "total_items": len(target_subtitles_for_check),
+                    "elapsed_time": translation_elapsed,
+                    "cancelled": True
+                }
+
             # 统一进行重新翻译
             if all_retranslate_items:
                 print(f"\n[翻译服务] 🔄 开始批量重新翻译 {len(all_retranslate_items)} 条问题文本（优化：一次性处理）", flush=True)
@@ -460,22 +488,26 @@ async def batch_translate_subtitles(
 
                     try:
                         retranslate_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "batch_retranslate_ollama.py")
-                        process = subprocess.Popen(
-                            [ui_env_python, retranslate_script, retranslate_config_file],
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT,
-                            text=True,
-                            encoding='utf-8',
-                            bufsize=1
+
+                        # 使用异步子进程避免阻塞事件循环
+                        process = await asyncio.create_subprocess_exec(
+                            ui_env_python, retranslate_script, retranslate_config_file,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.STDOUT
                         )
 
                         stdout_lines = []
-                        for line in process.stdout:
-                            print(line, end='', flush=True)
-                            stdout_lines.append(line)
+                        # 异步读取输出（让重新翻译完成）
+                        while True:
+                            line = await process.stdout.readline()
+                            if not line:
+                                break
+                            line_str = line.decode('utf-8', errors='replace').rstrip('\n')
+                            print(line_str, flush=True)
+                            stdout_lines.append(line_str)
 
-                        returncode = process.wait()
-                        stdout = ''.join(stdout_lines)
+                        returncode = await process.wait()
+                        stdout = '\n'.join(stdout_lines)
 
                         if returncode == 0 and stdout:
                             results_match = re.search(r'\[Results\](.*?)\[/Results\]', stdout, re.DOTALL)
@@ -495,6 +527,19 @@ async def batch_translate_subtitles(
                     finally:
                         if os.path.exists(retranslate_config_file):
                             os.remove(retranslate_config_file)
+
+            # 检查是否请求取消 - 跳过数字和标点优化
+            if running_task_tracker.is_cancel_requested():
+                print(f"[翻译服务] ⚠️ 检测到取消请求，等待当前处理完成后停止", flush=True)
+                await update_progress(100, "正在停止，重新翻译已完成...")
+                translation_elapsed = time.time() - translation_start_time
+                return {
+                    "source_file": str(source_subtitle_path),
+                    "target_file": str(target_subtitle_path),
+                    "total_items": len(target_subtitles_for_check),
+                    "elapsed_time": translation_elapsed,
+                    "cancelled": True
+                }
 
             # 5. 数字替换：将阿拉伯数字转换为目标语言的发音
             print(f"\n[翻译服务] 开始检测并替换译文中的阿拉伯数字...", flush=True)
@@ -520,6 +565,19 @@ async def batch_translate_subtitles(
                 srt_parser.save_srt(target_subtitles_for_check, target_subtitle_path)
             else:
                 print(f"ℹ️  未发现需要替换的数字", flush=True)
+
+            # 检查是否请求取消 - 跳过标点清理和空文本检查
+            if running_task_tracker.is_cancel_requested():
+                print(f"[翻译服务] ⚠️ 检测到取消请求，等待当前处理完成后停止", flush=True)
+                await update_progress(100, "正在停止，数字替换已完成...")
+                translation_elapsed = time.time() - translation_start_time
+                return {
+                    "source_file": str(source_subtitle_path),
+                    "target_file": str(target_subtitle_path),
+                    "total_items": len(target_subtitles_for_check),
+                    "elapsed_time": translation_elapsed,
+                    "cancelled": True
+                }
 
             # 6. 标点符号清理：删除句首和句中的标点，保留句末标点
             print(f"\n[翻译服务] 开始清理译文中的多余标点符号...", flush=True)

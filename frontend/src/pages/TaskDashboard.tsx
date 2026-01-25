@@ -320,16 +320,78 @@ const TaskDashboard: React.FC = () => {
   const isBatchRunning = batchStatus?.is_running || false;
   const isBatchStopping = batchStatus?.state === 'stopping';
 
-  // 计算任务统计
+  // 计算任务统计（基于所有语言的所有环节状态）
   const taskStats = React.useMemo(() => {
     const total = tasks.length;
-    const processing = tasks.filter(t => t.status === 'processing' || runningTasks[t.task_id]).length;
-    const completed = tasks.filter(t => t.status === 'completed').length;
-    const failed = tasks.filter(t => t.status === 'failed').length;
-    const pending = total - processing - completed - failed;
+    const languages = ['en', 'ko', 'ja', 'fr', 'de', 'es', 'id'];
+    const languageStages = ['translation', 'voice_cloning', 'stitch', 'export'];
 
-    return { total, processing, completed, failed, pending };
-  }, [tasks, runningTasks]);
+    // 辅助函数：检查任务是否所有语言的所有环节都完成
+    const isTaskFullyCompleted = (task: Task): boolean => {
+      const langStatus = task.language_status || {};
+
+      // 1. 检查说话人识别是否完成（在 'default' 或第一个语言下）
+      const defaultLangData = langStatus['default'] || langStatus[languages[0]];
+      if (!defaultLangData?.speaker_diarization || defaultLangData.speaker_diarization.status !== 'completed') {
+        return false;
+      }
+
+      // 2. 检查所有语言的所有阶段是否完成
+      return languages.every(lang => {
+        const langData = langStatus[lang];
+        if (!langData) return false;
+        return languageStages.every(stage => {
+          const stageData = langData[stage as keyof LanguageStageStatus];
+          return stageData?.status === 'completed';
+        });
+      });
+    };
+
+    // 辅助函数：检查任务是否有任何环节失败
+    const isTaskFailed = (task: Task): boolean => {
+      const langStatus = task.language_status || {};
+
+      // 1. 检查说话人识别是否失败
+      const defaultLangData = langStatus['default'] || langStatus[languages[0]];
+      if (defaultLangData?.speaker_diarization?.status === 'failed') {
+        return true;
+      }
+
+      // 2. 检查所有语言的所有阶段是否有失败
+      return languages.some(lang => {
+        const langData = langStatus[lang];
+        if (!langData) return false;
+        return languageStages.some(stage => {
+          const stageData = langData[stage as keyof LanguageStageStatus];
+          return stageData?.status === 'failed';
+        });
+      });
+    };
+
+    // 1. "失败" = 有任何一个环节失败的任务
+    const failed = tasks.filter(isTaskFailed).length;
+
+    // 2. "已完成" = 所有7种语言的所有环节都完成 && 没有任何失败环节的任务
+    const completed = tasks.filter(t => isTaskFullyCompleted(t) && !isTaskFailed(t)).length;
+
+    // 3. "正在运行" = 当前正在处理的任务（batchStatus.current_task_id存在且不在queued_tasks中）
+    const actuallyProcessing = batchStatus?.current_task_id &&
+      !batchStatus?.queued_tasks?.some(qt => qt.task_id === batchStatus.current_task_id) ? 1 : 0;
+
+    // 4. "待处理（队列中）" = 在批量处理队列中等待的任务数
+    const pending = batchStatus?.queued_count || 0;
+
+    // 5. "进行中" = 正在处理的任务 + 队列中等待的任务
+    const processing = actuallyProcessing + pending;
+
+    // 6. "完成率" = 已完成任务数 / 总任务数
+    const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+    // 检查是否有任务真正在运行（用于控制loading动画）
+    const hasRunningTasks = actuallyProcessing > 0 || isBatchRunning;
+
+    return { total, processing, completed, failed, pending, actuallyProcessing, hasRunningTasks, completionRate };
+  }, [tasks, runningTasks, isBatchRunning, batchStatus]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 p-6">
@@ -431,13 +493,14 @@ const TaskDashboard: React.FC = () => {
               <div className="p-2 bg-gradient-to-br from-blue-600 to-blue-500 rounded-lg">
                 <Activity size={20} className="text-white" />
               </div>
-              {taskStats.processing > 0 && (
+              {/* 只有真正有任务在运行时才显示loading动画 */}
+              {taskStats.hasRunningTasks && (
                 <Loader2 size={16} className="text-blue-400 animate-spin" />
               )}
             </div>
             <div className="mt-4">
               <p className="text-3xl font-bold text-blue-400">{taskStats.processing}</p>
-              <p className="text-xs text-blue-300 mt-1">进行中</p>
+              <p className="text-xs text-blue-300 mt-1">进行中 {taskStats.pending > 0 && `(${taskStats.actuallyProcessing}运行 + ${taskStats.pending}排队)`}</p>
             </div>
           </div>
 
@@ -455,7 +518,7 @@ const TaskDashboard: React.FC = () => {
             {taskStats.total > 0 && (
               <div className="mt-3 pt-3 border-t border-green-500/20">
                 <p className="text-xs text-green-400">
-                  完成率: {Math.round((taskStats.completed / taskStats.total) * 100)}%
+                  完成率: {taskStats.completionRate}%
                 </p>
               </div>
             )}
@@ -517,7 +580,7 @@ const TaskDashboard: React.FC = () => {
               </div>
               <div className="text-right">
                 <p className={`text-sm ${isBatchStopping ? 'text-yellow-300' : 'text-blue-300'}`}>
-                  任务: {batchStatus.completed_tasks}/{batchStatus.total_tasks}
+                  任务: {batchStatus.current_task_id ? batchStatus.completed_tasks + 1 : batchStatus.completed_tasks}/{batchStatus.total_tasks}
                   {batchStatus.queued_count > 0 && (
                     <span className="text-green-400 ml-2">(+{batchStatus.queued_count} 队列中)</span>
                   )}
@@ -592,7 +655,7 @@ const TaskDashboard: React.FC = () => {
           </div>
         ) : (
           <div className="max-h-[calc(100vh-280px)] overflow-y-auto pr-2">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" style={{ paddingBottom: '600px' }}>
               {tasks.map(task => (
                 <TaskCard
                   key={task.task_id}
@@ -604,7 +667,6 @@ const TaskDashboard: React.FC = () => {
                   runningTask={runningTasks[task.task_id] || null}
                   getStageName={getStageName}
                   getLanguageName={getLanguageName}
-                  isBatchRunning={isBatchRunning}
                   isInQueue={isTaskInQueue(task.task_id)}
                   isProcessing={isTaskProcessing(task.task_id)}
                   loading={loading}
@@ -749,7 +811,6 @@ interface TaskCardProps {
   runningTask: RunningTaskInfo | null;
   getStageName: (stage: string) => string;
   getLanguageName: (language: string) => string;
-  isBatchRunning: boolean;
   isInQueue: boolean;
   isProcessing: boolean;
   loading: boolean;
@@ -758,7 +819,7 @@ interface TaskCardProps {
 const TaskCard: React.FC<TaskCardProps> = ({
   task, onOpen, onDelete, onAddToQueue, onRemoveFromQueue,
   runningTask, getStageName, getLanguageName,
-  isBatchRunning, isInQueue, isProcessing, loading
+  isInQueue, isProcessing, loading
 }) => {
   const languages = ['en', 'ko', 'ja', 'fr', 'de', 'es', 'id'];
   const languageNames: Record<string, string> = {
@@ -957,8 +1018,8 @@ const TaskCard: React.FC<TaskCardProps> = ({
           <span>打开任务</span>
         </button>
 
-        {/* 添加到队列按钮（仅在批量处理运行中且任务不在队列/处理中时显示）*/}
-        {isBatchRunning && !isInQueue && !isProcessing && (
+        {/* 添加到队列按钮（任务不在队列/处理中时显示）*/}
+        {!isInQueue && !isProcessing && (
           <button
             onClick={onAddToQueue}
             disabled={loading}

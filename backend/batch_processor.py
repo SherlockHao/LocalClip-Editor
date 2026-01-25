@@ -294,24 +294,33 @@ class BatchProcessor:
         self._callbacks = callbacks  # 保存回调函数供队列任务使用
 
         # 初始化队列（将初始任务列表加入队列）
+        # 检查每个任务是否已完成，只将未完成的任务加入队列
         with self._queue_lock:
             self._task_queue = []
             for task_id in task_ids:
-                self._task_queue.append(QueuedTask(
-                    task_id=task_id,
-                    languages=self.SUPPORTED_LANGUAGES
-                ))
+                # 快速检查任务是否完全完成（所有语言的所有阶段）
+                is_fully_completed = await self._is_task_fully_completed(task_id, self.SUPPORTED_LANGUAGES, callbacks)
+                if not is_fully_completed:
+                    self._task_queue.append(QueuedTask(
+                        task_id=task_id,
+                        languages=self.SUPPORTED_LANGUAGES
+                    ))
+                else:
+                    print(f"[BatchProcessor] ⏭️  跳过已完成的任务: {task_id}", flush=True)
+
+        # total_tasks 只计算实际需要处理的任务数
+        actual_task_count = len(self._task_queue)
 
         self._progress = BatchProgress(
             state=BatchProcessorState.RUNNING,
-            total_tasks=len(task_ids),
+            total_tasks=actual_task_count,
             completed_tasks=0,
             message="开始批量处理所有任务...",
             started_at=datetime.utcnow(),
             queued_tasks=list(self._task_queue)
         )
 
-        print(f"[BatchProcessor] ✅ 开始多任务批量处理, 初始队列: {len(task_ids)} 个任务", flush=True)
+        print(f"[BatchProcessor] ✅ 开始多任务批量处理, 初始队列: {actual_task_count} 个任务 (共 {len(task_ids)} 个，{len(task_ids) - actual_task_count} 个已完成)", flush=True)
 
         failed_tasks = []
         processed_count = 0
@@ -325,9 +334,32 @@ class BatchProcessor:
             # 从队列中获取下一个任务
             queued_task = self._pop_next_task()
             if queued_task is None:
-                # 队列为空，处理完成
-                print(f"[BatchProcessor] ✅ 队列已清空，所有任务处理完成", flush=True)
-                break
+                # 队列为空，等待新任务添加（每2秒检查一次）
+                # 最多等待10次（20秒），如果仍然没有新任务则停止
+                wait_count = 0
+                max_wait_count = 10
+
+                while wait_count < max_wait_count:
+                    if self._cancel_requested:
+                        break
+
+                    # 更新状态显示等待中
+                    self._progress.message = f"队列为空，等待新任务... ({wait_count + 1}/{max_wait_count})"
+                    print(f"[BatchProcessor] 📭 队列为空，等待新任务添加... ({wait_count + 1}/{max_wait_count})", flush=True)
+
+                    await asyncio.sleep(2)
+                    wait_count += 1
+
+                    # 检查是否有新任务添加到队列
+                    queued_task = self._pop_next_task()
+                    if queued_task is not None:
+                        print(f"[BatchProcessor] 📬 检测到新任务: {queued_task.task_id}", flush=True)
+                        break
+
+                # 如果等待超时仍没有新任务，则停止
+                if queued_task is None:
+                    print(f"[BatchProcessor] ✅ 队列已清空且无新任务，批量处理完成", flush=True)
+                    break
 
             task_id = queued_task.task_id
             languages = queued_task.languages
@@ -395,6 +427,35 @@ class BatchProcessor:
         if 'get_task_languages' in callbacks:
             return await callbacks['get_task_languages'](task_id)
         return self.SUPPORTED_LANGUAGES
+
+    async def _is_task_fully_completed(self, task_id: str, languages: List[str], callbacks: Dict[str, Callable]) -> bool:
+        """
+        检查任务是否完全完成（所有语言的所有阶段都已完成）
+
+        Args:
+            task_id: 任务ID
+            languages: 要检查的语言列表
+            callbacks: 回调函数字典
+
+        Returns:
+            True 如果所有阶段都已完成，False 否则
+        """
+        if 'check_stage_completed' not in callbacks:
+            return False
+
+        # 检查说话人识别是否完成
+        speaker_completed = await callbacks['check_stage_completed'](task_id, "default", "speaker_diarization")
+        if not speaker_completed:
+            return False
+
+        # 检查所有语言的所有阶段是否完成
+        for language in languages:
+            for stage in self.LANGUAGE_STAGES:
+                stage_completed = await callbacks['check_stage_completed'](task_id, language, stage)
+                if not stage_completed:
+                    return False
+
+        return True
 
     async def _process_single_task(self, task_id: str, languages: List[str], callbacks: Dict[str, Callable]) -> bool:
         """

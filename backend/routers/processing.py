@@ -508,23 +508,42 @@ async def run_translation_task(
         )
 
         # 等待确保所有异步进度更新都已完成，然后再标记完成
-        import asyncio
         await asyncio.sleep(1.0)
 
-        # 标记翻译阶段完成，附带耗时和条数信息
-        print(f"[翻译] 正在标记任务完成...", flush=True)
-        await mark_task_completed(
-            task_id, target_language, "translation",
-            extra_data={
-                "elapsed_time": result['elapsed_time'],
-                "total_items": result['total_items']
-            }
-        )
-        # 完成时停止追踪
-        running_task_tracker.complete_task(task_id, target_language, "translation")
-        print(f"[翻译] ✅ 任务完成: {task_id} -> {target_language}", flush=True)
-        print(f"[翻译] 翻译文件: {result['target_file']}", flush=True)
-        print(f"[翻译] 总条数: {result['total_items']}, 耗时: {result['elapsed_time']}秒", flush=True)
+        # 检查是否被取消
+        if result.get('cancelled', False):
+            print(f"[翻译] ⚠️ 任务已取消，当前翻译已完成: {task_id} -> {target_language}", flush=True)
+            # 清除取消请求标志
+            running_task_tracker.clear_cancel_request()
+            # 停止追踪
+            running_task_tracker.complete_task(task_id, target_language, "translation")
+            # 标记任务完成（虽然被取消，但翻译部分已完成）
+            await mark_task_completed(
+                task_id, target_language, "translation",
+                extra_data={
+                    "elapsed_time": result['elapsed_time'],
+                    "total_items": result['total_items'],
+                    "cancelled": True
+                }
+            )
+            print(f"[翻译] 任务已停止，翻译部分已完成", flush=True)
+            print(f"[翻译] 翻译文件: {result['target_file']}", flush=True)
+            print(f"[翻译] 总条数: {result['total_items']}, 耗时: {result['elapsed_time']}秒", flush=True)
+        else:
+            # 正常完成，标记翻译阶段完成
+            print(f"[翻译] 正在标记任务完成...", flush=True)
+            await mark_task_completed(
+                task_id, target_language, "translation",
+                extra_data={
+                    "elapsed_time": result['elapsed_time'],
+                    "total_items": result['total_items']
+                }
+            )
+            # 完成时停止追踪
+            running_task_tracker.complete_task(task_id, target_language, "translation")
+            print(f"[翻译] ✅ 任务完成: {task_id} -> {target_language}", flush=True)
+            print(f"[翻译] 翻译文件: {result['target_file']}", flush=True)
+            print(f"[翻译] 总条数: {result['total_items']}, 耗时: {result['elapsed_time']}秒", flush=True)
 
     except Exception as e:
         print(f"[翻译] ❌ 任务失败: {str(e)}", flush=True)

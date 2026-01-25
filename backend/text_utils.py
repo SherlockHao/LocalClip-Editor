@@ -1102,15 +1102,10 @@ def clean_punctuation_in_sentence(text: str) -> str:
     """
     清理句子中的标点符号：删除句首和句中的标点，保留句末标点
 
-    删除的标点包括：
-    - 半角: , . ? ! ...
-    - 全角: ，。？！…、
-
-    规则：
-    1. 删除句子开头的所有标点符号
-    2. 删除句子中间的所有标点符号
-    3. 保留句子末尾的标点符号
-    4. 保留空格（某些语言如英语需要空格分隔单词）
+    新规则（整合优化）：
+    1. 在第一个单词或字出来之前，任何标点都去掉
+    2. 只保留句号/逗号/感叹号/问号（半角和全角：.,?!，。？！），其他的全去掉
+    3. 在做完所有操作后，如果有两个或两个以上标点相邻，则只保留第一个
 
     Args:
         text: 待处理文本
@@ -1125,16 +1120,20 @@ def clean_punctuation_in_sentence(text: str) -> str:
         >>> clean_punctuation_in_sentence("Hello, world!")
         "Hello world!"
 
-        >>> clean_punctuation_in_sentence("...测试，文本...")
-        "测试文本..."
+        >>> clean_punctuation_in_sentence("...测试...文本...")
+        "测试文本."
+
+        >>> clean_punctuation_in_sentence("你好！！！世界。。")
+        "你好！世界。"
     """
     if not text or not text.strip():
         return text
 
-    # 定义要删除的标点符号（半角和全角）
-    # 不包括空格，因为某些语言（如英语）需要空格分隔单词
-    # 包括：逗号、句号、问号、感叹号、省略号、顿号
-    punctuation_to_remove = ',.?!…，。？！、'
+    # 定义允许保留的标点符号（句号、逗号、感叹号、问号，半角和全角）
+    allowed_punctuation = ',.?!，。？！'
+
+    # 定义所有标点符号（包括要删除的：省略号、顿号、冒号、分号、西班牙语倒问号/倒感叹号等）
+    all_punctuation = ',.?!…，。？！、:：;；"""\'\'``~～@#$%^&*()（）[]【】{}｛｝<>《》-—_+=¿¡'
 
     # 去除首尾空白
     text = text.strip()
@@ -1142,28 +1141,44 @@ def clean_punctuation_in_sentence(text: str) -> str:
     if not text:
         return text
 
-    # 1. 删除句首的所有标点符号
-    while text and text[0] in punctuation_to_remove:
+    # 1. 删除句首的所有标点符号（第一个单词或字之前的任何标点）
+    while text and text[0] in all_punctuation:
         text = text[1:]
 
     if not text:
         return text
 
-    # 2. 找到句末的标点符号位置（从后往前找第一个非标点字符）
-    end_punctuation_start = len(text)
-    for i in range(len(text) - 1, -1, -1):
-        if text[i] not in punctuation_to_remove:
-            end_punctuation_start = i + 1
-            break
+    # 2. 遍历文本，只保留允许的标点，删除其他标点
+    result = []
+    for char in text:
+        if char in all_punctuation:
+            # 只保留允许的标点
+            if char in allowed_punctuation:
+                result.append(char)
+            # 其他标点全部删除
+        else:
+            # 非标点字符保留
+            result.append(char)
 
-    # 3. 分离出句末标点
-    main_text = text[:end_punctuation_start]
-    end_punctuation = text[end_punctuation_start:]
+    text = ''.join(result)
 
-    # 4. 删除句中的所有标点符号
-    cleaned_main = ''.join(char for char in main_text if char not in punctuation_to_remove)
+    if not text:
+        return text
 
-    # 5. 重新组合：清理后的主体 + 句末标点
-    result = cleaned_main + end_punctuation
+    # 3. 去除连续重复的标点，只保留第一个
+    result = []
+    prev_is_punctuation = False
 
-    return result
+    for char in text:
+        is_punctuation = char in allowed_punctuation
+
+        if is_punctuation:
+            # 如果前一个字符也是标点，则跳过当前标点
+            if not prev_is_punctuation:
+                result.append(char)
+            prev_is_punctuation = True
+        else:
+            result.append(char)
+            prev_is_punctuation = False
+
+    return ''.join(result)
