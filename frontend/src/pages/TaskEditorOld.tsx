@@ -1177,7 +1177,6 @@ const App: React.FC = () => {
       // 设置 seeking 标志
       isSeekingRef.current = true;
 
-      // 设置视频时间
       video.currentTime = time;
 
       // 监听 seeked 事件来更新状态

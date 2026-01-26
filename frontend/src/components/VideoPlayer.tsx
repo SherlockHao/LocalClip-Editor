@@ -187,11 +187,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     const video = videoRef.current;
     const audio = audioRef.current;
 
-    if (!video || filteredSpeakerId === null || !subtitles.length) return;
+    if (!video || filteredSpeakerId === null || !subtitles.length) {
+      return;
+    }
 
     // 当筛选说话人改变时，立即检查并跳转
     const checkAndJumpToFilteredSpeaker = () => {
       const currentVideoTime = video.currentTime;
+
       const currentSubtitle = subtitles.find(
         sub => currentVideoTime >= sub.start_time && currentVideoTime <= sub.end_time
       );
@@ -249,7 +252,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           );
 
           if (nextFilteredSubtitle) {
-            // 跳转到下一个筛选说话人的段落开始
             video.currentTime = nextFilteredSubtitle.start_time;
             if (audio && useExternalAudio) {
               audio.currentTime = nextFilteredSubtitle.start_time;

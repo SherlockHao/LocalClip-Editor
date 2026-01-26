@@ -222,6 +222,75 @@ async def serve_stitched_audio(task_id: str, request: Request):
         }
     )
 
+# 自定义任务视频路由，支持 Range 请求（用于任务目录中的视频）
+@app.get("/uploads/{task_id}/input/{filename}")
+async def serve_task_video(task_id: str, filename: str, request: Request):
+    """提供支持 HTTP Range 请求的任务视频流式传输"""
+    file_path = TASKS_DIR / task_id / "input" / filename
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="视频文件未找到")
+
+    file_size = file_path.stat().st_size
+    range_header = request.headers.get("range")
+
+    # 确定媒体类型
+    media_type = "video/mp4"
+    if filename.lower().endswith(".wav"):
+        media_type = "audio/wav"
+    elif filename.lower().endswith(".mp3"):
+        media_type = "audio/mpeg"
+
+    # 如果没有 Range 请求头，返回整个文件
+    if not range_header:
+        return FileResponse(
+            file_path,
+            media_type=media_type,
+            headers={
+                "Accept-Ranges": "bytes",
+                "Content-Length": str(file_size),
+            }
+        )
+
+    # 解析 Range 请求头
+    range_match = re.match(r"bytes=(\d+)-(\d*)", range_header)
+    if not range_match:
+        raise HTTPException(status_code=416, detail="Invalid range")
+
+    start = int(range_match.group(1))
+    end = int(range_match.group(2)) if range_match.group(2) else file_size - 1
+
+    # 确保范围有效
+    if start >= file_size or end >= file_size or start > end:
+        raise HTTPException(status_code=416, detail="Range not satisfiable")
+
+    chunk_size = end - start + 1
+
+    # 读取文件的指定范围
+    def iterfile():
+        with open(file_path, "rb") as f:
+            f.seek(start)
+            remaining = chunk_size
+            while remaining > 0:
+                chunk = f.read(min(8192, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    # 返回 206 Partial Content
+    return StreamingResponse(
+        iterfile(),
+        status_code=206,
+        media_type=media_type,
+        headers={
+            "Content-Range": f"bytes {start}-{end}/{file_size}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(chunk_size),
+        }
+    )
+
+
 # 挂载静态文件目录（用于其他非视频文件）
 # 注意：视频和拼接音频文件会被上面的路由优先处理
 app.mount("/exports", StaticFiles(directory=EXPORTS_DIR), name="exports")
