@@ -12,6 +12,7 @@ from models.task import Task as TaskModel
 from file_manager import file_manager
 from task_queue import task_queue
 from path_utils import task_path_manager
+from video_processor import VideoProcessor
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -39,14 +40,17 @@ class LanguageProcessRequest(BaseModel):
 @router.post("/", response_model=TaskResponse)
 async def create_task(
     video: UploadFile = File(...),
-    subtitle: Optional[UploadFile] = File(None),
+    subtitle: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
-    """创建新任务并上传视频和字幕（可选）"""
+    """创建新任务并上传视频和字幕（必须）"""
     try:
         print(f"[任务API] 收到上传请求, 文件名: {video.filename}, 类型: {video.content_type}", flush=True)
-        if subtitle:
-            print(f"[任务API] 包含字幕文件: {subtitle.filename}", flush=True)
+        print(f"[任务API] 包含字幕文件: {subtitle.filename}", flush=True)
+
+        # 验证字幕文件格式
+        if not subtitle.filename.lower().endswith('.srt'):
+            raise HTTPException(status_code=400, detail="仅支持 SRT 字幕文件")
 
         # 生成任务ID
         task_id = f"task_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
@@ -67,26 +71,35 @@ async def create_task(
         file_size = os.path.getsize(video_path)
         print(f"[任务API] 视频保存成功, 大小: {file_size} bytes", flush=True)
 
+        # 验证视频编码格式
+        video_processor = VideoProcessor()
+        codec_validation = video_processor.validate_video_codec(str(video_path))
+
+        if not codec_validation.get("valid"):
+            # 删除已上传的文件
+            file_manager.delete_task(task_id)
+            error_msg = codec_validation.get("error", "视频编码格式不支持")
+            print(f"[任务API] ❌ 视频编码验证失败: {error_msg}", flush=True)
+            raise HTTPException(status_code=400, detail=error_msg)
+
+        print(f"[任务API] ✅ 视频编码验证通过: {codec_validation.get('video_codec')}", flush=True)
+
         # 初始化配置
         config = {"target_languages": []}
 
-        # 保存字幕文件（如果提供）
-        if subtitle:
-            if not subtitle.filename.lower().endswith('.srt'):
-                raise HTTPException(status_code=400, detail="仅支持 SRT 字幕文件")
+        # 保存字幕文件
+        subtitle_path = task_path_manager.get_source_subtitle_path(task_id)
+        subtitle_path.parent.mkdir(exist_ok=True, parents=True)
 
-            subtitle_path = task_path_manager.get_source_subtitle_path(task_id)
-            subtitle_path.parent.mkdir(exist_ok=True, parents=True)
+        print(f"[任务API] 保存字幕到: {subtitle_path}", flush=True)
 
-            print(f"[任务API] 保存字幕到: {subtitle_path}", flush=True)
+        with open(subtitle_path, "wb") as buffer:
+            shutil.copyfileobj(subtitle.file, buffer)
 
-            with open(subtitle_path, "wb") as buffer:
-                shutil.copyfileobj(subtitle.file, buffer)
+        subtitle_size = os.path.getsize(subtitle_path)
+        print(f"[任务API] 字幕保存成功, 大小: {subtitle_size} bytes", flush=True)
 
-            subtitle_size = os.path.getsize(subtitle_path)
-            print(f"[任务API] 字幕保存成功, 大小: {subtitle_size} bytes", flush=True)
-
-            config['source_subtitle_filename'] = 'source_subtitle.srt'
+        config['source_subtitle_filename'] = 'source_subtitle.srt'
 
         # 创建数据库记录
         db_task = TaskModel(

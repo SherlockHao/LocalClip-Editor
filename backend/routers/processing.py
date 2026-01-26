@@ -1932,6 +1932,7 @@ async def regenerate_segment(
             print(f"[重新生成片段] 检测到印尼语，使用 Indonesian TTS", flush=True)
 
             from indonesian_tts_cloner import IndonesianTTSCloner
+            import platform
 
             # 使用默认说话人名称
             speaker_name = "ardi"
@@ -1944,16 +1945,36 @@ async def regenerate_segment(
                 "output_file": os.path.abspath(output_audio)
             }
 
-            # 获取印尼语TTS配置文件
-            config_file = os.path.join("backend", "indonesian_tts_config.json")
-            if not os.path.exists(config_file):
-                config_file = "indonesian_tts_config.json"
+            # 获取环境配置
+            tts_id_env_python = os.environ.get("TTS_ID_PYTHON")
+            if not tts_id_env_python:
+                # 默认路径
+                if platform.system() == "Windows":
+                    tts_id_env_python = "C:/Users/7/miniconda3/envs/tts-id-py311/python.exe"
+                else:
+                    tts_id_env_python = os.path.expanduser("~/miniconda3/envs/tts-id-py311/bin/python")
 
-            if not os.path.exists(config_file):
-                raise HTTPException(status_code=500, detail="印尼语TTS配置文件不存在")
+            model_dir = os.environ.get("VITS_TTS_ID_MODEL_DIR")
+            if not model_dir:
+                # 默认路径: routers -> backend -> LocalClip-Editor -> workspace -> ai_editing -> models
+                routers_dir = os.path.dirname(os.path.abspath(__file__))
+                model_dir = os.path.join(routers_dir, "..", "..", "..", "..", "models", "vits-tts-id")
+                model_dir = os.path.abspath(model_dir)
+
+            print(f"[重新生成片段] 印尼语TTS Python环境: {tts_id_env_python}", flush=True)
+            print(f"[重新生成片段] 印尼语TTS 模型路径: {model_dir}", flush=True)
+
+            if not os.path.exists(tts_id_env_python):
+                raise HTTPException(status_code=500, detail=f"TTS-ID Python环境不存在: {tts_id_env_python}")
+
+            if not os.path.exists(model_dir):
+                raise HTTPException(status_code=500, detail=f"印尼语TTS模型不存在: {model_dir}")
+
+            # 获取印尼语TTS配置文件
+            config_file = os.path.join(cloned_audio_dir, "indonesian_tts_config.json")
 
             # 创建印尼语TTS克隆器
-            indonesian_cloner = IndonesianTTSCloner()
+            indonesian_cloner = IndonesianTTSCloner(model_dir, tts_id_env_python)
 
             print(f"[重新生成片段] 印尼语TTS生成中... 片段 {segment_index}, 说话人: {speaker_name}", flush=True)
 

@@ -282,6 +282,7 @@ DEFAULT_VOICES = [
 ]
 
 # 印尼语默认音色库（VITS-TTS-ID）
+# 注意：VITS-TTS-ID 模型使用 ardi（男声）和 gadis（女声）
 INDONESIAN_VOICES = [
     {
         "id": "indonesian_male",
@@ -1824,10 +1825,10 @@ async def run_voice_cloning_process(
             for speaker_id in speaker_references.keys():
                 speaker_id_str = str(speaker_id)
                 indonesian_voice = speaker_to_indonesian.get(speaker_id, "ardi")
-                # 映射到正确的 voice ID: ardi -> indonesian_male, gadis -> indonesian_female
+                # 映射到正确的 voice ID: 使用 INDONESIAN_VOICES 中定义的 ID
                 if indonesian_voice == "gadis":
                     voice_id = "indonesian_female"
-                else:  # ardi
+                else:  # ardi (默认)
                     voice_id = "indonesian_male"
                 complete_initial_mapping[speaker_id_str] = voice_id
 
@@ -2070,10 +2071,43 @@ async def run_voice_cloning_process(
 
 
 @app.get("/voice-cloning/status/{task_id}")
-async def get_voice_cloning_status(task_id: str):
+@app.get("/api/voice-cloning/status/{task_id}")
+async def get_voice_cloning_status(task_id: str, lang: str = None):
     """获取语音克隆处理状态"""
     if task_id not in voice_cloning_status:
-        raise HTTPException(status_code=404, detail="任务不存在")
+        # 尝试从文件加载历史任务状态
+        task_base_dir = os.path.join("tasks", task_id)
+        if not os.path.exists(task_base_dir):
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        # 任务目录存在，尝试加载状态
+        outputs_dir = os.path.join(task_base_dir, "outputs")
+        if os.path.exists(outputs_dir):
+            # 查找语言目录
+            lang_dirs = [d for d in os.listdir(outputs_dir) if os.path.isdir(os.path.join(outputs_dir, d))]
+
+            # 如果指定了语言，优先使用；否则使用第一个找到的
+            target_lang = lang if lang and lang in lang_dirs else (lang_dirs[0] if lang_dirs else None)
+
+            if target_lang:
+                cloned_audio_dir = os.path.join(outputs_dir, target_lang, "cloned_audio")
+                cloned_results_file = os.path.join(cloned_audio_dir, "cloned_results.json")
+
+                if os.path.exists(cloned_results_file):
+                    # 历史任务存在，返回已完成状态
+                    with open(cloned_results_file, 'r', encoding='utf-8') as f:
+                        cloned_results = json.load(f)
+
+                    return {
+                        "status": "completed",
+                        "message": "语音克隆已完成（历史任务）",
+                        "progress": 100,
+                        "cloned_results": cloned_results,
+                        "cloned_audio_dir": cloned_audio_dir
+                    }
+
+        # 任务目录存在但没有完成的克隆结果
+        raise HTTPException(status_code=404, detail="任务存在但未找到克隆结果")
 
     status = voice_cloning_status[task_id]
     # 调试日志已移除 - 减少日志输出
@@ -2126,12 +2160,34 @@ async def serve_default_voice_audio(filename: str):
 
 
 @app.get("/cloned-audio/{task_id}/{filename}")
-async def serve_cloned_audio(task_id: str, filename: str, request: Request):
+@app.get("/api/cloned-audio/{task_id}/{filename}")
+async def serve_cloned_audio(task_id: str, filename: str, request: Request, lang: str = None):
     """提供克隆音频文件的流式传输，支持 HTTP Range 请求"""
-    file_path = EXPORTS_DIR / f"cloned_{task_id}" / filename
+    # 搜索多个可能的路径
+    possible_paths = [
+        EXPORTS_DIR / f"cloned_{task_id}" / filename,  # 旧路径模式
+    ]
 
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="音频文件未找到")
+    # 新路径模式：tasks/{task_id}/outputs/{language}/cloned_audio/
+    tasks_dir = Path("tasks") / task_id / "outputs"
+    if tasks_dir.exists():
+        # 如果指定了语言，优先使用
+        if lang:
+            possible_paths.insert(0, tasks_dir / lang / "cloned_audio" / filename)
+        # 搜索所有语言目录
+        for lang_dir in tasks_dir.iterdir():
+            if lang_dir.is_dir():
+                possible_paths.append(lang_dir / "cloned_audio" / filename)
+
+    # 找到第一个存在的文件
+    file_path = None
+    for path in possible_paths:
+        if path.exists():
+            file_path = path
+            break
+
+    if file_path is None:
+        raise HTTPException(status_code=404, detail=f"音频文件未找到: {filename}")
 
     file_size = file_path.stat().st_size
     range_header = request.headers.get("range")
@@ -2226,21 +2282,126 @@ class StitchAudioRequest(BaseModel):
 class RegenerateVoicesRequest(BaseModel):
     task_id: str
     speaker_voice_mapping: Dict[str, str]  # {speaker_id: voice_id}
+    language: str = "zh"  # 目标语言，默认中文
 
 
-@app.post("/voice-cloning/regenerate-voices")
+@app.post("/api/voice-cloning/regenerate-voices")
 async def regenerate_voices_with_new_mapping(request: RegenerateVoicesRequest):
     """重新生成使用了不同音色的说话人的所有语音片段"""
     try:
         import asyncio
-        from fish_batch_cloner import FishBatchCloner
         import time
 
         task_id = request.task_id
+        language = request.language
 
-        # 检查任务是否存在
+        print(f"\n[重新生成] 语言: {language}")
+
+        # 检查任务是否存在 - 支持历史任务
         if task_id not in voice_cloning_status:
-            raise HTTPException(status_code=404, detail="任务不存在")
+            print(f"[重新生成] 任务 {task_id} 不在内存中，尝试从文件加载...", flush=True)
+
+            # 尝试从文件加载历史任务数据
+            # 查找任务的根目录 (tasks/{task_id})
+            task_base_dir = os.path.join("tasks", task_id)
+            if not os.path.exists(task_base_dir):
+                raise HTTPException(status_code=404, detail=f"任务不存在: {task_id}")
+
+            # 使用请求中的语言 (tasks/{task_id}/outputs/{language}/cloned_audio)
+            cloned_audio_dir = os.path.join(task_base_dir, "outputs", language, "cloned_audio")
+            if not os.path.exists(cloned_audio_dir):
+                raise HTTPException(status_code=404, detail=f"克隆音频目录不存在: {cloned_audio_dir}")
+
+            # 加载 cloned_results.json
+            cloned_results_file = os.path.join(cloned_audio_dir, "cloned_results.json")
+            if not os.path.exists(cloned_results_file):
+                raise HTTPException(status_code=404, detail=f"未找到克隆结果文件: {cloned_results_file}")
+
+            with open(cloned_results_file, 'r', encoding='utf-8') as f:
+                cloned_results = json.load(f)
+
+            # 加载 speaker_references（从 tasks/{task_id}/processed 目录）
+            processed_dir = os.path.join(task_base_dir, "processed")
+            speaker_data_file = os.path.join(processed_dir, "speaker_data.json")
+
+            speaker_references = {}
+            speaker_labels = []
+            if os.path.exists(speaker_data_file):
+                with open(speaker_data_file, 'r', encoding='utf-8') as f:
+                    speaker_data = json.load(f)
+
+                # speaker_data.json 格式:
+                # {
+                #   "segments": [{"path": ..., "text": ..., "subtitle_index": ...}, ...],
+                #   "speaker_labels": [1, 1, 3, 0, ...],  # 每个字幕的说话人ID
+                #   "scored_segments": {"speaker_id": [[path, score], ...], ...},
+                #   "gender_dict": {"speaker_id": "male"/"female", ...},
+                #   "speaker_name_mapping": {"speaker_id": "name", ...},
+                #   "audio_dir": "..."
+                # }
+
+                scored_segments = speaker_data.get("scored_segments", {})
+                segments = speaker_data.get("segments", [])
+                gender_dict = speaker_data.get("gender_dict", {})
+                speaker_name_mapping = speaker_data.get("speaker_name_mapping", {})
+                speaker_labels = speaker_data.get("speaker_labels", [])
+
+                # 为 cloned_results 中的每个项添加 speaker_id（从 speaker_labels 获取）
+                for result in cloned_results:
+                    idx = result.get("index", -1)
+                    if 0 <= idx < len(speaker_labels):
+                        result["speaker_id"] = speaker_labels[idx]
+                print(f"[重新生成] 已为 {len(cloned_results)} 条克隆结果添加 speaker_id", flush=True)
+
+                # 构建 path -> text 映射
+                path_to_text = {}
+                for seg in segments:
+                    seg_path = seg.get("path", "")
+                    # 标准化路径分隔符
+                    seg_path_normalized = seg_path.replace("\\", "/")
+                    path_to_text[seg_path_normalized] = seg.get("text", "")
+
+                # 构建 speaker_references 格式
+                for speaker_id_str, segment_list in scored_segments.items():
+                    speaker_id = int(speaker_id_str)
+                    if segment_list:
+                        # 使用第一个（得分最高的）片段
+                        best_segment_path = segment_list[0][0]
+                        best_segment_path_normalized = best_segment_path.replace("\\", "/")
+                        reference_text = path_to_text.get(best_segment_path_normalized, "")
+
+                        speaker_references[speaker_id] = {
+                            "reference_audio": os.path.abspath(best_segment_path),
+                            "reference_text": reference_text,
+                            "target_language": language,
+                            "speaker_name": speaker_name_mapping.get(speaker_id_str, f"说话人{speaker_id}"),
+                            "gender": gender_dict.get(speaker_id_str, "unknown")
+                        }
+                print(f"[重新生成] 从 speaker_data.json 加载了 {len(speaker_references)} 个说话人", flush=True)
+            else:
+                # 从 cloned_results 中提取说话人信息
+                print(f"[重新生成] speaker_data.json 不存在，从 cloned_results 提取说话人信息...", flush=True)
+                for result in cloned_results:
+                    speaker_id = result.get("speaker_id")
+                    if speaker_id is not None and speaker_id not in speaker_references:
+                        speaker_references[speaker_id] = {
+                            "reference_audio": None,
+                            "reference_text": "",
+                            "target_language": language
+                        }
+                print(f"[重新生成] 从 cloned_results 提取了 {len(speaker_references)} 个说话人", flush=True)
+
+            # 初始化 voice_cloning_status
+            voice_cloning_status[task_id] = {
+                "status": "completed",
+                "cloned_results": cloned_results,
+                "speaker_references": speaker_references,
+                "audio_dir": processed_dir,
+                "cloned_audio_dir": cloned_audio_dir,
+                "initial_speaker_voice_mapping": {},  # 历史任务默认使用 default
+                "target_language": language
+            }
+            print(f"[重新生成] ✅ 成功加载历史任务 {task_id}, 语言: {language}, 说话人数: {len(speaker_references)}", flush=True)
 
         status = voice_cloning_status[task_id]
         cloned_results = status.get("cloned_results", [])
@@ -2291,10 +2452,11 @@ async def regenerate_voices_with_new_mapping(request: RegenerateVoicesRequest):
         # 收集需要重新生成的任务（格式与初始克隆时一致）
         tasks_to_regenerate = []
         for idx, result in enumerate(cloned_results):
-            if result["speaker_id"] in speakers_to_regenerate:
+            speaker_id = result.get("speaker_id")
+            if speaker_id is not None and speaker_id in speakers_to_regenerate:
                 tasks_to_regenerate.append({
-                    "speaker_id": result["speaker_id"],
-                    "target_text": result["target_text"],
+                    "speaker_id": speaker_id,
+                    "target_text": result.get("target_text", ""),
                     "segment_index": idx,
                     "start_time": result.get("start_time", 0),
                     "end_time": result.get("end_time", 0)
@@ -2302,46 +2464,122 @@ async def regenerate_voices_with_new_mapping(request: RegenerateVoicesRequest):
 
         print(f"[重新生成] 总共需要重新生成 {len(tasks_to_regenerate)} 个片段")
 
-        # 准备npy文件
-        encode_output_dir = os.path.join(audio_dir, "encoded")
-        os.makedirs(encode_output_dir, exist_ok=True)
+        generated_audio_files = {}
 
-        batch_cloner = FishBatchCloner()
-        speaker_npy_files = {}
+        # 根据语言选择不同的克隆器
+        if language == "id":
+            # ========== 印尼语：使用 IndonesianTTSCloner ==========
+            print(f"[重新生成] 使用印尼语 TTS 克隆器")
 
-        for speaker_id in speakers_to_regenerate:
-            speaker_id_str = str(speaker_id)
-            selected_voice = request.speaker_voice_mapping.get(speaker_id_str, "default")
+            from indonesian_tts_cloner import IndonesianTTSCloner
+            import platform
 
-            if selected_voice == "default":
-                # 使用说话人自己的音色
-                ref_data = speaker_references[speaker_id]
-                speakers_dict = {speaker_id: ref_data}
-                encoded_npy = batch_cloner.batch_encode_speakers(speakers_dict, encode_output_dir)
-                speaker_npy_files[speaker_id] = encoded_npy[speaker_id]
-                print(f"  ✅ 说话人 {speaker_id} 使用自己的音色")
-            else:
-                # 使用默认音色
-                default_voice = next((v for v in DEFAULT_VOICES if v["id"] == selected_voice), None)
-                if default_voice:
-                    npy_path = str(DEFAULT_VOICES_DIR / default_voice["npy_file"])
-                    speaker_npy_files[speaker_id] = npy_path
-                    print(f"  ✅ 说话人 {speaker_id} 使用默认音色: {default_voice['name']}")
-                    # 更新参考文本
-                    speaker_references[speaker_id]["reference_text"] = default_voice["reference_text"]
+            # 获取环境配置
+            tts_id_env_python = os.environ.get("TTS_ID_PYTHON")
+            if not tts_id_env_python:
+                if platform.system() == "Windows":
+                    tts_id_env_python = "C:/Users/7/miniconda3/envs/tts-id-py311/python.exe"
+                else:
+                    tts_id_env_python = os.path.expanduser("~/miniconda3/envs/tts-id-py311/bin/python")
 
-        # 获取脚本目录
-        script_dir = os.path.join(audio_dir, "scripts")
+            model_dir = os.environ.get("VITS_TTS_ID_MODEL_DIR")
+            if not model_dir:
+                backend_dir = os.path.dirname(os.path.abspath(__file__))
+                model_dir = os.path.join(backend_dir, "..", "..", "..", "models", "vits-tts-id")
+                model_dir = os.path.abspath(model_dir)
 
-        # 批量生成语音
-        print(f"\n[重新生成] 开始批量生成...")
-        generated_audio_files = batch_cloner.batch_generate_audio(
-            tasks_to_regenerate,
-            speaker_npy_files,
-            speaker_references,
-            cloned_audio_dir,
-            script_dir=script_dir
-        )
+            print(f"[重新生成] 印尼语TTS Python环境: {tts_id_env_python}")
+            print(f"[重新生成] 印尼语TTS 模型路径: {model_dir}")
+
+            if not os.path.exists(tts_id_env_python):
+                raise HTTPException(status_code=500, detail=f"TTS-ID Python环境不存在: {tts_id_env_python}")
+
+            if not os.path.exists(model_dir):
+                raise HTTPException(status_code=500, detail=f"印尼语TTS模型不存在: {model_dir}")
+
+            indonesian_cloner = IndonesianTTSCloner(model_dir, tts_id_env_python)
+
+            # 准备印尼语TTS任务
+            indonesian_tasks = []
+            for task in tasks_to_regenerate:
+                speaker_id = task["speaker_id"]
+                speaker_id_str = str(speaker_id)
+                selected_voice = request.speaker_voice_mapping.get(speaker_id_str, "default")
+
+                # 印尼语音色映射（使用 INDONESIAN_VOICES 中定义的 ID）
+                speaker_name_map = {
+                    "indonesian_male": "ardi",
+                    "indonesian_female": "gadis",
+                    "default": "ardi"
+                }
+                speaker_name = speaker_name_map.get(selected_voice, "ardi")
+                print(f"  [印尼语] 说话人 {speaker_id}: 选择音色 {selected_voice} -> TTS音色 {speaker_name}")
+
+                output_file = os.path.join(cloned_audio_dir, f"segment_{task['segment_index']}.wav")
+                indonesian_tasks.append({
+                    "segment_index": task["segment_index"],
+                    "speaker_name": speaker_name,
+                    "target_text": task["target_text"],
+                    "output_file": os.path.abspath(output_file)
+                })
+
+            # 配置文件
+            config_file = os.path.join(cloned_audio_dir, "indonesian_tts_config.json")
+
+            # 批量生成
+            print(f"\n[重新生成] 开始印尼语批量生成...")
+            generated_audio_files = indonesian_cloner.batch_generate_audio(
+                indonesian_tasks,
+                config_file,
+                progress_callback=None
+            )
+
+        else:
+            # ========== 其他语言：使用 FishBatchCloner ==========
+            print(f"[重新生成] 使用 Fish-Audio 克隆器")
+
+            from fish_batch_cloner import FishBatchCloner
+
+            # 准备npy文件
+            encode_output_dir = os.path.join(audio_dir, "encoded")
+            os.makedirs(encode_output_dir, exist_ok=True)
+
+            batch_cloner = FishBatchCloner()
+            speaker_npy_files = {}
+
+            for speaker_id in speakers_to_regenerate:
+                speaker_id_str = str(speaker_id)
+                selected_voice = request.speaker_voice_mapping.get(speaker_id_str, "default")
+
+                if selected_voice == "default":
+                    # 使用说话人自己的音色
+                    ref_data = speaker_references[speaker_id]
+                    speakers_dict = {speaker_id: ref_data}
+                    encoded_npy = batch_cloner.batch_encode_speakers(speakers_dict, encode_output_dir)
+                    speaker_npy_files[speaker_id] = encoded_npy[speaker_id]
+                    print(f"  ✅ 说话人 {speaker_id} 使用自己的音色")
+                else:
+                    # 使用默认音色
+                    default_voice = next((v for v in DEFAULT_VOICES if v["id"] == selected_voice), None)
+                    if default_voice:
+                        npy_path = str(DEFAULT_VOICES_DIR / default_voice["npy_file"])
+                        speaker_npy_files[speaker_id] = npy_path
+                        print(f"  ✅ 说话人 {speaker_id} 使用默认音色: {default_voice['name']}")
+                        # 更新参考文本
+                        speaker_references[speaker_id]["reference_text"] = default_voice["reference_text"]
+
+            # 获取脚本目录
+            script_dir = os.path.join(audio_dir, "scripts")
+
+            # 批量生成语音
+            print(f"\n[重新生成] 开始批量生成...")
+            generated_audio_files = batch_cloner.batch_generate_audio(
+                tasks_to_regenerate,
+                speaker_npy_files,
+                speaker_references,
+                cloned_audio_dir,
+                script_dir=script_dir
+            )
 
         # 更新 cloned_results
         print(f"\n[重新生成] 更新 cloned_results...")
@@ -2350,9 +2588,9 @@ async def regenerate_voices_with_new_mapping(request: RegenerateVoicesRequest):
         for task in tasks_to_regenerate:
             segment_index = task["segment_index"]
             if segment_index in generated_audio_files:
-                # 生成API路径，添加时间戳参数破坏浏览器缓存
+                # 生成API路径，添加语言和时间戳参数
                 audio_filename = f"segment_{segment_index}.wav"
-                api_path = f"/cloned-audio/{task_id}/{audio_filename}?t={timestamp}"
+                api_path = f"/cloned-audio/{task_id}/{audio_filename}?lang={language}&t={timestamp}"
 
                 # 更新该片段的信息
                 old_path = cloned_results[segment_index].get("cloned_audio_path")
@@ -2363,6 +2601,15 @@ async def regenerate_voices_with_new_mapping(request: RegenerateVoicesRequest):
 
         voice_cloning_status[task_id]["cloned_results"] = cloned_results
         print(f"[重新生成] cloned_results 已更新到 voice_cloning_status")
+
+        # 保存更新后的 cloned_results 到文件
+        cloned_results_file = os.path.join(cloned_audio_dir, "cloned_results.json")
+        try:
+            with open(cloned_results_file, 'w', encoding='utf-8') as f:
+                json.dump(cloned_results, f, ensure_ascii=False, indent=2)
+            print(f"[重新生成] ✅ 已保存 cloned_results.json")
+        except Exception as e:
+            print(f"[重新生成] ⚠️ 保存 cloned_results.json 失败: {e}")
 
         # 计算耗时
         end_time = time.time()
@@ -2410,8 +2657,10 @@ async def regenerate_voices_with_new_mapping(request: RegenerateVoicesRequest):
         error_detail = traceback.format_exc()
         print(f"[重新生成] 失败: {error_detail}")
 
-        voice_cloning_status[task_id]["status"] = "failed"
-        voice_cloning_status[task_id]["message"] = f"重新生成失败: {str(e)}"
+        # 安全地更新状态（task_id 可能不在 voice_cloning_status 中）
+        if task_id in voice_cloning_status:
+            voice_cloning_status[task_id]["status"] = "failed"
+            voice_cloning_status[task_id]["message"] = f"重新生成失败: {str(e)}"
 
         raise HTTPException(status_code=500, detail=str(e))
 

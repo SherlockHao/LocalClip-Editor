@@ -1739,7 +1739,8 @@ const App: React.FC = () => {
         },
         body: JSON.stringify({
           task_id: voiceCloningTaskId,
-          speaker_voice_mapping: speakerVoiceMapping
+          speaker_voice_mapping: speakerVoiceMapping,
+          language: targetLanguage || 'zh'
         })
       });
 
