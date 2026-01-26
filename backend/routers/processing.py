@@ -341,7 +341,7 @@ async def run_speaker_diarization_task(
 
         # 根据视频时长计算说话人聚类数量
         duration_minutes = video_duration / 60
-        if duration_minutes <= 2:
+        if duration_minutes <= 1:
             n_clusters = 4
         elif duration_minutes <= 5:
             n_clusters = 5
