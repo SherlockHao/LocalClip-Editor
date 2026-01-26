@@ -752,13 +752,13 @@ const TaskDashboard: React.FC = () => {
                     <>
                       <FileText className="mx-auto mb-2 text-slate-400 group-hover:text-blue-400 transition-colors" size={32} />
                       <p className="text-sm text-slate-300 font-medium group-hover:text-white transition-colors">点击选择字幕文件</p>
-                      <p className="text-xs text-slate-500 mt-1">支持 SRT 格式</p>
+                      <p className="text-xs text-slate-500 mt-1">支持 SRT / ASS 格式</p>
                     </>
                   )}
                 </div>
                 <input
                   type="file"
-                  accept=".srt"
+                  accept=".srt,.ass,.ssa"
                   className="hidden"
                   onChange={(e) => e.target.files?.[0] && setSubtitleFile(e.target.files[0])}
                   disabled={uploading}

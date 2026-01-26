@@ -43,14 +43,18 @@ async def create_task(
     subtitle: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
-    """创建新任务并上传视频和字幕（必须）"""
+    """创建新任务并上传视频和字幕（必须，支持 SRT 和 ASS 格式）"""
     try:
         print(f"[任务API] 收到上传请求, 文件名: {video.filename}, 类型: {video.content_type}", flush=True)
         print(f"[任务API] 包含字幕文件: {subtitle.filename}", flush=True)
 
-        # 验证字幕文件格式
-        if not subtitle.filename.lower().endswith('.srt'):
-            raise HTTPException(status_code=400, detail="仅支持 SRT 字幕文件")
+        # 验证字幕文件格式 - 支持 SRT 和 ASS/SSA 格式
+        subtitle_filename_lower = subtitle.filename.lower()
+        is_ass_format = subtitle_filename_lower.endswith('.ass') or subtitle_filename_lower.endswith('.ssa')
+        is_srt_format = subtitle_filename_lower.endswith('.srt')
+
+        if not (is_srt_format or is_ass_format):
+            raise HTTPException(status_code=400, detail="仅支持 SRT 和 ASS 字幕文件")
 
         # 生成任务ID
         task_id = f"task_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
@@ -91,10 +95,38 @@ async def create_task(
         subtitle_path = task_path_manager.get_source_subtitle_path(task_id)
         subtitle_path.parent.mkdir(exist_ok=True, parents=True)
 
-        print(f"[任务API] 保存字幕到: {subtitle_path}", flush=True)
+        if is_ass_format:
+            # ASS 格式：先保存为临时文件，然后解析转换为 SRT
+            import tempfile
+            from srt_parser import SRTParser
+            srt_parser = SRTParser()
 
-        with open(subtitle_path, "wb") as buffer:
-            shutil.copyfileobj(subtitle.file, buffer)
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.ass') as temp_file:
+                shutil.copyfileobj(subtitle.file, temp_file)
+                temp_path = temp_file.name
+
+            print(f"[任务API] ASS 文件已保存到临时位置: {temp_path}", flush=True)
+
+            # 解析 ASS 文件
+            subtitles = srt_parser.parse_ass(temp_path)
+
+            if not subtitles:
+                os.unlink(temp_path)
+                # 清理已创建的目录
+                file_manager.delete_task(task_id)
+                raise HTTPException(status_code=400, detail="ASS 字幕文件解析失败")
+
+            # 转换并保存为 SRT 格式
+            srt_parser.save_srt(subtitles, str(subtitle_path))
+
+            # 清理临时文件
+            os.unlink(temp_path)
+            print(f"[任务API] ASS 已转换为 SRT: {subtitle_path}", flush=True)
+        else:
+            # SRT 格式：直接保存
+            print(f"[任务API] 保存字幕到: {subtitle_path}", flush=True)
+            with open(subtitle_path, "wb") as buffer:
+                shutil.copyfileobj(subtitle.file, buffer)
 
         subtitle_size = os.path.getsize(subtitle_path)
         print(f"[任务API] 字幕保存成功, 大小: {subtitle_size} bytes", flush=True)
@@ -273,7 +305,7 @@ async def upload_subtitle(
     subtitle: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
-    """上传字幕文件到任务"""
+    """上传字幕文件到任务 (支持 SRT 和 ASS 格式)"""
     try:
         print(f"[字幕上传] 收到请求: {task_id}, 文件名: {subtitle.filename}", flush=True)
 
@@ -282,18 +314,48 @@ async def upload_subtitle(
         if not task:
             raise HTTPException(status_code=404, detail="任务不存在")
 
-        # 验证文件类型
-        if not subtitle.filename.lower().endswith('.srt'):
-            raise HTTPException(status_code=400, detail="仅支持 SRT 字幕文件")
+        # 验证文件类型 - 支持 SRT 和 ASS/SSA 格式
+        filename_lower = subtitle.filename.lower()
+        is_ass_format = filename_lower.endswith('.ass') or filename_lower.endswith('.ssa')
+        is_srt_format = filename_lower.endswith('.srt')
+
+        if not (is_srt_format or is_ass_format):
+            raise HTTPException(status_code=400, detail="仅支持 SRT 和 ASS 字幕文件")
 
         # 保存字幕到 processed 目录
         subtitle_path = task_path_manager.get_source_subtitle_path(task_id)
         subtitle_path.parent.mkdir(exist_ok=True, parents=True)
 
-        print(f"[字幕上传] 保存字幕到: {subtitle_path}", flush=True)
+        if is_ass_format:
+            # ASS 格式：先保存为临时文件，然后解析转换为 SRT
+            import tempfile
+            from srt_parser import SRTParser
+            srt_parser = SRTParser()
 
-        with open(subtitle_path, "wb") as buffer:
-            shutil.copyfileobj(subtitle.file, buffer)
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.ass') as temp_file:
+                shutil.copyfileobj(subtitle.file, temp_file)
+                temp_path = temp_file.name
+
+            print(f"[字幕上传] ASS 文件已保存到临时位置: {temp_path}", flush=True)
+
+            # 解析 ASS 文件
+            subtitles = srt_parser.parse_ass(temp_path)
+
+            if not subtitles:
+                os.unlink(temp_path)
+                raise HTTPException(status_code=400, detail="ASS 字幕文件解析失败")
+
+            # 转换并保存为 SRT 格式
+            srt_parser.save_srt(subtitles, str(subtitle_path))
+
+            # 清理临时文件
+            os.unlink(temp_path)
+            print(f"[字幕上传] ASS 已转换为 SRT: {subtitle_path}", flush=True)
+        else:
+            # SRT 格式：直接保存
+            print(f"[字幕上传] 保存字幕到: {subtitle_path}", flush=True)
+            with open(subtitle_path, "wb") as buffer:
+                shutil.copyfileobj(subtitle.file, buffer)
 
         file_size = os.path.getsize(subtitle_path)
         print(f"[字幕上传] 字幕保存成功, 大小: {file_size} bytes", flush=True)

@@ -22,8 +22,92 @@ from models.task import Task
 from progress_manager import update_task_progress, mark_task_failed, mark_task_completed
 from path_utils import task_path_manager
 from running_task_tracker import running_task_tracker
+import shutil
+from pathlib import Path
 
 router = APIRouter(prefix="/api/tasks", tags=["processing"])
+
+
+# ==================== 桌面输出辅助函数 ====================
+
+def copy_to_desktop_output(output_video_path: str, video_original_name: str, language: str, task_id: str = None):
+    """
+    将导出的视频和翻译字幕复制到桌面输出文件夹
+
+    Args:
+        output_video_path: 导出视频的路径
+        video_original_name: 原视频文件名（如 3_full.mp4）
+        language: 目标语言（如 en, ko, ja）
+        task_id: 任务ID（用于定位翻译字幕文件）
+    """
+    try:
+        # 桌面输出根目录
+        desktop_output_root = Path(r"C:\Users\Administrator\Desktop\Ascendia_Output")
+
+        # 获取原视频名称（不含后缀）作为子文件夹名
+        video_base_name = Path(video_original_name).stem  # 例如: 3_full
+
+        # 创建子文件夹
+        output_folder = desktop_output_root / video_base_name
+        output_folder.mkdir(parents=True, exist_ok=True)
+
+        # 复制视频文件
+        source_path = Path(output_video_path)
+        if not source_path.exists():
+            print(f"[桌面复制] ⚠️ 源文件不存在: {source_path}", flush=True)
+        else:
+            dest_path = output_folder / source_path.name
+            shutil.copy2(str(source_path), str(dest_path))
+            print(f"[桌面复制] ✅ 视频已复制到桌面: {dest_path}", flush=True)
+
+        # 复制翻译后的SRT字幕文件
+        if task_id:
+            translated_srt_path = task_path_manager.get_translated_subtitle_path(task_id, language)
+            if translated_srt_path.exists():
+                # 字幕文件命名: 原视频名_语言.srt
+                srt_dest_name = f"{video_base_name}_{language}.srt"
+                srt_dest_path = output_folder / srt_dest_name
+                shutil.copy2(str(translated_srt_path), str(srt_dest_path))
+                print(f"[桌面复制] ✅ 字幕已复制到桌面: {srt_dest_path}", flush=True)
+            else:
+                print(f"[桌面复制] ⚠️ 翻译字幕不存在: {translated_srt_path}", flush=True)
+
+    except Exception as e:
+        print(f"[桌面复制] ❌ 复制失败: {str(e)}", flush=True)
+        import traceback
+        traceback.print_exc()
+
+
+def copy_srt_to_task_output(task_id: str, language: str, video_original_name: str):
+    """
+    将翻译后的SRT字幕复制到任务输出目录（与导出视频同目录）
+
+    Args:
+        task_id: 任务ID
+        language: 目标语言
+        video_original_name: 原视频文件名
+    """
+    try:
+        # 源文件：translated.srt
+        translated_srt_path = task_path_manager.get_translated_subtitle_path(task_id, language)
+        if not translated_srt_path.exists():
+            print(f"[字幕复制] ⚠️ 翻译字幕不存在: {translated_srt_path}", flush=True)
+            return
+
+        # 目标文件：原视频名_语言.srt（与导出视频同目录）
+        video_base_name = Path(video_original_name).stem
+        srt_dest_name = f"{video_base_name}_{language}.srt"
+        output_dir = task_path_manager.get_language_output_dir(task_id, language)
+        srt_dest_path = output_dir / srt_dest_name
+
+        # 复制字幕文件
+        shutil.copy2(str(translated_srt_path), str(srt_dest_path))
+        print(f"[字幕复制] ✅ 字幕已复制到任务输出目录: {srt_dest_path}", flush=True)
+
+    except Exception as e:
+        print(f"[字幕复制] ❌ 复制失败: {str(e)}", flush=True)
+        import traceback
+        traceback.print_exc()
 
 
 # ==================== Pydantic 模型 ====================
@@ -1050,6 +1134,12 @@ async def run_export_task(task_id: str, language: str):
         )
 
         print(f"[导出] ✅ 导出完成: {output_video_path}", flush=True)
+
+        # 复制翻译字幕到任务输出目录
+        copy_srt_to_task_output(task_id, language, task.video_original_name)
+
+        # 复制视频和字幕到桌面输出文件夹
+        copy_to_desktop_output(str(output_video_path), task.video_original_name, language, task_id)
 
         await mark_task_completed(task_id, language, "export")
         print(f"[导出] ✅ 任务完成: {task_id} -> {language}", flush=True)
@@ -2265,6 +2355,20 @@ async def export_video_task(
         file_size_mb = file_size / (1024 * 1024)
 
         print(f"[视频导出] ✅ 完成! 文件大小: {file_size_mb:.2f}MB, 耗时: {duration:.1f}s", flush=True)
+
+        # 复制翻译字幕和视频到桌面输出文件夹
+        from database import SessionLocal
+        from models.task import Task as TaskModel
+        db = SessionLocal()
+        try:
+            task = db.query(TaskModel).filter(TaskModel.task_id == task_id).first()
+            if task:
+                # 复制翻译字幕到任务输出目录
+                copy_srt_to_task_output(task_id, language, task.video_original_name)
+                # 复制视频和字幕到桌面输出文件夹
+                copy_to_desktop_output(output_video_path, task.video_original_name, language, task_id)
+        finally:
+            db.close()
 
         # 标记完成
         await mark_task_completed(

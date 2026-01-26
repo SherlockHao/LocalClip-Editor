@@ -589,21 +589,25 @@ async def upload_video(file: UploadFile = File(...)):
 @app.post("/upload/subtitle")
 async def upload_subtitle(file: UploadFile = File(...)):
     try:
-        # 检查文件类型
-        if not file.filename.lower().endswith('.srt'):
-            raise HTTPException(status_code=400, detail="仅支持SRT字幕文件")
-        
-        # 生成唯一文件名
-        unique_filename = f"{uuid.uuid4()}.srt"
+        # 检查文件类型 - 支持 SRT 和 ASS 格式
+        filename_lower = file.filename.lower()
+        if not (filename_lower.endswith('.srt') or filename_lower.endswith('.ass') or filename_lower.endswith('.ssa')):
+            raise HTTPException(status_code=400, detail="仅支持SRT和ASS字幕文件")
+
+        # 获取原始文件扩展名
+        original_ext = '.srt' if filename_lower.endswith('.srt') else '.ass'
+
+        # 生成唯一文件名（保留原始扩展名）
+        unique_filename = f"{uuid.uuid4()}{original_ext}"
         file_path = UPLOADS_DIR / unique_filename
-        
+
         # 保存文件
         with open(file_path, "wb") as buffer:
             content = await file.read()
             buffer.write(content)
-        
-        # 解析SRT文件
-        subtitles = srt_parser.parse_srt(str(file_path))
+
+        # 自动检测格式并解析字幕文件
+        subtitles = srt_parser.parse_subtitle(str(file_path))
         
         return {
             "filename": unique_filename,
