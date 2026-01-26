@@ -273,13 +273,15 @@ const TaskDashboard: React.FC = () => {
       alert('请选择视频文件');
       return;
     }
+    if (!subtitleFile) {
+      alert('请选择字幕文件');
+      return;
+    }
 
     setUploading(true);
     const formData = new FormData();
     formData.append('video', videoFile);
-    if (subtitleFile) {
-      formData.append('subtitle', subtitleFile);
-    }
+    formData.append('subtitle', subtitleFile);
 
     try {
       const response = await axios.post('/api/tasks/', formData, {
@@ -726,11 +728,11 @@ const TaskDashboard: React.FC = () => {
               </label>
             </div>
 
-            {/* 字幕文件上传 (可选) */}
+            {/* 字幕文件上传 (必须) */}
             <div className="mb-8">
               <label className="block text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
                 <FileText size={16} className="text-blue-400" />
-                字幕文件 <span className="text-slate-500 font-normal">(可选)</span>
+                字幕文件 <span className="text-red-400">*</span>
               </label>
               <label className={`group flex items-center justify-center w-full px-4 py-6 border-2 border-dashed rounded-xl cursor-pointer transition-all ${
                 subtitleFile
@@ -780,7 +782,7 @@ const TaskDashboard: React.FC = () => {
               <button
                 onClick={handleUploadSubmit}
                 className="flex-1 px-5 py-3 bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-600 text-white rounded-xl hover:shadow-xl hover:shadow-purple-500/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
-                disabled={uploading || !videoFile}
+                disabled={uploading || !videoFile || !subtitleFile}
               >
                 {uploading ? (
                   <span className="flex items-center justify-center gap-2">
