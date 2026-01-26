@@ -309,7 +309,7 @@ async def run_speaker_diarization_task(
         gender_classifier = GenderClassifier()
 
         # 使用静音切割预处理，临时文件保存在segments_dir
-        gender_dict = gender_classifier.classify_speakers(
+        gender_dict, gender_probs = gender_classifier.classify_speakers(
             scored_segments,
             min_duration=2.0,
             use_silence_trimming=True,

@@ -361,8 +361,9 @@ class GenderClassifier:
         min_duration: float = 2.0,
         use_silence_trimming: bool = True,
         min_final_duration: float = 1.5,
-        temp_dir: Optional[str] = None
-    ) -> Dict[int, str]:
+        temp_dir: Optional[str] = None,
+        auto_rebalance: bool = True
+    ) -> Tuple[Dict[int, str], Dict[int, Dict[str, float]]]:
         """
         对所有说话人进行性别分类
 
@@ -372,11 +373,15 @@ class GenderClassifier:
             use_silence_trimming: 是否使用静音切割预处理
             min_final_duration: 切割后的最小可接受时长
             temp_dir: 临时文件目录
+            auto_rebalance: 是否自动重平衡性别分配（处理异常分布）
 
         Returns:
-            Dict[int, str]: 字典，key为说话人ID，value为性别（"male"或"female"）
+            Tuple[Dict[int, str], Dict[int, Dict[str, float]]]:
+                - 性别结果字典：{speaker_id: "male"/"female"}
+                - 概率结果字典：{speaker_id: {"male": prob, "female": prob}}
         """
-        results = {}
+        gender_results = {}
+        prob_results = {}
 
         for speaker_id, scored_segments in scored_segments_dict.items():
             print(f"\n对说话人 {speaker_id} 进行性别识别...")
@@ -397,20 +402,110 @@ class GenderClassifier:
                     )
 
                 # 进行性别识别
-                gender = self.get_gender(best_audio)
                 prediction = self.classify_audio(best_audio)
+                gender = "male" if prediction["male"] > prediction["female"] else "female"
 
                 print(f"  识别结果: {gender} (male: {prediction['male']:.3f}, female: {prediction['female']:.3f})")
-                results[speaker_id] = gender
+                gender_results[speaker_id] = gender
+                prob_results[speaker_id] = prediction
 
             except Exception as e:
                 print(f"  识别失败: {str(e)}")
                 import traceback
                 traceback.print_exc()
-                # 默认为male
-                results[speaker_id] = "male"
+                # 默认为male，概率设为0.5表示不确定
+                gender_results[speaker_id] = "male"
+                prob_results[speaker_id] = {"male": 0.5, "female": 0.5}
 
-        return results
+        # 自动重平衡性别分配
+        if auto_rebalance:
+            gender_results = self.rebalance_genders(gender_results, prob_results)
+
+        return gender_results, prob_results
+
+    def rebalance_genders(
+        self,
+        gender_results: Dict[int, str],
+        prob_results: Dict[int, Dict[str, float]]
+    ) -> Dict[int, str]:
+        """
+        根据概率重新平衡性别分配，处理异常的性别分布
+
+        规则：
+        1. ≥4个说话人且全部同性 → 将异性概率最高的改为异性
+        2. ≥5个说话人且只有≤1个少数性别 → 将多数性别中异性概率最高的改为异性
+
+        Args:
+            gender_results: 原始性别结果
+            prob_results: 概率结果
+
+        Returns:
+            重平衡后的性别结果
+        """
+        total_speakers = len(gender_results)
+        result = gender_results.copy()
+
+        if total_speakers < 4:
+            print(f"\n[性别重平衡] 说话人数量({total_speakers}) < 4，无需重平衡")
+            return result
+
+        def count_genders():
+            males = [sid for sid, g in result.items() if g == "male"]
+            females = [sid for sid, g in result.items() if g == "female"]
+            return males, females
+
+        males, females = count_genders()
+        male_count, female_count = len(males), len(females)
+
+        print(f"\n[性别重平衡] 检查性别分布: {male_count}男 {female_count}女 (共{total_speakers}人)")
+
+        # Case 1: ≥4个说话人，全部同性
+        if total_speakers >= 4 and (male_count == 0 or female_count == 0):
+            if male_count == 0:
+                # 全是女性，找male_prob最高的改成male
+                best = max(females, key=lambda sid: prob_results[sid]["male"])
+                result[best] = "male"
+                print(f"[性别重平衡] Case1触发: 全为女性({female_count}人)")
+                print(f"  → 将说话人 {best} 改为男性 (male_prob: {prob_results[best]['male']:.3f})")
+            else:
+                # 全是男性，找female_prob最高的改成female
+                best = max(males, key=lambda sid: prob_results[sid]["female"])
+                result[best] = "female"
+                print(f"[性别重平衡] Case1触发: 全为男性({male_count}人)")
+                print(f"  → 将说话人 {best} 改为女性 (female_prob: {prob_results[best]['female']:.3f})")
+
+            # 重新计算性别分布
+            males, females = count_genders()
+            male_count, female_count = len(males), len(females)
+            print(f"[性别重平衡] Case1后分布: {male_count}男 {female_count}女")
+
+        # Case 2: ≥5个说话人，只有≤1个少数性别
+        if total_speakers >= 5:
+            minority_count = min(male_count, female_count)
+
+            if minority_count <= 1:
+                if male_count > female_count:
+                    # 男性是多数，在男性中找female_prob最高的改成female
+                    best = max(males, key=lambda sid: prob_results[sid]["female"])
+                    result[best] = "female"
+                    print(f"[性别重平衡] Case2触发: {male_count}男{female_count}女，少数性别≤1")
+                    print(f"  → 将说话人 {best} 改为女性 (female_prob: {prob_results[best]['female']:.3f})")
+                else:
+                    # 女性是多数，在女性中找male_prob最高的改成male
+                    best = max(females, key=lambda sid: prob_results[sid]["male"])
+                    result[best] = "male"
+                    print(f"[性别重平衡] Case2触发: {male_count}男{female_count}女，少数性别≤1")
+                    print(f"  → 将说话人 {best} 改为男性 (male_prob: {prob_results[best]['male']:.3f})")
+
+                # 输出最终结果
+                males, females = count_genders()
+                print(f"[性别重平衡] Case2后分布: {len(males)}男 {len(females)}女")
+            else:
+                print(f"[性别重平衡] Case2未触发: 少数性别数量({minority_count}) > 1，分布正常")
+        elif total_speakers >= 4:
+            print(f"[性别重平衡] Case2未触发: 说话人数量({total_speakers}) < 5")
+
+        return result
 
 
 def rename_speakers_by_gender(

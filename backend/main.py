@@ -782,7 +782,7 @@ async def run_speaker_diarization_process(task_id: str, video_path: str, subtitl
         # 性别识别
         from gender_classifier import GenderClassifier, rename_speakers_by_gender
         gender_classifier = GenderClassifier()
-        gender_dict = gender_classifier.classify_speakers(scored_segments, min_duration=2.0)
+        gender_dict, gender_probs = gender_classifier.classify_speakers(scored_segments, min_duration=2.0)
 
         # 根据性别和出现次数重新命名说话人
         print(f"\n根据性别和出现次数重新命名说话人...")
