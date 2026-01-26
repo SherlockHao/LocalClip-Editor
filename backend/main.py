@@ -32,7 +32,7 @@ from srt_parser import SRTParser
 
 # 导入批量任务管理相关模块
 from database import init_db
-from routers import tasks, websocket, processing, batch
+from routers import tasks, websocket, processing, batch, system
 
 # 语言代码到中文名称的映射
 def get_language_name(language_code: str) -> str:
@@ -77,6 +77,7 @@ app.include_router(tasks.router)
 app.include_router(websocket.router)
 app.include_router(processing.router)
 app.include_router(batch.router)
+app.include_router(system.router)
 
 # 添加CORS中间件
 app.add_middleware(

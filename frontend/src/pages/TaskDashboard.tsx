@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Play, Trash2, Plus, Video, Clock, Loader2, FileText, Upload, PlayCircle, StopCircle, CheckCircle, XCircle, Activity, TrendingUp } from 'lucide-react';
+import { Play, Trash2, Plus, Video, Clock, Loader2, FileText, Upload, PlayCircle, StopCircle, CheckCircle, XCircle, Activity, TrendingUp, Power, Server, Cpu, HardDrive } from 'lucide-react';
 
 interface StageStatus {
   status: string;
@@ -63,6 +63,19 @@ interface BatchStatus {
   queued_count: number;
 }
 
+// 系统状态接口
+interface SystemStatus {
+  status: string;
+  uptime_seconds: number;
+  uptime_formatted: string;
+  platform: string;
+  python_version: string;
+  cpu_percent: number;
+  memory_percent: number;
+  memory_used_gb: number;
+  memory_total_gb: number;
+}
+
 const TaskDashboard: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -72,6 +85,8 @@ const TaskDashboard: React.FC = () => {
   const [subtitleFile, setSubtitleFile] = useState<File | null>(null);
   const [runningTasks, setRunningTasks] = useState<Record<string, RunningTaskInfo>>({});
   const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null);
+  const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
+  const [isShuttingDown, setIsShuttingDown] = useState(false);
   const navigate = useNavigate();
 
   // 用于追踪是否曾经成功加载过任务
@@ -83,6 +98,7 @@ const TaskDashboard: React.FC = () => {
     fetchTasks();
     fetchRunningTasks();
     fetchBatchStatus();
+    fetchSystemStatus();
 
     // 每3秒刷新一次运行任务状态、任务列表和批量处理状态
     const runningTasksInterval = setInterval(fetchRunningTasks, 3000);
@@ -91,11 +107,14 @@ const TaskDashboard: React.FC = () => {
       fetchTasksSilent();
     }, 3000);
     const batchStatusInterval = setInterval(fetchBatchStatus, 2000);
+    // 每5秒刷新一次系统状态
+    const systemStatusInterval = setInterval(fetchSystemStatus, 5000);
 
     return () => {
       clearInterval(runningTasksInterval);
       clearInterval(tasksInterval);
       clearInterval(batchStatusInterval);
+      clearInterval(systemStatusInterval);
     };
   }, []);
 
@@ -152,6 +171,44 @@ const TaskDashboard: React.FC = () => {
     } catch (error) {
       // 静默失败
       console.log('Failed to fetch batch status:', error);
+    }
+  };
+
+  // 获取系统状态
+  const fetchSystemStatus = async () => {
+    try {
+      const response = await axios.get('/api/system/status', { timeout: 5000 });
+      setSystemStatus(response.data);
+    } catch (error) {
+      // 静默失败，可能是服务已关闭
+      console.log('Failed to fetch system status:', error);
+      setSystemStatus(null);
+    }
+  };
+
+  // 关闭系统
+  const handleShutdown = async () => {
+    if (batchStatus?.is_running) {
+      const confirm1 = window.confirm('当前有批量处理任务正在运行，关闭系统将中断任务。\n\n确定要关闭系统吗？');
+      if (!confirm1) return;
+    } else {
+      const confirm2 = window.confirm('确定要关闭 Ascendia 系统吗？\n\n关闭后需要重新启动才能使用。');
+      if (!confirm2) return;
+    }
+
+    try {
+      setIsShuttingDown(true);
+      await axios.post('/api/system/shutdown', { confirm: true }, { timeout: 5000 });
+      // 显示关闭成功提示
+      alert('系统正在关闭...\n\n请关闭此浏览器窗口。');
+    } catch (error: any) {
+      // 如果请求失败可能是因为服务已经关闭
+      if (error.code === 'ECONNABORTED' || error.code === 'ERR_NETWORK') {
+        alert('系统已关闭。\n\n请关闭此浏览器窗口。');
+      } else {
+        setIsShuttingDown(false);
+        alert('关闭系统失败: ' + (error.response?.data?.detail || error.message));
+      }
     }
   };
 
@@ -396,7 +453,7 @@ const TaskDashboard: React.FC = () => {
   }, [tasks, runningTasks, isBatchRunning, batchStatus]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 p-6">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 p-6 pb-20">
       <div className="max-w-7xl mx-auto">
         {/* Ascendia 品牌头部 */}
         <div className="mb-8">
@@ -677,6 +734,75 @@ const TaskDashboard: React.FC = () => {
             </div>
           </div>
         )}
+
+        {/* 系统状态栏 - 固定在底部 */}
+        <div className="fixed bottom-0 left-0 right-0 bg-gradient-to-r from-slate-900/95 via-slate-800/95 to-slate-900/95 backdrop-blur-sm border-t border-slate-700/50 px-6 py-3 z-40">
+          <div className="max-w-7xl mx-auto flex items-center justify-between">
+            {/* 左侧：系统状态信息 */}
+            <div className="flex items-center gap-6">
+              {/* 运行状态指示 */}
+              <div className="flex items-center gap-2">
+                {systemStatus ? (
+                  <>
+                    <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse shadow-lg shadow-green-500/50"></div>
+                    <span className="text-sm text-green-400 font-medium">系统运行中</span>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-2.5 h-2.5 rounded-full bg-red-500"></div>
+                    <span className="text-sm text-red-400 font-medium">连接断开</span>
+                  </>
+                )}
+              </div>
+
+              {systemStatus && (
+                <>
+                  {/* 运行时间 */}
+                  <div className="flex items-center gap-2 text-slate-400">
+                    <Clock size={14} />
+                    <span className="text-sm">运行时间: <span className="text-slate-300">{systemStatus.uptime_formatted}</span></span>
+                  </div>
+
+                  {/* CPU 使用率 */}
+                  <div className="flex items-center gap-2 text-slate-400">
+                    <Cpu size={14} />
+                    <span className="text-sm">CPU: <span className={systemStatus.cpu_percent > 80 ? 'text-red-400' : 'text-slate-300'}>{systemStatus.cpu_percent.toFixed(1)}%</span></span>
+                  </div>
+
+                  {/* 内存使用 */}
+                  <div className="flex items-center gap-2 text-slate-400">
+                    <HardDrive size={14} />
+                    <span className="text-sm">内存: <span className={systemStatus.memory_percent > 80 ? 'text-red-400' : 'text-slate-300'}>{systemStatus.memory_used_gb}GB / {systemStatus.memory_total_gb}GB ({systemStatus.memory_percent.toFixed(1)}%)</span></span>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* 右侧：关闭系统按钮 */}
+            <button
+              onClick={handleShutdown}
+              disabled={isShuttingDown || !systemStatus}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-all ${
+                isShuttingDown || !systemStatus
+                  ? 'bg-slate-700/50 text-slate-500 cursor-not-allowed'
+                  : 'bg-red-600/20 text-red-400 border border-red-500/30 hover:bg-red-600/30 hover:border-red-400/50'
+              }`}
+              title={!systemStatus ? '系统未连接' : '关闭 Ascendia 系统'}
+            >
+              {isShuttingDown ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  <span>正在关闭...</span>
+                </>
+              ) : (
+                <>
+                  <Power size={16} />
+                  <span>关闭系统</span>
+                </>
+              )}
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* 上传模态框 */}

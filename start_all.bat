@@ -1,106 +1,117 @@
 @echo off
 chcp 65001 >nul
-title LocalClip Editor - 启动中...
+title Ascendia - Starting...
+color 0B
 
 echo.
-echo ========================================
-echo   LocalClip Editor 一键启动
-echo ========================================
+echo  ============================================
+echo.
+echo       A S C E N D I A
+echo.
+echo       AI-Powered Video Translation Platform
+echo.
+echo  ============================================
 echo.
 
-REM 保存脚本所在目录
+REM Save script directory
 set "SCRIPT_DIR=%~dp0"
 if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 
-REM Conda 设置
+REM Conda settings
 set "CONDA_ACTIVATE=C:\Miniconda3\Scripts\activate.bat"
 set "CONDA_ENV=ui"
 set "CONDA_NODE=C:\Miniconda3\envs\ui\node.exe"
 set "CONDA_PYTHON=C:\Miniconda3\envs\ui\python.exe"
 
-REM 检查 Conda 环境
+REM Check Conda environment
 if not exist "%CONDA_PYTHON%" (
-    echo [错误] 未找到 Conda 环境 ui
+    color 0C
+    echo   [X] ERROR: Conda environment 'ui' not found
+    echo.
     pause
     exit /b 1
 )
 
-echo [1/4] 清理旧进程...
-REM 清理占用 8000 端口的进程
+echo   [1/4] Cleaning old processes...
+REM Clean processes on port 8000
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":8000.*LISTENING"') do (
-    echo   - 关闭端口 8000 占用进程 PID: %%a
+    echo         - Killing PID %%a [port 8000]
     taskkill /F /PID %%a >nul 2>&1
 )
-REM 清理占用 5173 端口的进程
+REM Clean processes on port 5173
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr ":5173.*LISTENING"') do (
-    echo   - 关闭端口 5173 占用进程 PID: %%a
+    echo         - Killing PID %%a [port 5173]
     taskkill /F /PID %%a >nul 2>&1
 )
-echo   - 端口清理完成
+echo         Done.
 echo.
 
-echo [2/4] 检查环境...
-echo   - Conda 环境: %CONDA_ENV%
+echo   [2/4] Checking environment...
+echo         - Conda env: %CONDA_ENV%
+echo         Done.
 echo.
 
-REM 检查前端依赖
-echo [3/4] 检查前端依赖...
+REM Check frontend dependencies
+echo   [3/4] Checking frontend dependencies...
 if not exist "%SCRIPT_DIR%\frontend\node_modules\" (
-    echo   ! Node 模块不存在，正在安装...
+    echo         - Installing node modules...
     cd /d "%SCRIPT_DIR%\frontend"
     call "%CONDA_ACTIVATE%" %CONDA_ENV%
     npm install --ignore-scripts
     node node_modules\esbuild\install.js 2>nul
     cd /d "%SCRIPT_DIR%"
 ) else (
-    echo   - Node 模块已安装
+    echo         - Node modules: OK
 )
+echo         Done.
 echo.
 
-echo [4/4] 启动服务...
-echo.
+echo   [4/4] Starting services...
 
-REM 创建临时启动脚本 - 后端
+REM Create temp startup script - backend
 echo @echo off > "%TEMP%\localclip_backend.bat"
 echo call "%CONDA_ACTIVATE%" %CONDA_ENV% >> "%TEMP%\localclip_backend.bat"
 echo cd /d "%SCRIPT_DIR%\backend" >> "%TEMP%\localclip_backend.bat"
 echo python main.py >> "%TEMP%\localclip_backend.bat"
 
-REM 创建临时启动脚本 - 前端
+REM Create temp startup script - frontend
 echo @echo off > "%TEMP%\localclip_frontend.bat"
 echo call "%CONDA_ACTIVATE%" %CONDA_ENV% >> "%TEMP%\localclip_frontend.bat"
 echo cd /d "%SCRIPT_DIR%\frontend" >> "%TEMP%\localclip_frontend.bat"
 echo node node_modules\vite\bin\vite.js >> "%TEMP%\localclip_frontend.bat"
 
-REM 启动后端
-echo   - 正在启动后端服务...
-start "LocalClip-Backend" cmd /k "%TEMP%\localclip_backend.bat"
+REM Start backend (minimized)
+echo         - Backend starting...
+start /min "Ascendia-Backend" cmd /k "%TEMP%\localclip_backend.bat"
 timeout /t 3 /nobreak >nul
 
-REM 启动前端
-echo   - 正在启动前端服务...
-start "LocalClip-Frontend" cmd /k "%TEMP%\localclip_frontend.bat"
+REM Start frontend (minimized)
+echo         - Frontend starting...
+start /min "Ascendia-Frontend" cmd /k "%TEMP%\localclip_frontend.bat"
 timeout /t 3 /nobreak >nul
 
+echo         Done.
 echo.
-echo ========================================
-echo   启动完成！
-echo ========================================
+echo  ============================================
 echo.
-echo   后端服务: http://localhost:8000
-echo   API 文档: http://localhost:8000/docs
-echo   前端界面: http://localhost:5173
+echo   Ascendia is ready!
 echo.
-echo   提示：关闭服务窗口即可停止服务
+echo   Backend:   http://localhost:8000
+echo   Frontend:  http://localhost:5173
+echo   API Docs:  http://localhost:8000/docs
+echo.
+echo   TIP: Use the Shutdown button in web UI to stop
+echo.
+echo  ============================================
 echo.
 
-REM 等待后自动打开浏览器
-echo   5 秒后自动打开浏览器...
+REM Wait then open browser
+echo   Opening browser in 5 seconds...
 timeout /t 5 /nobreak >nul
 
 start http://localhost:5173/dashboard
 
 echo.
-echo   浏览器已打开！
+echo   Browser opened! This window will close in 3s...
 echo.
-pause
+timeout /t 3 /nobreak >nul
