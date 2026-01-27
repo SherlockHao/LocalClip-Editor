@@ -44,6 +44,12 @@ interface SubtitleDetailsProps {
   isStitchingAudio?: boolean;
   targetLanguage?: string;
   hasRunningTask?: boolean;
+  isSpeakerEditingMode?: boolean;  // 说话人编辑模式
+  // 说话人编辑保存相关
+  hasSpeakerChanges?: boolean;  // 是否有说话人分配变更
+  onSaveSpeakerChanges?: () => void;  // 保存说话人变更回调
+  isSavingSpeakerChanges?: boolean;  // 是否正在保存
+  hasOtherTasksRun?: boolean;  // 是否已运行其他任务（翻译/克隆等）
 }
 
 const getUniqueSpeakers = (subtitles: Subtitle[]): number[] => {
@@ -76,7 +82,12 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
   isProcessingVoiceCloning = false,
   isStitchingAudio = false,
   targetLanguage = '',
-  hasRunningTask = false
+  hasRunningTask = false,
+  isSpeakerEditingMode = false,
+  hasSpeakerChanges = false,
+  onSaveSpeakerChanges,
+  isSavingSpeakerChanges = false,
+  hasOtherTasksRun = false
 }) => {
   const activeSubtitleRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -689,6 +700,40 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
               </button>
             </div>
           )}
+
+          {/* 说话人编辑保存按钮 - 仅在说话人编辑模式下显示 */}
+          {isSpeakerEditingMode && (
+            <div className="mt-3 pt-3 border-t border-slate-700">
+              {hasOtherTasksRun ? (
+                <div className="text-xs text-yellow-400 bg-yellow-900/30 border border-yellow-700/50 rounded-lg px-3 py-2 text-center">
+                  已有其他任务运行，无法修改说话人分配
+                </div>
+              ) : (
+                <button
+                  onClick={onSaveSpeakerChanges}
+                  disabled={!hasSpeakerChanges || isSavingSpeakerChanges || hasRunningTask}
+                  className={`w-full flex items-center justify-center space-x-2 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
+                    hasSpeakerChanges && !isSavingSpeakerChanges && !hasRunningTask
+                      ? 'bg-gradient-to-r from-green-600 to-green-500 hover:from-green-500 hover:to-green-400 text-white shadow-lg hover:shadow-green-500/50'
+                      : 'bg-slate-700/50 text-slate-500 cursor-not-allowed'
+                  }`}
+                  title={!hasSpeakerChanges ? '无变更需要保存' : isSavingSpeakerChanges ? '正在保存...' : '保存说话人分配'}
+                >
+                  {isSavingSpeakerChanges ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      <span>保存中...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save size={14} />
+                      <span>保存说话人分配</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -823,8 +868,8 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
                 </div>
               )}
 
-              {/* 操作区域 - 新布局 */}
-              {sortedSpeakers.length > 0 && subtitle.cloned_audio_path && (
+              {/* 操作区域 - 说话人编辑模式或语音克隆模式 */}
+              {sortedSpeakers.length > 0 && (isSpeakerEditingMode || subtitle.cloned_audio_path) && (
                 <div className="flex gap-1.5 items-center" onClick={(e) => e.stopPropagation()}>
                   {/* 说话人下拉菜单 */}
                   <select
@@ -851,33 +896,38 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
                     {currentVoiceName}
                   </div>
 
-                  {/* 播放按钮 */}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); !hasRunningTask && handlePlayClonedAudio(subtitle.cloned_audio_path!); }}
-                    disabled={regeneratingIndex === index || isRegeneratingVoices || hasRunningTask}
-                    className={`flex items-center justify-center text-xs px-2 py-1 rounded transition-colors ${
-                      regeneratingIndex === index || isRegeneratingVoices || hasRunningTask
-                        ? 'bg-emerald-600/20 border border-emerald-500/20 text-emerald-400/50 cursor-not-allowed'
-                        : 'bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-600/50'
-                    }`}
-                    title={hasRunningTask ? '任务运行中，请稍候' : isRegeneratingVoices ? "正在重新生成音色..." : "播放克隆音频"}
-                  >
-                    {regeneratingIndex === index ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}
-                  </button>
+                  {/* 播放和重新生成按钮 - 仅在非说话人编辑模式且有克隆音频时显示 */}
+                  {!isSpeakerEditingMode && subtitle.cloned_audio_path && (
+                    <>
+                      {/* 播放按钮 */}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); !hasRunningTask && handlePlayClonedAudio(subtitle.cloned_audio_path!); }}
+                        disabled={regeneratingIndex === index || isRegeneratingVoices || hasRunningTask}
+                        className={`flex items-center justify-center text-xs px-2 py-1 rounded transition-colors ${
+                          regeneratingIndex === index || isRegeneratingVoices || hasRunningTask
+                            ? 'bg-emerald-600/20 border border-emerald-500/20 text-emerald-400/50 cursor-not-allowed'
+                            : 'bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-600/50'
+                        }`}
+                        title={hasRunningTask ? '任务运行中，请稍候' : isRegeneratingVoices ? "正在重新生成音色..." : "播放克隆音频"}
+                      >
+                        {regeneratingIndex === index ? <Loader2 size={11} className="animate-spin" /> : <Play size={11} />}
+                      </button>
 
-                  {/* 重新生成按钮 */}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); !hasRunningTask && handleRegenerateSegment(index); }}
-                    disabled={regeneratingIndex === index || isRegeneratingVoices || hasRunningTask}
-                    className={`flex items-center justify-center text-xs px-2 py-1 rounded transition-colors ${
-                      regeneratingIndex === index || isRegeneratingVoices || hasRunningTask
-                        ? 'bg-orange-600/20 border border-orange-500/20 text-orange-400/50 cursor-not-allowed'
-                        : 'bg-orange-600/30 border border-orange-500/40 text-orange-300 hover:bg-orange-600/50'
-                    }`}
-                    title={hasRunningTask ? '任务运行中，请稍候' : isRegeneratingVoices ? "正在重新生成音色..." : "重新生成"}
-                  >
-                    {regeneratingIndex === index ? <Loader2 size={11} className="animate-spin" /> : <RotateCw size={11} />}
-                  </button>
+                      {/* 重新生成按钮 */}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); !hasRunningTask && handleRegenerateSegment(index); }}
+                        disabled={regeneratingIndex === index || isRegeneratingVoices || hasRunningTask}
+                        className={`flex items-center justify-center text-xs px-2 py-1 rounded transition-colors ${
+                          regeneratingIndex === index || isRegeneratingVoices || hasRunningTask
+                            ? 'bg-orange-600/20 border border-orange-500/20 text-orange-400/50 cursor-not-allowed'
+                            : 'bg-orange-600/30 border border-orange-500/40 text-orange-300 hover:bg-orange-600/50'
+                        }`}
+                        title={hasRunningTask ? '任务运行中，请稍候' : isRegeneratingVoices ? "正在重新生成音色..." : "重新生成"}
+                      >
+                        {regeneratingIndex === index ? <Loader2 size={11} className="animate-spin" /> : <RotateCw size={11} />}
+                      </button>
+                    </>
+                  )}
                 </div>
               )}
             </div>

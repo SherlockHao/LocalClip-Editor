@@ -6,12 +6,16 @@ interface SidebarProps {
   speakerDiarizationCompleted: boolean;
   selectedLanguage: string;
   onLanguageSelect: (languageCode: string) => void;
+  isSpeakerEditingMode?: boolean;
+  onSpeakerEditingSelect?: () => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
   speakerDiarizationCompleted,
   selectedLanguage,
   onLanguageSelect,
+  isSpeakerEditingMode = false,
+  onSpeakerEditingSelect,
 }) => {
   return (
     <div className="w-72 bg-gradient-to-b from-slate-800 to-slate-900 border-r border-slate-700 flex flex-col shadow-2xl">
@@ -30,11 +34,13 @@ const Sidebar: React.FC<SidebarProps> = ({
         speakerDiarizationCompleted={speakerDiarizationCompleted}
         selectedLanguage={selectedLanguage}
         onLanguageSelect={onLanguageSelect}
+        isSpeakerEditingMode={isSpeakerEditingMode}
+        onSpeakerEditingSelect={onSpeakerEditingSelect}
       />
 
       {/* 底部说明 */}
       <div className="p-4 border-t border-slate-700 bg-slate-900/50 text-xs text-slate-500">
-        <p className="text-center">点击语言卡片切换目标语言</p>
+        <p className="text-center">点击说话人识别或语言卡片切换视图</p>
       </div>
     </div>
   );

@@ -21,6 +21,8 @@ interface LanguageProgressSidebarProps {
   speakerDiarizationCompleted: boolean;
   selectedLanguage: string;
   onLanguageSelect: (languageCode: string) => void;
+  isSpeakerEditingMode?: boolean;  // 是否处于说话人编辑模式
+  onSpeakerEditingSelect?: () => void;  // 点击说话人识别进入编辑模式
 }
 
 // 语言代码映射（API使用的代码 -> 显示名称）
@@ -45,6 +47,8 @@ const LanguageProgressSidebar: React.FC<LanguageProgressSidebarProps> = ({
   speakerDiarizationCompleted,
   selectedLanguage,
   onLanguageSelect,
+  isSpeakerEditingMode = false,
+  onSpeakerEditingSelect,
 }) => {
   const { taskId } = useParams<{ taskId: string }>();
   const [task, setTask] = useState<Task | null>(null);
@@ -150,15 +154,30 @@ const LanguageProgressSidebar: React.FC<LanguageProgressSidebarProps> = ({
 
   return (
     <div className="flex-1 overflow-y-auto p-4">
-      {/* 说话人识别状态 */}
-      <div className="mb-4 p-3 rounded-lg border bg-slate-700/50 border-slate-600">
+      {/* 说话人识别状态 - 可点击进入编辑模式 */}
+      <div
+        className={`mb-4 p-3 rounded-lg border transition-all ${
+          speakerDiarizationCompleted
+            ? isSpeakerEditingMode
+              ? 'bg-blue-900/40 border-blue-500 ring-1 ring-blue-500 cursor-pointer'
+              : 'bg-slate-700/50 border-slate-600 hover:border-slate-500 cursor-pointer'
+            : 'bg-slate-800/20 border-slate-700/30 opacity-50 cursor-not-allowed'
+        }`}
+        onClick={() => {
+          if (speakerDiarizationCompleted && onSpeakerEditingSelect) {
+            onSpeakerEditingSelect();
+          }
+        }}
+      >
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <span className="text-xl">🎙️</span>
             <div>
               <div className="text-sm font-medium text-slate-200">说话人识别</div>
               <div className="text-xs text-slate-400">
-                {speakerDiarizationCompleted ? '已完成' : '未执行'}
+                {speakerDiarizationCompleted
+                  ? (isSpeakerEditingMode ? '编辑中' : '已完成 - 点击编辑')
+                  : '未执行'}
               </div>
             </div>
           </div>

@@ -81,6 +81,11 @@ const App: React.FC = () => {
   });
   const [speakerNameMapping, setSpeakerNameMapping] = useState<{[key: number]: string}>({});
   const [filteredSpeakerId, setFilteredSpeakerId] = useState<number | null>(null); // 筛选的说话人ID
+  const [isSpeakerEditingMode, setIsSpeakerEditingMode] = useState<boolean>(false); // 说话人编辑模式
+
+  // 说话人编辑保存相关状态
+  const [originalSpeakerLabels, setOriginalSpeakerLabels] = useState<(number | undefined)[]>([]); // 原始说话人标签
+  const [isSavingSpeakerChanges, setIsSavingSpeakerChanges] = useState(false); // 是否正在保存说话人变更
 
   // 语音克隆相关状态
   const [targetLanguage, setTargetLanguage] = useState<string>('');
@@ -419,6 +424,8 @@ const App: React.FC = () => {
                     ...subtitle,
                     speaker_id: status.speaker_labels[index] ?? subtitle.speaker_id
                   })));
+                  // 保存原始说话人标签用于变更检测
+                  setOriginalSpeakerLabels(status.speaker_labels);
                 }
                 if (status.speaker_name_mapping) {
                   setSpeakerNameMapping(status.speaker_name_mapping);
@@ -775,6 +782,8 @@ const App: React.FC = () => {
                 };
               });
               setSubtitles(updatedSubtitles);
+              // 保存原始说话人标签用于变更检测
+              setOriginalSpeakerLabels(speakerResult.speaker_labels);
             }
 
             // 恢复说话人名称映射
@@ -1189,6 +1198,77 @@ const App: React.FC = () => {
     }
   };
 
+  // 语言选择处理 - 退出说话人编辑模式
+  const handleLanguageSelect = (languageCode: string) => {
+    setTargetLanguage(languageCode);
+    setIsSpeakerEditingMode(false);
+  };
+
+  // 说话人编辑模式选择处理
+  const handleSpeakerEditingSelect = () => {
+    setIsSpeakerEditingMode(true);
+    setTargetLanguage(''); // 清空语言选择
+  };
+
+  // 检测说话人分配是否有变更
+  const hasSpeakerChanges = (): boolean => {
+    if (originalSpeakerLabels.length === 0) return false;
+    if (subtitles.length !== originalSpeakerLabels.length) return true;
+    return subtitles.some((subtitle, index) => {
+      const originalLabel = originalSpeakerLabels[index];
+      const currentLabel = subtitle.speaker_id;
+      return originalLabel !== currentLabel;
+    });
+  };
+
+  // 检测是否有其他任务已运行（翻译/语音克隆等）
+  const hasOtherTasksRun = (): boolean => {
+    // 检查是否有任何字幕有克隆音频路径（表示已做过语音克隆）
+    const hasClonedAudio = subtitles.some(s => s.cloned_audio_path);
+    // 检查是否有任何字幕有翻译结果
+    const hasTranslation = subtitles.some(s => s.target_text);
+    return hasClonedAudio || hasTranslation;
+  };
+
+  // 保存说话人分配变更
+  const handleSaveSpeakerChanges = async () => {
+    if (!taskId || isSavingSpeakerChanges) return;
+
+    setIsSavingSpeakerChanges(true);
+    try {
+      // 收集当前的说话人标签
+      const currentSpeakerLabels = subtitles.map(s => s.speaker_id ?? null);
+
+      // 调用后端API保存
+      const response = await axios.post(`/api/tasks/${taskId}/save-speaker-labels`, {
+        speaker_labels: currentSpeakerLabels,
+        speaker_name_mapping: speakerNameMapping
+      });
+
+      if (response.data.success) {
+        // 更新原始标签为当前标签
+        setOriginalSpeakerLabels(currentSpeakerLabels.map(l => l ?? undefined));
+
+        setNotificationData({
+          title: '保存成功',
+          message: '说话人分配已保存，MOS评分已重新计算。',
+          uniqueSpeakers: undefined
+        });
+        setShowNotification(true);
+      }
+    } catch (error) {
+      console.error('[保存说话人] 失败:', error);
+      setNotificationData({
+        title: '保存失败',
+        message: '保存说话人分配时出错，请重试。',
+        uniqueSpeakers: undefined
+      });
+      setShowNotification(true);
+    } finally {
+      setIsSavingSpeakerChanges(false);
+    }
+  };
+
   const handleAddSpeaker = (gender: 'male' | 'female') => {
     // 获取当前最大的说话人ID
     const existingIds = Object.keys(speakerNameMapping).map(id => parseInt(id));
@@ -1347,6 +1427,8 @@ const App: React.FC = () => {
             };
           });
           setSubtitles(updatedSubtitles);
+          // 保存原始说话人标签用于变更检测
+          setOriginalSpeakerLabels(status.speaker_labels);
         }
 
         // 提取说话人名称映射
@@ -2315,7 +2397,9 @@ const App: React.FC = () => {
         <Sidebar
           speakerDiarizationCompleted={subtitles.some(s => s.speaker_id !== undefined)}
           selectedLanguage={targetLanguage}
-          onLanguageSelect={setTargetLanguage}
+          onLanguageSelect={handleLanguageSelect}
+          isSpeakerEditingMode={isSpeakerEditingMode}
+          onSpeakerEditingSelect={handleSpeakerEditingSelect}
         />
 
         {/* 中央区域（新布局：上方播放器+信息，下方时间轴） - 始终显示占位 */}
@@ -2347,6 +2431,11 @@ const App: React.FC = () => {
                 isStitchingAudio={isStitchingAudio}
                 targetLanguage={targetLanguage}
                 hasRunningTask={isProcessingSpeakerDiarization || isProcessingVoiceCloning || isTranslating || isStitchingAudio || isExportingVideo || !!globalRunningTask || !!runningTask}
+                isSpeakerEditingMode={isSpeakerEditingMode}
+                hasSpeakerChanges={hasSpeakerChanges()}
+                onSaveSpeakerChanges={handleSaveSpeakerChanges}
+                isSavingSpeakerChanges={isSavingSpeakerChanges}
+                hasOtherTasksRun={hasOtherTasksRun()}
               />
 
             {/* 右侧：播放器 + 视频信息 (缩小宽度比例) */}

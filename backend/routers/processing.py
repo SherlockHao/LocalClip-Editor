@@ -303,6 +303,138 @@ async def get_speaker_diarization_status(
     return response
 
 
+# ==================== 保存说话人编辑结果 API ====================
+
+class SaveSpeakerLabelsRequest(BaseModel):
+    speaker_labels: List[Optional[int]]  # 每条字幕的说话人ID，可以为None
+    speaker_name_mapping: Dict[str, str]  # 说话人ID到名称的映射
+
+
+@router.post("/{task_id}/save-speaker-labels")
+async def save_speaker_labels(
+    task_id: str,
+    request: SaveSpeakerLabelsRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    保存用户编辑的说话人分配，并重新计算MOS评分
+
+    工作流程:
+    1. 验证任务存在
+    2. 更新speaker_labels
+    3. 重新计算MOS评分（按新分组）
+    4. 根据speaker_name_mapping推断gender_dict和gender_stats
+    5. 保存更新后的speaker_data.json
+    """
+    print(f"\n[保存说话人] 收到请求: {task_id}", flush=True)
+    print(f"[保存说话人] speaker_labels 长度: {len(request.speaker_labels)}", flush=True)
+    print(f"[保存说话人] speaker_name_mapping: {request.speaker_name_mapping}", flush=True)
+
+    # 验证任务存在
+    task = db.query(Task).filter(Task.task_id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    # 检查是否有正在运行的任务
+    if running_task_tracker.has_running_task(task_id):
+        running = running_task_tracker.get_running_task(task_id)
+        raise HTTPException(
+            status_code=409,
+            detail=f"任务 {task_id} 已有正在运行的任务: {running.language}/{running.stage}"
+        )
+
+    # 读取现有的speaker_data.json
+    speaker_data_path = task_path_manager.get_speaker_data_path(task_id)
+    if not speaker_data_path.exists():
+        raise HTTPException(status_code=400, detail="说话人数据不存在，请先执行说话人识别")
+
+    try:
+        with open(speaker_data_path, 'r', encoding='utf-8') as f:
+            speaker_data = json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"读取说话人数据失败: {str(e)}")
+
+    # 注册运行任务
+    running_task_tracker.start_task(task_id, "default", "save_speaker_labels")
+
+    try:
+        # 更新speaker_labels
+        speaker_data['speaker_labels'] = request.speaker_labels
+
+        # 将speaker_name_mapping的key从字符串转为整数
+        speaker_name_mapping = {int(k): v for k, v in request.speaker_name_mapping.items()}
+        speaker_data['speaker_name_mapping'] = speaker_name_mapping
+
+        # 根据speaker_name_mapping推断gender_dict和gender_stats
+        gender_dict = {}
+        gender_stats = {'male': 0, 'female': 0}
+        for speaker_id, name in speaker_name_mapping.items():
+            if name.startswith('男'):
+                gender_dict[speaker_id] = 'male'
+                gender_stats['male'] += 1
+            elif name.startswith('女'):
+                gender_dict[speaker_id] = 'female'
+                gender_stats['female'] += 1
+            else:
+                gender_dict[speaker_id] = 'unknown'
+        speaker_data['gender_dict'] = gender_dict
+        speaker_data['gender_stats'] = gender_stats
+
+        # 更新说话人数量
+        unique_speakers = set(l for l in request.speaker_labels if l is not None)
+        speaker_data['num_speakers'] = len(unique_speakers)
+
+        # 获取音频片段目录
+        segments_dir = task_path_manager.get_speaker_segments_dir(task_id)
+        audio_segments = speaker_data.get('segments', [])
+
+        # 按新的说话人分组重新计算MOS评分
+        print(f"[保存说话人] 开始重新计算MOS评分...", flush=True)
+
+        # 构建新的说话人音频分组
+        speaker_segments = {}
+        for i, speaker_id in enumerate(request.speaker_labels):
+            if speaker_id is not None and i < len(audio_segments):
+                audio_path = audio_segments[i].get('path')
+                if audio_path:
+                    if speaker_id not in speaker_segments:
+                        speaker_segments[speaker_id] = []
+                    speaker_segments[speaker_id].append(audio_path)
+
+        # 使用NISQA重新评分
+        from nisqa_scorer import NISQAScorer
+        mos_scorer = NISQAScorer()
+        scored_segments = mos_scorer.score_speaker_audios(str(segments_dir), speaker_segments)
+
+        print(f"[保存说话人] MOS评分完成，共 {len(scored_segments)} 个说话人", flush=True)
+
+        # 更新scored_segments
+        speaker_data['scored_segments'] = scored_segments
+
+        # 保存更新后的数据
+        with open(speaker_data_path, 'w', encoding='utf-8') as f:
+            json.dump(speaker_data, f, ensure_ascii=False, indent=2)
+
+        print(f"[保存说话人] ✅ 保存成功: {speaker_data_path}", flush=True)
+
+        # 完成任务追踪
+        running_task_tracker.complete_task(task_id, "default", "save_speaker_labels")
+
+        return {
+            "success": True,
+            "message": "说话人分配已保存",
+            "num_speakers": speaker_data['num_speakers'],
+            "gender_stats": gender_stats
+        }
+
+    except Exception as e:
+        print(f"[保存说话人] ❌ 失败: {str(e)}", flush=True)
+        import traceback
+        traceback.print_exc()
+        running_task_tracker.fail_task(task_id, str(e))
+        raise HTTPException(status_code=500, detail=f"保存说话人分配失败: {str(e)}")
+
+
 async def run_speaker_diarization_task(
     task_id: str,
     video_path: str,
