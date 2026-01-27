@@ -30,7 +30,7 @@ interface SubtitleDetailsProps {
   onAddSpeaker?: (gender: 'male' | 'female') => void;
   onRemoveSpeaker?: (speakerId: number) => void;
   onPlayClonedAudio?: (audioPath: string) => void;
-  onRegenerateSegment?: (index: number, newSpeakerId: number, newTargetText?: string) => void;
+  onRegenerateSegment?: (index: number, newSpeakerId: number, newTargetText?: string, voiceSourceSpeakerId?: number, defaultVoiceId?: string) => void;
   voiceCloningTaskId?: string;
   filteredSpeakerId?: number | null;
   onFilteredSpeakerChange?: (speakerId: number | null) => void;
@@ -312,9 +312,29 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
       console.warn('[重新生成] 没有找到初始状态，使用当前说话人');
       const newSpeakerId = subtitle.speaker_id;
       if (newSpeakerId !== undefined) {
+        // 检查该说话人是否有指定的音色来源
+        const assignedVoice = speakerVoiceMapping[newSpeakerId.toString()];
+        let voiceSourceSpeakerId: number | undefined = undefined;
+        let defaultVoiceId: string | undefined = undefined;
+
+        if (assignedVoice && assignedVoice !== 'default') {
+          // 检查是否是默认音色（以 "voice_" 开头）
+          if (assignedVoice.startsWith('voice_')) {
+            defaultVoiceId = assignedVoice;
+            console.log('[重新生成] 使用默认音色:', defaultVoiceId);
+          } else {
+            // 尝试解析为说话人ID
+            const parsedId = parseInt(assignedVoice, 10);
+            if (!isNaN(parsedId) && parsedId !== newSpeakerId) {
+              voiceSourceSpeakerId = parsedId;
+              console.log('[重新生成] 使用说话人音色:', voiceSourceSpeakerId);
+            }
+          }
+        }
+
         setRegeneratingIndex(index);
         try {
-          await onRegenerateSegment(index, newSpeakerId);
+          await onRegenerateSegment(index, newSpeakerId, undefined, voiceSourceSpeakerId, defaultVoiceId);
         } finally {
           setRegeneratingIndex(null);
         }
@@ -401,8 +421,29 @@ const SubtitleDetails: React.FC<SubtitleDetailsProps> = ({
       // 使用当前说话人重新生成
       const speakerId = subtitle.speaker_id;
       if (speakerId !== undefined) {
-        console.log('[重新生成] 开始生成音频，说话人:', speakerId, '译文:', targetTextToUse);
-        await onRegenerateSegment(index, speakerId, targetTextToUse);
+        // 检查该说话人是否有指定的音色来源
+        const assignedVoice = speakerVoiceMapping[speakerId.toString()];
+        let voiceSourceSpeakerId: number | undefined = undefined;
+        let defaultVoiceId: string | undefined = undefined;
+
+        // 如果不是 "default"，检查是否是默认音色或其他说话人的ID
+        if (assignedVoice && assignedVoice !== 'default') {
+          // 检查是否是默认音色（以 "voice_" 开头）
+          if (assignedVoice.startsWith('voice_')) {
+            defaultVoiceId = assignedVoice;
+            console.log('[重新生成] 使用默认音色:', defaultVoiceId);
+          } else {
+            // 尝试解析为说话人ID
+            const parsedId = parseInt(assignedVoice, 10);
+            if (!isNaN(parsedId) && parsedId !== speakerId) {
+              voiceSourceSpeakerId = parsedId;
+              console.log('[重新生成] 使用说话人', voiceSourceSpeakerId, '的音色');
+            }
+          }
+        }
+
+        console.log('[重新生成] 开始生成音频，说话人:', speakerId, '音色来源:', voiceSourceSpeakerId, '默认音色:', defaultVoiceId, '译文:', targetTextToUse);
+        await onRegenerateSegment(index, speakerId, targetTextToUse, voiceSourceSpeakerId, defaultVoiceId);
 
         // 更新初始状态
         setInitialSubtitleState(prev => ({

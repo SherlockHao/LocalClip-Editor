@@ -27,6 +27,41 @@ from pathlib import Path
 
 router = APIRouter(prefix="/api/tasks", tags=["processing"])
 
+# 默认音色配置
+_backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_VOICES_DIR = Path(_backend_dir) / "default_seed"  # 预编码的NPY文件目录
+
+DEFAULT_VOICES = [
+    {
+        "id": "voice_1",
+        "name": "沉稳绅士",
+        "npy_file": "沉稳绅士_codes.npy",
+        "audio_file": "沉稳绅士.wav",
+        "reference_text": "今天早晨市中心的主要道路因突发事故造成了严重堵塞，请驾驶员朋友们注意绕行并听从现场交警的指挥。"
+    },
+    {
+        "id": "voice_2",
+        "name": "清爽少年",
+        "npy_file": "清爽少年_codes.npy",
+        "audio_file": "清爽少年.wav",
+        "reference_text": "今天早晨市中心的主要道路因突发事故造成了严重堵塞，请驾驶员朋友们注意绕行并听从现场交警的指挥。"
+    },
+    {
+        "id": "voice_3",
+        "name": "甜美女声",
+        "npy_file": "甜美女声_codes.npy",
+        "audio_file": "甜美女声.wav",
+        "reference_text": "今天早晨市中心的主要道路因突发事故造成了严重堵塞，请驾驶员朋友们注意绕行并听从现场交警的指挥。"
+    },
+    {
+        "id": "voice_4",
+        "name": "知性御姐",
+        "npy_file": "知性御姐_codes.npy",
+        "audio_file": "知性御姐.wav",
+        "reference_text": "今天早晨市中心的主要道路因突发事故造成了严重堵塞，请驾驶员朋友们注意绕行并听从现场交警的指挥。"
+    }
+]
+
 
 # ==================== 桌面输出辅助函数 ====================
 
@@ -143,6 +178,8 @@ class RegenerateSegmentRequest(BaseModel):
     new_speaker_id: int
     new_text: Optional[str] = None  # 新的原文（如果修改了）
     new_target_text: Optional[str] = None  # 新的译文（如果修改了）
+    voice_source_speaker_id: Optional[int] = None  # 音色来源说话人ID（用于复制其他说话人的音色）
+    default_voice_id: Optional[str] = None  # 默认音色ID（如 "voice_1"），用于新添加的说话人使用默认音色
 
 
 # ==================== 说话人识别 API ====================
@@ -1889,7 +1926,9 @@ async def regenerate_segment(
         segment_index = request.segment_index
         new_speaker_id = request.new_speaker_id
 
-        print(f"[重新生成片段] 参数: segment_index={segment_index}, new_speaker_id={new_speaker_id}", flush=True)
+        voice_source_speaker_id = request.voice_source_speaker_id
+        default_voice_id = request.default_voice_id
+        print(f"[重新生成片段] 参数: segment_index={segment_index}, new_speaker_id={new_speaker_id}, voice_source_speaker_id={voice_source_speaker_id}, default_voice_id={default_voice_id}", flush=True)
 
         # 验证任务存在
         task = db.query(Task).filter(Task.task_id == task_id).first()
@@ -1945,66 +1984,115 @@ async def regenerate_segment(
             else:
                 print(f"[重新生成片段] ⚠️  未找到说话人数据，将直接使用参考音频", flush=True)
 
-        # 获取参考音频路径 - 尝试多个可能的位置
-        reference_output_dir = os.path.join(audio_dir, "references")
-        ref_audio_path = os.path.join(reference_output_dir, f"speaker_{new_speaker_id}_reference.wav")
+        # 确定参考音频和参考文本
+        ref_audio_path = None
+        ref_text = ""
+        using_default_voice = False
+        default_voice_npy_path = None  # 用于Fish-Speech的预编码NPY文件
 
-        if not os.path.exists(ref_audio_path):
-            # 尝试其他可能的路径
-            alt_paths = [
-                os.path.join(str(processed_dir), "speaker_segments", "references", f"speaker_{new_speaker_id}_reference.wav"),
-                os.path.join(str(task_path_manager.get_diarization_dir(task_id)), "speaker_segments", "references", f"speaker_{new_speaker_id}_reference.wav"),
-            ]
-
-            for alt_path in alt_paths:
-                if os.path.exists(alt_path):
-                    ref_audio_path = alt_path
-                    audio_dir = os.path.dirname(os.path.dirname(alt_path))
-                    print(f"[重新生成片段] 找到参考音频: {ref_audio_path}", flush=True)
-                    break
-            else:
-                raise HTTPException(status_code=400, detail=f"说话人 {new_speaker_id} 的参考音频不存在")
-
-        # 获取参考文本
-        from subtitle_text_extractor import SubtitleTextExtractor
-        source_subtitle_path = task_path_manager.get_source_subtitle_path(task_id)
-        text_extractor = SubtitleTextExtractor()
-
-        # 将 scored_segments 的键转换为整数
-        scored_segments_int = {}
-        for k, v in scored_segments.items():
-            try:
-                scored_segments_int[int(k)] = v
-            except (ValueError, TypeError):
-                scored_segments_int[k] = v
-
-        if new_speaker_id in scored_segments_int:
-            # scored_segments 的格式是 List[Tuple[str, float]] 即 (音频路径, MOS分数)
-            # 但 SubtitleTextExtractor 期望 List[Tuple[str, float, float]] 即 (音频路径, MOS分数, 时长)
-            # 所以需要转换格式，添加一个占位时长 0.0
-            segments_for_text = []
-            for item in scored_segments_int[new_speaker_id]:
-                if len(item) == 2:
-                    # 二元组格式：(音频路径, MOS分数)
-                    segments_for_text.append((item[0], item[1], 0.0))
-                elif len(item) >= 3:
-                    # 已经是三元组或更多
-                    segments_for_text.append(item)
+        # 优先检查是否使用默认音色（使用Fish-Speech + NPY文件）
+        if default_voice_id:
+            default_voice = next((v for v in DEFAULT_VOICES if v["id"] == default_voice_id), None)
+            if default_voice:
+                npy_path = str(DEFAULT_VOICES_DIR / default_voice["npy_file"])
+                if os.path.exists(npy_path):
+                    default_voice_npy_path = npy_path
+                    ref_text = default_voice["reference_text"]
+                    using_default_voice = True
+                    print(f"[重新生成片段] 使用默认音色 '{default_voice['name']}' (ID: {default_voice_id})", flush=True)
+                    print(f"[重新生成片段] NPY文件: {npy_path}", flush=True)
                 else:
-                    # 其他格式，跳过
-                    continue
+                    print(f"[重新生成片段] ⚠️ 默认音色NPY文件不存在: {npy_path}", flush=True)
+            else:
+                print(f"[重新生成片段] ⚠️ 未找到默认音色: {default_voice_id}", flush=True)
 
-            try:
-                speaker_texts = text_extractor.process_all_speakers(
-                    {new_speaker_id: segments_for_text},
-                    str(source_subtitle_path)
-                )
-                ref_text = speaker_texts.get(new_speaker_id, "")
-            except Exception as e:
-                print(f"[重新生成片段] ⚠️ 提取参考文本失败: {e}，使用空文本", flush=True)
+        # 如果没有使用默认音色，使用说话人的参考音频
+        if not using_default_voice:
+            # 确定使用哪个说话人的参考音频
+            # 如果提供了 voice_source_speaker_id，使用它的参考音频
+            # 否则使用 new_speaker_id 的参考音频
+            ref_speaker_id = voice_source_speaker_id if voice_source_speaker_id is not None else new_speaker_id
+
+            # 获取参考音频路径 - 尝试多个可能的位置
+            reference_output_dir = os.path.join(audio_dir, "references")
+            ref_audio_path = os.path.join(reference_output_dir, f"speaker_{ref_speaker_id}_reference.wav")
+
+            if not os.path.exists(ref_audio_path):
+                # 尝试其他可能的路径
+                alt_paths = [
+                    os.path.join(str(processed_dir), "speaker_segments", "references", f"speaker_{ref_speaker_id}_reference.wav"),
+                    os.path.join(str(task_path_manager.get_diarization_dir(task_id)), "speaker_segments", "references", f"speaker_{ref_speaker_id}_reference.wav"),
+                ]
+
+                for alt_path in alt_paths:
+                    if os.path.exists(alt_path):
+                        ref_audio_path = alt_path
+                        audio_dir = os.path.dirname(os.path.dirname(alt_path))
+                        print(f"[重新生成片段] 找到参考音频: {ref_audio_path}", flush=True)
+                        break
+                else:
+                    # 如果使用 voice_source 失败，尝试用 new_speaker_id
+                    if voice_source_speaker_id is not None and voice_source_speaker_id != new_speaker_id:
+                        fallback_paths = [
+                            os.path.join(reference_output_dir, f"speaker_{new_speaker_id}_reference.wav"),
+                            os.path.join(str(processed_dir), "speaker_segments", "references", f"speaker_{new_speaker_id}_reference.wav"),
+                        ]
+                        for fb_path in fallback_paths:
+                            if os.path.exists(fb_path):
+                                ref_audio_path = fb_path
+                                audio_dir = os.path.dirname(os.path.dirname(fb_path))
+                                print(f"[重新生成片段] 使用说话人 {new_speaker_id} 的参考音频: {ref_audio_path}", flush=True)
+                                break
+                        else:
+                            raise HTTPException(status_code=400, detail=f"说话人 {ref_speaker_id} 和 {new_speaker_id} 的参考音频都不存在")
+                    else:
+                        raise HTTPException(status_code=400, detail=f"说话人 {ref_speaker_id} 的参考音频不存在")
+
+            if voice_source_speaker_id is not None:
+                print(f"[重新生成片段] 使用说话人 {voice_source_speaker_id} 的音色为说话人 {new_speaker_id} 生成语音", flush=True)
+
+        # 获取参考文本（如果使用默认音色，已经在上面设置好了）
+        if not using_default_voice:
+            from subtitle_text_extractor import SubtitleTextExtractor
+            source_subtitle_path = task_path_manager.get_source_subtitle_path(task_id)
+            text_extractor = SubtitleTextExtractor()
+
+            # 将 scored_segments 的键转换为整数
+            scored_segments_int = {}
+            for k, v in scored_segments.items():
+                try:
+                    scored_segments_int[int(k)] = v
+                except (ValueError, TypeError):
+                    scored_segments_int[k] = v
+
+            # 使用 ref_speaker_id 来获取参考文本（因为我们使用的是该说话人的音色）
+            if ref_speaker_id in scored_segments_int:
+                # scored_segments 的格式是 List[Tuple[str, float]] 即 (音频路径, MOS分数)
+                # 但 SubtitleTextExtractor 期望 List[Tuple[str, float, float]] 即 (音频路径, MOS分数, 时长)
+                # 所以需要转换格式，添加一个占位时长 0.0
+                segments_for_text = []
+                for item in scored_segments_int[ref_speaker_id]:
+                    if len(item) == 2:
+                        # 二元组格式：(音频路径, MOS分数)
+                        segments_for_text.append((item[0], item[1], 0.0))
+                    elif len(item) >= 3:
+                        # 已经是三元组或更多
+                        segments_for_text.append(item)
+                    else:
+                        # 其他格式，跳过
+                        continue
+
+                try:
+                    speaker_texts = text_extractor.process_all_speakers(
+                        {ref_speaker_id: segments_for_text},
+                        str(source_subtitle_path)
+                    )
+                    ref_text = speaker_texts.get(ref_speaker_id, "")
+                except Exception as e:
+                    print(f"[重新生成片段] ⚠️ 提取参考文本失败: {e}，使用空文本", flush=True)
+                    ref_text = ""
+            else:
                 ref_text = ""
-        else:
-            ref_text = ""
 
         print(f"[重新生成片段] 参考文本: {ref_text[:50] if ref_text else '(空)'}...", flush=True)
 
@@ -2083,7 +2171,45 @@ async def regenerate_segment(
             else:
                 raise Exception("Indonesian TTS 生成失败")
 
-        # 优先级 2: 默认使用 CosyVoice3 克隆原音色
+        # 优先级 2: 使用默认音色（Fish-Speech + 预编码NPY）
+        elif using_default_voice and default_voice_npy_path:
+            # ========== 使用 Fish-Speech 预设音色 ==========
+            print(f"[重新生成片段] 使用 Fish-Speech 预设音色", flush=True)
+
+            from fish_voice_cloner import FishVoiceCloner
+            cloner = FishVoiceCloner()
+
+            # 创建工作目录
+            work_dir = str(cloned_audio_dir / f"regen_{segment_index}_{new_speaker_id}")
+            os.makedirs(work_dir, exist_ok=True)
+
+            print(f"[重新生成片段] Fish-Speech 生成中... 片段 {segment_index}", flush=True)
+            print(f"[重新生成片段] 目标文本: {target_text[:50]}...", flush=True)
+            print(f"[重新生成片段] 参考文本: {ref_text[:50]}...", flush=True)
+
+            # 在线程池中运行（避免阻塞事件循环）
+            loop = asyncio.get_running_loop()
+
+            def generate_with_fish_speech():
+                # 生成语义token
+                codes_path = cloner.generate_semantic_tokens(
+                    target_text=target_text,
+                    ref_text=ref_text,
+                    fake_npy_path=default_voice_npy_path,
+                    output_dir=work_dir
+                )
+                # 解码为音频
+                cloner.decode_to_audio(codes_path, output_audio)
+                return True
+
+            result = await loop.run_in_executor(None, generate_with_fish_speech)
+
+            if result and os.path.exists(output_audio):
+                print(f"[重新生成片段] ✅ Fish-Speech 生成成功: {output_audio}", flush=True)
+            else:
+                raise Exception("Fish-Speech 生成失败")
+
+        # 优先级 3: 默认使用 CosyVoice3 克隆原音色
         else:
             # ========== 使用 CosyVoice3 克隆原音色 ==========
             print(f"[重新生成片段] 使用 CosyVoice3 克隆原音色", flush=True)

@@ -775,7 +775,7 @@ const App: React.FC = () => {
   };
 
   // 重新生成单个片段
-  const handleRegenerateSegment = async (index: number, newSpeakerId: number, newTargetText?: string) => {
+  const handleRegenerateSegment = async (index: number, newSpeakerId: number, newTargetText?: string, voiceSourceSpeakerId?: number, defaultVoiceId?: string) => {
     if (!voiceCloningTaskId) {
       alert('语音克隆任务ID不存在');
       return;
@@ -790,6 +790,14 @@ const App: React.FC = () => {
 
       if (newTargetText) {
         requestBody.new_target_text = newTargetText;
+      }
+
+      if (voiceSourceSpeakerId !== undefined) {
+        requestBody.voice_source_speaker_id = voiceSourceSpeakerId;
+      }
+
+      if (defaultVoiceId) {
+        requestBody.default_voice_id = defaultVoiceId;
       }
 
       const response = await fetch('/api/voice-cloning/regenerate-segment', {

@@ -1662,7 +1662,7 @@ const App: React.FC = () => {
   };
 
   // 重新生成单个片段
-  const handleRegenerateSegment = async (index: number, newSpeakerId: number, newTargetText?: string) => {
+  const handleRegenerateSegment = async (index: number, newSpeakerId: number, newTargetText?: string, voiceSourceSpeakerId?: number, defaultVoiceId?: string) => {
     if (!taskId || !targetLanguage) {
       alert('任务ID或目标语言不存在');
       return;
@@ -1676,6 +1676,14 @@ const App: React.FC = () => {
 
       if (newTargetText) {
         requestBody.new_target_text = newTargetText;
+      }
+
+      if (voiceSourceSpeakerId !== undefined) {
+        requestBody.voice_source_speaker_id = voiceSourceSpeakerId;
+      }
+
+      if (defaultVoiceId) {
+        requestBody.default_voice_id = defaultVoiceId;
       }
 
       // 使用新的任务系统 API

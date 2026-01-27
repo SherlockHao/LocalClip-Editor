@@ -60,6 +60,10 @@ class TaskPathManager:
         """获取说话人聚类数据路径"""
         return self.get_task_paths(task_id)["processed"] / "speaker_data.json"
 
+    def get_diarization_dir(self, task_id: str) -> Path:
+        """获取说话人分离数据目录（与processed目录相同）"""
+        return self.get_task_paths(task_id)["processed"]
+
     def get_language_output_dir(self, task_id: str, language: str) -> Path:
         """获取指定语言的输出目录"""
         lang_dir = self.get_task_paths(task_id)["outputs"] / language
