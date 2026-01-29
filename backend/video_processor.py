@@ -67,7 +67,7 @@ class VideoProcessor:
                 video_path
             ]
 
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
 
             if result.returncode != 0:
                 return {
@@ -146,7 +146,7 @@ class VideoProcessor:
                 video_path
             ]
             
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
             info = json.loads(result.stdout)
             
             # 查找视频流
@@ -214,8 +214,8 @@ class VideoProcessor:
                 export_path
             ]
             
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
+
             if result.returncode == 0:
                 file_size = os.path.getsize(export_path)
                 return {
@@ -271,7 +271,7 @@ class VideoProcessor:
 
             print(f"🎬 使用编码器: {encoder_args[1]}")
 
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
 
             if result.returncode == 0:
                 file_size = os.path.getsize(export_path)
@@ -295,7 +295,7 @@ class VideoProcessor:
                     export_path
                 ]
 
-                result = subprocess.run(cmd, capture_output=True, text=True)
+                result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
 
                 if result.returncode == 0:
                     file_size = os.path.getsize(export_path)
@@ -316,7 +316,7 @@ class VideoProcessor:
         """检查是否有硬件编码器"""
         try:
             cmd = ["ffmpeg", "-encoders"]
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8', errors='ignore')
             return "h264_videotoolbox" in result.stdout
         except:
             return False

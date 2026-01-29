@@ -217,7 +217,9 @@ async def get_video_info(task_id: str, db: Session = Depends(get_db)):
             result = subprocess.run(
                 ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', str(video_path)],
                 capture_output=True,
-                text=True
+                text=True,
+                encoding='utf-8',
+                errors='ignore'
             )
 
             if result.returncode == 0:

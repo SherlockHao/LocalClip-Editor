@@ -8,6 +8,7 @@ import soundfile as sf
 from pathlib import Path
 from typing import Dict, List, Tuple
 from mos_scorer import get_audio_duration
+from audio_silence_trimmer import AudioSilenceTrimmer
 
 
 class SpeakerAudioProcessor:
@@ -25,42 +26,70 @@ class SpeakerAudioProcessor:
         self.silence_duration = silence_duration
         self.sample_rate = 16000  # 统一采样率
 
+        # 初始化静音切割器（用于检测有效语音段）
+        self.trimmer = AudioSilenceTrimmer(
+            threshold_db=-40.0,
+            frame_length_ms=25.0,
+            hop_length_ms=10.0
+        )
+
     def select_best_segments(
         self,
         scored_segments: List[Tuple[str, float]]
     ) -> List[Tuple[str, float, float]]:
         """
-        根据MOS分数筛选最佳音频片段，直到累计时长达到目标时长
+        根据MOS分数筛选最佳音频片段，直到累计有效语音时长达到目标时长
 
         Args:
             scored_segments: 列表，每个元素为(音频路径, MOS分数)
 
         Returns:
             List[Tuple[str, float, float]]: 筛选后的片段列表，
-                每个元素为(音频路径, MOS分数, 时长)
+                每个元素为(音频路径, MOS分数, 有效语音时长)
         """
         # 按MOS分数从高到低排序
         sorted_segments = sorted(scored_segments, key=lambda x: x[1], reverse=True)
 
         selected = []
-        total_duration = 0.0
+        total_effective_duration = 0.0
 
         for audio_path, mos_score in sorted_segments:
-            # 获取音频时长
-            duration = get_audio_duration(audio_path)
+            try:
+                # 加载音频
+                audio_data, sr = librosa.load(audio_path, sr=self.sample_rate)
 
-            if duration <= 0:
+                # 检测语音段
+                speech_segments = self.trimmer.detect_speech_segments(audio_data, sr)
+
+                if not speech_segments:
+                    print(f"  跳过片段 {Path(audio_path).name}：未检测到语音")
+                    continue
+
+                # 计算有效语音时长（所有语音段的总时长）
+                effective_duration = sum(
+                    seg['end'] - seg['start'] for seg in speech_segments
+                )
+
+                if effective_duration <= 0:
+                    continue
+
+                # 添加到选中列表
+                selected.append((audio_path, mos_score, effective_duration))
+                total_effective_duration += effective_duration
+
+                print(f"  已选择: {Path(audio_path).name}, MOS: {mos_score:.3f}, "
+                      f"有效语音: {effective_duration:.2f}秒 "
+                      f"(检测到 {len(speech_segments)} 个语音段)")
+
+                # 如果累计有效时长达到目标，停止筛选
+                if total_effective_duration >= self.target_duration:
+                    break
+
+            except Exception as e:
+                print(f"  处理片段 {audio_path} 时出错: {str(e)}")
                 continue
 
-            # 添加到选中列表
-            selected.append((audio_path, mos_score, duration))
-            total_duration += duration
-
-            # 如果累计时长达到目标，停止筛选
-            if total_duration >= self.target_duration:
-                break
-
-        print(f"  筛选了 {len(selected)} 个片段，总时长: {total_duration:.2f}秒")
+        print(f"  筛选了 {len(selected)} 个片段，累计有效语音时长: {total_effective_duration:.2f}秒")
         return selected
 
     def sort_by_timestamp(
@@ -70,7 +99,8 @@ class SpeakerAudioProcessor:
         """
         按照音频文件名中的时间戳排序片段
 
-        音频文件名格式假设为: segment_XXXX.wav 或包含时间信息
+        音频文件名格式：segment_XXX_START_END.wav
+        例如：segment_001_19.980_81.539.wav
 
         Args:
             segments: 音频片段列表
@@ -79,14 +109,24 @@ class SpeakerAudioProcessor:
             List[Tuple[str, float, float]]: 排序后的片段列表
         """
         def extract_timestamp(path: str) -> float:
-            """从文件名中提取时间戳"""
+            """从文件名中提取开始时间戳"""
             filename = Path(path).stem
             try:
-                # 尝试从文件名中提取数字作为时间戳
-                # 例如: segment_0.wav, segment_1.wav
+                # 文件名格式：segment_XXX_START_END 或 segment_XXX_YY_START_END（分割后的）
+                # 例如：segment_001_19.980_81.539 或 segment_032_01_19.980_50.000
                 parts = filename.split('_')
+
+                if len(parts) >= 3:
+                    # 尝试倒数第二个部分（开始时间）
+                    try:
+                        return float(parts[-2])
+                    except ValueError:
+                        pass
+
+                # 后备方案：使用第一个数字部分
                 if len(parts) > 1:
-                    return float(parts[-1])
+                    return float(parts[1])
+
                 return float(filename)
             except:
                 return 0.0
@@ -101,10 +141,10 @@ class SpeakerAudioProcessor:
         output_path: str
     ) -> str:
         """
-        拼接音频片段，片段之间加入静音间隔
+        拼接音频片段，仅保留语音段，片段之间加入静音间隔
 
         Args:
-            segments: 音频片段列表，每个元素为(音频路径, MOS分数, 时长)
+            segments: 音频片段列表，每个元素为(音频路径, MOS分数, 有效语音时长)
             output_path: 输出文件路径
 
         Returns:
@@ -117,17 +157,39 @@ class SpeakerAudioProcessor:
         silence_samples = int(self.silence_duration * self.sample_rate)
         silence = np.zeros(silence_samples, dtype=np.float32)
 
-        # 收集所有音频数据
+        # 收集所有音频数据（仅保留语音段）
         audio_data = []
 
         for i, (audio_path, _, _) in enumerate(segments):
-            # 加载音频并重采样到目标采样率
-            audio, sr = librosa.load(audio_path, sr=self.sample_rate)
-            audio_data.append(audio)
+            try:
+                # 加载音频并重采样到目标采样率
+                audio, sr = librosa.load(audio_path, sr=self.sample_rate)
 
-            # 除了最后一个片段，都添加静音间隔
-            if i < len(segments) - 1:
-                audio_data.append(silence)
+                # 检测语音段
+                speech_segments = self.trimmer.detect_speech_segments(audio, sr)
+
+                if not speech_segments:
+                    print(f"  警告: 片段 {Path(audio_path).name} 未检测到语音，使用原始音频")
+                    audio_data.append(audio)
+                else:
+                    # 使用trim_silence提取语音段（去除冗余静音）
+                    trimmed_audio = self.trimmer.trim_silence(audio, sr, speech_segments)
+                    audio_data.append(trimmed_audio)
+
+                    trimmed_duration = len(trimmed_audio) / sr
+                    print(f"  已处理片段 {Path(audio_path).name}: "
+                          f"原始 {len(audio)/sr:.2f}s -> 去静音后 {trimmed_duration:.2f}s")
+
+                # 除了最后一个片段，都添加静音间隔
+                if i < len(segments) - 1:
+                    audio_data.append(silence)
+
+            except Exception as e:
+                print(f"  处理片段 {audio_path} 时出错: {str(e)}")
+                continue
+
+        if not audio_data:
+            raise ValueError("没有可用的音频片段")
 
         # 拼接所有音频
         concatenated = np.concatenate(audio_data)
@@ -137,7 +199,10 @@ class SpeakerAudioProcessor:
         output_dir.mkdir(parents=True, exist_ok=True)
 
         sf.write(output_path, concatenated, self.sample_rate)
+
+        final_duration = len(concatenated) / self.sample_rate
         print(f"  已保存拼接音频: {output_path}")
+        print(f"  最终时长: {final_duration:.2f}秒 (包含 {len(segments)} 个片段)")
 
         return output_path
 

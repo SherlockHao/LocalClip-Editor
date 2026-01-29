@@ -21,55 +21,101 @@ class AudioExtractor:
         self.cache_dir.mkdir(exist_ok=True, parents=True)
         self.srt_parser = SRTParser()
 
-    def extract_audio_segments(self, video_path: str, srt_path: str) -> List[str]:
+    def extract_audio_segments(self, video_path: str, srt_path: str, max_duration: float = 30.0) -> List[str]:
         """
         根据SRT文件的时间段提取音频片段
-        
+
         Args:
             video_path (str): 视频文件路径
             srt_path (str): SRT字幕文件路径
-            
+            max_duration (float): 单个片段最大时长（秒），默认30秒，防止NISQA评分超限
+
         Returns:
             List[str]: 提取的音频文件路径列表
         """
         # 解析SRT文件
         subtitles = self.srt_parser.parse_srt(srt_path)
-        
+
         audio_paths = []
-        
+
         for i, subtitle in enumerate(subtitles):
             start_time = subtitle['start_time']
             end_time = subtitle['end_time']
             duration = end_time - start_time
-            
-            # 生成音频文件名
-            audio_filename = f"segment_{i+1:03d}_{start_time:.3f}_{end_time:.3f}.wav"
-            audio_path = self.cache_dir / audio_filename
-            
-            # 使用FFmpeg从视频中提取指定时间段的音频
-            cmd = [
-                "ffmpeg",
-                "-ss", str(start_time),  # 开始时间
-                "-t", str(duration),     # 持续时间
-                "-i", video_path,        # 输入视频
-                "-ab", "16k",            # 音频比特率
-                "-ac", "1",              # 单声道
-                "-ar", "16000",          # 采样率
-                "-y",                    # 覆盖输出文件
-                str(audio_path)
-            ]
-            
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                if result.returncode == 0:
+
+            # 如果片段超过最大时长，分割处理
+            if duration > max_duration:
+                num_splits = int(duration / max_duration) + 1
+                split_duration = duration / num_splits
+
+                print(f"[警告] 字幕 #{i+1} 时长过长 ({duration:.1f}秒)，分割为 {num_splits} 段")
+
+                for j in range(num_splits):
+                    split_start = start_time + j * split_duration
+                    split_end = min(split_start + split_duration, end_time)
+                    split_duration_actual = split_end - split_start
+
+                    audio_filename = f"segment_{i+1:03d}_{j+1:02d}_{split_start:.3f}_{split_end:.3f}.wav"
+                    audio_path = self.cache_dir / audio_filename
+
+                    self._extract_single_segment(
+                        video_path, audio_path,
+                        split_start, split_duration_actual
+                    )
                     audio_paths.append(str(audio_path))
-                    print(f"成功提取音频片段: {audio_filename}")
-                else:
-                    print(f"提取音频片段失败: {audio_filename}, 错误: {result.stderr}")
-            except Exception as e:
-                print(f"提取音频片段异常: {audio_filename}, 错误: {str(e)}")
-        
+            else:
+                # 正常处理
+                audio_filename = f"segment_{i+1:03d}_{start_time:.3f}_{end_time:.3f}.wav"
+                audio_path = self.cache_dir / audio_filename
+
+                self._extract_single_segment(
+                    video_path, audio_path,
+                    start_time, duration
+                )
+                audio_paths.append(str(audio_path))
+
         return audio_paths
+
+    def _extract_single_segment(self, video_path: str, audio_path: Path, start_time: float, duration: float):
+        """
+        提取单个音频片段
+
+        Args:
+            video_path: 视频文件路径
+            audio_path: 输出音频路径
+            start_time: 开始时间（秒）
+            duration: 持续时间（秒）
+        """
+        audio_filename = os.path.basename(str(audio_path))
+
+        cmd = [
+            "ffmpeg",
+            "-ss", str(start_time),
+            "-t", str(duration),
+            "-i", video_path,
+            "-ab", "16k",
+            "-ac", "1",
+            "-ar", "16000",
+            "-y",
+            str(audio_path)
+        ]
+
+        try:
+            # 修复编码问题：使用 UTF-8 并忽略无法解码的字符
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='ignore'
+            )
+
+            if result.returncode == 0:
+                print(f"成功提取音频片段: {audio_filename}")
+            else:
+                print(f"提取音频片段失败: {audio_filename}")
+        except Exception as e:
+            print(f"提取音频片段异常: {audio_filename}, 错误: {str(e)}")
 
     def get_cache_dir(self) -> str:
         """获取音频缓存目录"""

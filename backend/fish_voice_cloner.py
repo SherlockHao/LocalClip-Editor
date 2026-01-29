@@ -156,7 +156,7 @@ class FishVoiceCloner:
         env["PYTHONPATH"] = self.fish_speech_dir + (f"{path_sep}{existing_path}" if existing_path else '')
 
         try:
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=self.fish_speech_dir, env=env)
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True, encoding='utf-8', errors='ignore', cwd=self.fish_speech_dir, env=env)
 
             # 检查并移动生成的文件
             if os.path.exists("fake.npy"):
@@ -218,7 +218,7 @@ class FishVoiceCloner:
         env["PYTHONPATH"] = self.fish_speech_dir + (f"{path_sep}{existing_path}" if existing_path else '')
 
         try:
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=self.fish_speech_dir, env=env)
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True, encoding='utf-8', errors='ignore', cwd=self.fish_speech_dir, env=env)
 
             # 检查并移动生成的文件
             temp_codes = os.path.join(self.fish_speech_dir, "temp/codes_0.npy")
@@ -274,7 +274,7 @@ class FishVoiceCloner:
         env["PYTHONPATH"] = self.fish_speech_dir + (f"{path_sep}{existing_path}" if existing_path else '')
 
         try:
-            result = subprocess.run(cmd, check=True, capture_output=True, text=True, cwd=self.fish_speech_dir, env=env)
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True, encoding='utf-8', errors='ignore', cwd=self.fish_speech_dir, env=env)
 
             if not os.path.exists(output_audio_path):
                 raise FileNotFoundError(f"未找到生成的音频文件: {output_audio_path}")
