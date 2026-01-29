@@ -1463,13 +1463,13 @@ xcopy /E /I backend\config D:\Ascendia_Backup\config
 - **处理器**：Intel Core i7 或 AMD Ryzen 7
 - **内存**：16 GB RAM
 - **存储**：200 GB SSD
-- **显卡**：NVIDIA GTX 1660 或以上（6GB+ 显存）
+- **显卡**：NVIDIA GTX 2080 或以上（16GB+ 显存）
 
 #### 高性能配置
 - **处理器**：Intel Core i9 或 AMD Ryzen 9
 - **内存**：32 GB RAM
 - **存储**：500 GB NVMe SSD
-- **显卡**：NVIDIA RTX 3060 或以上（8GB+ 显存）
+- **显卡**：NVIDIA RTX 5090 或以上（24GB+ 显存）
 
 ---
 
@@ -1512,7 +1512,7 @@ xcopy /E /I backend\config D:\Ascendia_Backup\config
 
 ### 6.6 性能优化参考
 
-#### 处理时间预估（1分钟视频）
+#### 处理时间预估（4分钟视频）
 
 | 阶段 | CPU 模式 | GPU 模式 | 影响因素 |
 |------|---------|---------|---------|
