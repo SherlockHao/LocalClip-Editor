@@ -118,8 +118,9 @@ class GenderClassifier:
             str: "male" 或 "female"
         """
         prediction = self.classify_audio(audio_path)
-        # 返回概率更高的性别
-        return "male" if prediction["male"] > prediction["female"] else "female"
+        # 如果女声概率 >= 0.4，识别为女声，否则识别为男声
+        # 这样设计是为了让模型对女声的识别更加宽松
+        return "female" if prediction["female"] >= 0.4 else "male"
 
     def select_best_audio_for_gender_classification(
         self,
@@ -401,11 +402,21 @@ class GenderClassifier:
                         min_duration=min_duration
                     )
 
+                # 打印用于性别识别的音频文件信息
+                try:
+                    audio_duration = librosa.get_duration(path=best_audio)
+                    print(f"  用于识别的音频: {os.path.basename(best_audio)}")
+                    print(f"  音频时长: {audio_duration:.2f}s")
+                except Exception as e:
+                    print(f"  用于识别的音频: {best_audio}")
+
                 # 进行性别识别
                 prediction = self.classify_audio(best_audio)
-                gender = "male" if prediction["male"] > prediction["female"] else "female"
+                # 如果女声概率 >= 0.4，识别为女声，否则识别为男声
+                gender = "female" if prediction["female"] >= 0.4 else "male"
 
                 print(f"  识别结果: {gender} (male: {prediction['male']:.3f}, female: {prediction['female']:.3f})")
+                print(f"  判定逻辑: female({prediction['female']:.3f}) >= 0.4 ? {'是' if prediction['female'] >= 0.4 else '否'} -> {gender}")
                 gender_results[speaker_id] = gender
                 prob_results[speaker_id] = prediction
 
@@ -420,6 +431,20 @@ class GenderClassifier:
         # 自动重平衡性别分配
         if auto_rebalance:
             gender_results = self.rebalance_genders(gender_results, prob_results)
+
+        # 打印最终性别识别结果汇总
+        print(f"\n{'='*50}")
+        print(f"[性别识别结果汇总]")
+        print(f"{'='*50}")
+        male_count = sum(1 for g in gender_results.values() if g == "male")
+        female_count = sum(1 for g in gender_results.values() if g == "female")
+        print(f"  总计: {len(gender_results)} 位说话人 ({male_count}男, {female_count}女)")
+        print(f"  详细:")
+        for speaker_id, gender in sorted(gender_results.items()):
+            prob = prob_results.get(speaker_id, {})
+            gender_cn = "男" if gender == "male" else "女"
+            print(f"    说话人 {speaker_id} -> {gender_cn} (male: {prob.get('male', 0):.3f}, female: {prob.get('female', 0):.3f})")
+        print(f"{'='*50}\n")
 
         return gender_results, prob_results
 
@@ -548,17 +573,25 @@ def rename_speakers_by_gender(
     # 生成新名称
     speaker_name_mapping = {}
 
+    print(f"\n{'='*50}")
+    print(f"[说话人命名映射]")
+    print(f"{'='*50}")
+
     for idx, (speaker_id, count) in enumerate(male_speakers, 1):
         speaker_name_mapping[speaker_id] = f"男{idx}"
-        print(f"说话人 {speaker_id} -> {speaker_name_mapping[speaker_id]} (出现 {count} 次)")
+        print(f"  说话人 {speaker_id} -> {speaker_name_mapping[speaker_id]} (出现 {count} 次)")
 
     for idx, (speaker_id, count) in enumerate(female_speakers, 1):
         speaker_name_mapping[speaker_id] = f"女{idx}"
-        print(f"说话人 {speaker_id} -> {speaker_name_mapping[speaker_id]} (出现 {count} 次)")
+        print(f"  说话人 {speaker_id} -> {speaker_name_mapping[speaker_id]} (出现 {count} 次)")
 
     gender_stats = {
         "male": len(male_speakers),
         "female": len(female_speakers)
     }
+
+    print(f"{'='*50}")
+    print(f"  统计: {gender_stats['male']}男 {gender_stats['female']}女")
+    print(f"{'='*50}\n")
 
     return speaker_name_mapping, gender_stats

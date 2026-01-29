@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import { Play, Trash2, Plus, Video, Clock, Loader2, FileText, Upload, PlayCircle, StopCircle, CheckCircle, XCircle, Activity, TrendingUp, Power, Server, Cpu, HardDrive } from 'lucide-react';
+import { Play, Trash2, Plus, Video, Clock, Loader2, FileText, Upload, PlayCircle, StopCircle, CheckCircle, XCircle, Activity, TrendingUp, Power, Server, Cpu, HardDrive, Zap, Thermometer } from 'lucide-react';
 
 interface StageStatus {
   status: string;
@@ -63,6 +63,16 @@ interface BatchStatus {
   queued_count: number;
 }
 
+// GPU信息接口
+interface GpuInfo {
+  name: string;
+  memory_used_mb: number;
+  memory_total_mb: number;
+  memory_percent: number;
+  gpu_util_percent: number;
+  temperature?: number;
+}
+
 // 系统状态接口
 interface SystemStatus {
   status: string;
@@ -74,6 +84,10 @@ interface SystemStatus {
   memory_percent: number;
   memory_used_gb: number;
   memory_total_gb: number;
+  // GPU信息
+  gpu_available: boolean;
+  gpu_count: number;
+  gpus: GpuInfo[];
 }
 
 const TaskDashboard: React.FC = () => {
@@ -774,6 +788,35 @@ const TaskDashboard: React.FC = () => {
                     <HardDrive size={14} />
                     <span className="text-sm">内存: <span className={systemStatus.memory_percent > 80 ? 'text-red-400' : 'text-slate-300'}>{systemStatus.memory_used_gb}GB / {systemStatus.memory_total_gb}GB ({systemStatus.memory_percent.toFixed(1)}%)</span></span>
                   </div>
+
+                  {/* GPU 使用 */}
+                  {systemStatus.gpu_available && systemStatus.gpus.length > 0 && (
+                    <div className="flex items-center gap-2 text-slate-400">
+                      <Zap size={14} className="text-green-400" />
+                      <span className="text-sm">
+                        GPU:
+                        {systemStatus.gpus.map((gpu, index) => (
+                          <span key={index} className="ml-1">
+                            <span className={gpu.gpu_util_percent > 80 ? 'text-red-400' : 'text-slate-300'}>
+                              {gpu.gpu_util_percent.toFixed(0)}%
+                            </span>
+                            <span className="text-slate-500 mx-1">|</span>
+                            <span className={gpu.memory_percent > 80 ? 'text-red-400' : 'text-slate-300'}>
+                              {(gpu.memory_used_mb / 1024).toFixed(1)}GB/{(gpu.memory_total_mb / 1024).toFixed(0)}GB
+                            </span>
+                            {gpu.temperature !== undefined && gpu.temperature !== null && (
+                              <>
+                                <span className="text-slate-500 mx-1">|</span>
+                                <span className={gpu.temperature > 80 ? 'text-red-400' : gpu.temperature > 70 ? 'text-yellow-400' : 'text-slate-300'}>
+                                  {gpu.temperature}°C
+                                </span>
+                              </>
+                            )}
+                          </span>
+                        ))}
+                      </span>
+                    </div>
+                  )}
                 </>
               )}
             </div>

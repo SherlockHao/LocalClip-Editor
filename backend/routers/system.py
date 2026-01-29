@@ -5,17 +5,28 @@
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 import os
 import sys
 import time
 import platform
 import psutil
+import subprocess
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
 # 记录系统启动时间
 _start_time = time.time()
+
+
+class GpuInfo(BaseModel):
+    """GPU信息"""
+    name: str
+    memory_used_mb: float
+    memory_total_mb: float
+    memory_percent: float
+    gpu_util_percent: float
+    temperature: Optional[float] = None
 
 
 class SystemStatus(BaseModel):
@@ -29,6 +40,10 @@ class SystemStatus(BaseModel):
     memory_percent: float
     memory_used_gb: float
     memory_total_gb: float
+    # GPU 信息
+    gpu_available: bool = False
+    gpu_count: int = 0
+    gpus: List[GpuInfo] = []
 
 
 class ShutdownRequest(BaseModel):
@@ -50,6 +65,66 @@ def format_uptime(seconds: float) -> str:
         return f"{hours} 小时 {minutes} 分"
 
 
+def get_gpu_info() -> tuple[bool, int, List[GpuInfo]]:
+    """
+    获取GPU信息
+
+    Returns:
+        (gpu_available, gpu_count, gpus)
+    """
+    try:
+        # 使用 nvidia-smi 获取 GPU 信息
+        result = subprocess.run(
+            [
+                'nvidia-smi',
+                '--query-gpu=name,memory.used,memory.total,utilization.gpu,temperature.gpu',
+                '--format=csv,noheader,nounits'
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+
+        if result.returncode != 0:
+            return False, 0, []
+
+        gpus = []
+        lines = result.stdout.strip().split('\n')
+
+        for line in lines:
+            if not line.strip():
+                continue
+            parts = [p.strip() for p in line.split(',')]
+            if len(parts) >= 4:
+                name = parts[0]
+                memory_used = float(parts[1]) if parts[1] else 0
+                memory_total = float(parts[2]) if parts[2] else 1
+                gpu_util = float(parts[3]) if parts[3] else 0
+                temperature = float(parts[4]) if len(parts) > 4 and parts[4] else None
+
+                memory_percent = (memory_used / memory_total * 100) if memory_total > 0 else 0
+
+                gpus.append(GpuInfo(
+                    name=name,
+                    memory_used_mb=memory_used,
+                    memory_total_mb=memory_total,
+                    memory_percent=round(memory_percent, 1),
+                    gpu_util_percent=gpu_util,
+                    temperature=temperature
+                ))
+
+        return True, len(gpus), gpus
+
+    except FileNotFoundError:
+        # nvidia-smi 不存在
+        return False, 0, []
+    except subprocess.TimeoutExpired:
+        return False, 0, []
+    except Exception as e:
+        print(f"[系统状态] 获取GPU信息失败: {e}", flush=True)
+        return False, 0, []
+
+
 @router.get("/status", response_model=SystemStatus)
 async def get_system_status():
     """
@@ -60,11 +135,15 @@ async def get_system_status():
     - 运行时间
     - 系统信息
     - CPU/内存使用率
+    - GPU信息
     """
     uptime = time.time() - _start_time
 
     # 获取内存信息
     memory = psutil.virtual_memory()
+
+    # 获取GPU信息
+    gpu_available, gpu_count, gpus = get_gpu_info()
 
     return SystemStatus(
         status="running",
@@ -75,7 +154,10 @@ async def get_system_status():
         cpu_percent=psutil.cpu_percent(interval=0.1),
         memory_percent=memory.percent,
         memory_used_gb=round(memory.used / (1024 ** 3), 2),
-        memory_total_gb=round(memory.total / (1024 ** 3), 2)
+        memory_total_gb=round(memory.total / (1024 ** 3), 2),
+        gpu_available=gpu_available,
+        gpu_count=gpu_count,
+        gpus=gpus
     )
 
 
