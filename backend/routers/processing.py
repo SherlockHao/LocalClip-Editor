@@ -476,6 +476,7 @@ async def run_speaker_diarization_task(
         audio_paths = extractor.extract_audio_segments(video_path, subtitle_path)
 
         print(f"[说话人识别] 提取了 {len(audio_paths)} 个音频片段", flush=True)
+        print(f"[DEBUG-切分] audio_paths 长度: {len(audio_paths)}", flush=True)
 
         # ==================== 任务2: 说话人特征提取和聚类 (25-60%) ====================
         await update_task_progress(
@@ -529,6 +530,7 @@ async def run_speaker_diarization_task(
         num_speakers = clusterer.get_unique_speakers_count(speaker_labels)
 
         print(f"[说话人识别] 识别到 {num_speakers} 个说话人", flush=True)
+        print(f"[DEBUG-聚类] speaker_labels 长度: {len(speaker_labels)}", flush=True)
 
         # ==================== 任务3: MOS音频质量评分 (60-80%) ====================
         await update_task_progress(
@@ -586,6 +588,15 @@ async def run_speaker_diarization_task(
         srt_parser = SRTParser()
         subtitles = srt_parser.parse_srt(subtitle_path)
 
+        print(f"[DEBUG-字幕] 原始字幕 subtitles 长度: {len(subtitles)}", flush=True)
+        print(f"[DEBUG-字幕] audio_paths 长度: {len(audio_paths)}", flush=True)
+
+        if len(audio_paths) != len(subtitles):
+            print(f"[DEBUG-警告] ⚠️  audio_paths 和 subtitles 长度不一致!", flush=True)
+            print(f"  audio_paths: {len(audio_paths)}", flush=True)
+            print(f"  subtitles: {len(subtitles)}", flush=True)
+            print(f"  zip() 将截断到较短的长度: {min(len(audio_paths), len(subtitles))}", flush=True)
+
         # 构建 audio_segments 列表
         audio_segments = []
         for i, (audio_path, subtitle) in enumerate(zip(audio_paths, subtitles)):
@@ -595,6 +606,8 @@ async def run_speaker_diarization_task(
                 'subtitle_index': i,
                 'text': subtitle['text']
             })
+
+        print(f"[DEBUG-构建] audio_segments 长度: {len(audio_segments)}", flush=True)
 
         # 计算总耗时
         end_time = time.time()
@@ -616,6 +629,16 @@ async def run_speaker_diarization_task(
         duration_str = format_duration(total_duration)
 
         # 保存完整结果
+        print(f"[DEBUG-保存] 准备保存 speaker_data.json:", flush=True)
+        print(f"  - segments 长度: {len(audio_segments)}", flush=True)
+        print(f"  - speaker_labels 长度: {len(speaker_labels)}", flush=True)
+        print(f"  - 原始字幕 subtitles 长度: {len(subtitles)}", flush=True)
+
+        if len(audio_segments) != len(speaker_labels):
+            print(f"[DEBUG-警告] ❌ 数据长度不一致! audio_segments({len(audio_segments)}) != speaker_labels({len(speaker_labels)})", flush=True)
+        else:
+            print(f"[DEBUG-检查] ✓ 数据长度一致: {len(audio_segments)}", flush=True)
+
         speaker_data = {
             'segments': audio_segments,
             'speaker_labels': speaker_labels,

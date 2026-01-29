@@ -183,6 +183,10 @@ async def clone_voices_for_language(
         source_subtitles = srt_parser.parse_srt(str(source_subtitle_path))
 
         print(f"[语音克隆服务] 加载 {len(target_subtitles)} 条翻译字幕", flush=True)
+        print(f"[DEBUG-克隆] speaker_labels 长度: {len(speaker_labels)}", flush=True)
+        print(f"[DEBUG-克隆] target_subtitles 长度: {len(target_subtitles)}", flush=True)
+        print(f"[DEBUG-克隆] source_subtitles 长度: {len(source_subtitles)}", flush=True)
+        print(f"[DEBUG-克隆] segments 长度: {len(segments)}", flush=True)
 
         # 检查字幕行数是否匹配
         if len(speaker_labels) != len(target_subtitles):
