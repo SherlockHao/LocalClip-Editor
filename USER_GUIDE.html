@@ -1,0 +1,1924 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ascendia 视频翻译系统 - 完整操作指南</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "微软雅黑", sans-serif;
+            line-height: 1.8;
+            color: #333;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 40px 60px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-radius: 8px;
+        }
+
+        h1 {
+            color: #2c3e50;
+            font-size: 2.5em;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 3px solid #3498db;
+        }
+
+        h2 {
+            color: #34495e;
+            font-size: 2em;
+            margin-top: 40px;
+            margin-bottom: 20px;
+            padding-left: 15px;
+            border-left: 4px solid #3498db;
+        }
+
+        h3 {
+            color: #555;
+            font-size: 1.6em;
+            margin-top: 30px;
+            margin-bottom: 15px;
+        }
+
+        h4 {
+            color: #666;
+            font-size: 1.3em;
+            margin-top: 25px;
+            margin-bottom: 12px;
+        }
+
+        h5 {
+            color: #777;
+            font-size: 1.1em;
+            margin-top: 20px;
+            margin-bottom: 10px;
+        }
+
+        h6 {
+            color: #888;
+            font-size: 1em;
+            margin-top: 15px;
+            margin-bottom: 8px;
+        }
+
+        p {
+            margin-bottom: 15px;
+            text-align: justify;
+        }
+
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: "Consolas", "Monaco", "Courier New", monospace;
+            font-size: 0.9em;
+            color: #e74c3c;
+        }
+
+        pre {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 20px;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin: 20px 0;
+            line-height: 1.5;
+        }
+
+        pre code {
+            background: transparent;
+            padding: 0;
+            color: #ecf0f1;
+            font-size: 0.95em;
+        }
+
+        blockquote {
+            background: #f9f9f9;
+            border-left: 4px solid #3498db;
+            padding: 15px 20px;
+            margin: 20px 0;
+            color: #555;
+            font-style: italic;
+        }
+
+        ul, ol {
+            margin: 15px 0;
+            padding-left: 40px;
+        }
+
+        li {
+            margin: 8px 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 25px 0;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        th {
+            background: #3498db;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        tr:hover {
+            background: #f5f5f5;
+        }
+
+        hr {
+            border: none;
+            border-top: 2px solid #e0e0e0;
+            margin: 40px 0;
+        }
+
+        a {
+            color: #3498db;
+            text-decoration: none;
+            border-bottom: 1px solid transparent;
+            transition: all 0.3s;
+        }
+
+        a:hover {
+            border-bottom-color: #3498db;
+        }
+
+        img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 6px;
+            margin: 20px 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        strong {
+            color: #2c3e50;
+            font-weight: 600;
+        }
+
+        em {
+            font-style: italic;
+            color: #555;
+        }
+
+        /* 滚动条样式 */
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 5px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+
+        /* 打印样式 */
+        @media print {
+            body {
+                background: white;
+                padding: 0;
+            }
+
+            .container {
+                box-shadow: none;
+                padding: 0;
+            }
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px 25px;
+            }
+
+            h1 {
+                font-size: 2em;
+            }
+
+            h2 {
+                font-size: 1.6em;
+            }
+
+            table {
+                font-size: 0.9em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Ascendia 视频翻译系统 - 完整操作指南</h1>
+<blockquote><strong>AI驱动的多语言视频翻译平台</strong> | 让你的视频内容触达全球观众</blockquote>
+<hr>
+<h2>📖 目录</h2>
+<ol>
+<li><a href="#1-系统概述">系统概述</a></li>
+<li><a href="#2-快速入门5分钟上手">快速入门（5分钟上手）</a></li>
+<li><a href="#3-详细功能说明">详细功能说明</a></li>
+<li><a href="#4-最佳实践和技巧">最佳实践和技巧</a></li>
+<li><a href="#5-常见问题和故障排除">常见问题和故障排除</a></li>
+<li><a href="#6-附录">附录</a></li>
+</ol>
+<hr>
+<h2>1. 系统概述</h2>
+<h3>1.1 Ascendia 是什么？</h3>
+<p>Ascendia 是一个强大的 AI 视频翻译平台，能够帮助你快速将视频内容翻译成多种语言，并使用 AI 语音克隆技术生成自然流畅的配音。</p>
+<strong>核心功能：</strong>
+<ul>
+<li>🎯 <strong>智能说话人识别</strong>：自动识别视频中不同的说话人</li>
+<li>🌍 <strong>多语言翻译</strong>：支持英语、韩语、日语、法语、德语、西班牙语、印尼语</li>
+<li>🎤 <strong>AI 语音克隆</strong>：使用先进的 TTS 技术生成自然的配音</li>
+<li>🎬 <strong>一键导出</strong>：自动合成最终视频</li>
+</ul>
+<h3>1.2 系统界面布局</h3>
+<p>[截图：Dashboard 主界面概览]</p>
+<p>系统主要包含两个页面：</p>
+<ol>
+<li><strong>任务看板（Dashboard）</strong>：管理所有视频翻译任务</li>
+<li><strong>任务编辑器（Editor）</strong>：编辑和处理单个任务</li>
+</ol>
+<h3>1.3 工作流程概览</h3>
+<pre><code class="language-">📹 上传视频 → 🔍 识别说话人 → 🌍 翻译字幕 → 🎤 语音克隆 → 🎬 导出视频
+<p>   (1分钟)      (3-5分钟)       (2-3分钟)     (5-10分钟)     (3-5分钟)</code></pre></p>
+<strong>预计总时间：</strong> 15-25 分钟（取决于视频长度）
+<hr>
+<h2>2. 快速入门（5分钟上手）</h2>
+<h3>2.1 启动系统</h3>
+<ol>
+<li><strong>找到并双击</strong> <code>start_all.bat</code> 文件</li>
+<li>等待系统启动（约 10-15 秒）</li>
+<li>浏览器会自动打开，显示任务看板</li>
+</ol>
+<p>[截图：start_all.bat 启动界面]</p>
+<strong>启动完成标志：</strong>
+<ul>
+<li>看到 "Ascendia is ready!" 消息</li>
+<li>浏览器自动打开 http://localhost:5173/dashboard</li>
+</ul>
+<h3>2.2 创建第一个任务</h3>
+<h4>步骤 1：准备文件</h4>
+<p>需要准备：</p>
+<ul>
+<li>✅ <strong>视频文件</strong>（必须）：MP4、MOV、AVI 或 MKV 格式</li>
+<li>⭕ <strong>字幕文件</strong>（可选）：SRT 或 ASS 格式</li>
+</ul>
+<blockquote><strong>💡 提示：</strong> 如果没有字幕文件，系统会提示你使用外部工具（如 剪映）先生成字幕。</blockquote>
+<h4>步骤 2：上传文件</h4>
+<p>[截图：点击"创建新任务"按钮]</p>
+<ol>
+<li>点击页面右上角的 <strong>"创建新任务"</strong> 按钮</li>
+<li>在弹出窗口中，点击 <strong>"选择视频文件"</strong></li>
+<li>选择你的视频文件</li>
+<li>点击 <strong>"选择字幕文件"</strong>（如果有）</li>
+<li>点击 <strong>"创建任务"</strong> 按钮</li>
+</ol>
+<p>[截图：上传文件对话框]</p>
+<strong>上传过程：</strong>
+<ul>
+<li>系统会显示上传进度条</li>
+<li>上传完成后自动跳转到编辑器页面</li>
+</ul>
+<h4>步骤 3：识别说话人</h4>
+<p>[截图：编辑器界面 - 说话人识别面板]</p>
+<ol>
+<li>在编辑器页面，找到右侧的 <strong>"处理进度"</strong> 面板</li>
+<li>点击 <strong>"开始说话人识别"</strong> 按钮</li>
+<li>等待识别完成（3-5 分钟）</li>
+</ol>
+<strong>识别过程中会显示：</strong>
+<ul>
+<li>当前进度百分比</li>
+<li>正在处理的字幕编号</li>
+<li>预计剩余时间</li>
+</ul>
+<h4>步骤 4：选择目标语言并开始处理</h4>
+<p>[截图：语言选择界面]</p>
+<ol>
+<li>识别完成后，点击 <strong>"选择目标语言"</strong></li>
+<li>勾选你需要的语言（可多选）：</li>
+</ol>
+<p>   - 🇬🇧 英语 (English)    - 🇰🇷 韩语 (Korean)    - 🇯🇵 日语 (Japanese)    - 🇫🇷 法语 (French)    - 🇩🇪 德语 (German)    - 🇪🇸 西班牙语 (Spanish)    - 🇮🇩 印尼语 (Indonesian)</p>
+<ol>
+<li>选择每个说话人的音色（4种预设）：</li>
+</ol>
+<p>   - 🎩 沉稳绅士    - 🌟 清爽少年    - 🎀 甜美女声    - 👑 知性御姐</p>
+<ol>
+<li>点击 <strong>"开始处理"</strong> 按钮</li>
+</ol>
+<p>[截图：音色选择界面]</p>
+<h4>步骤 5：等待处理完成</h4>
+<p>系统会依次自动完成以下步骤：</p>
+<pre><code class="language-">1️⃣ 翻译字幕 (2-3分钟)
+<p>   └─ 显示：正在翻译到英语... 45%</p>
+<p>2️⃣ 语音克隆 (5-10分钟)    └─ 显示：正在克隆说话人 1 的声音... 23/100</p>
+<p>3️⃣ 音频拼接 (1-2分钟)    └─ 显示：正在合成音频轨道...</p>
+<p>4️⃣ 视频导出 (3-5分钟)    └─ 显示：正在合成最终视频...</code></pre></p>
+<p>[截图：处理进度实时更新]</p>
+<h4>步骤 6：下载结果</h4>
+<p>[截图：下载按钮位置]</p>
+<ol>
+<li>所有步骤完成后，会显示 ✅ <strong>"处理完成"</strong></li>
+<li>点击 <strong>"下载视频"</strong> 按钮</li>
+<li>视频会保存到你的下载文件夹</li>
+</ol>
+<strong>文件命名格式：</strong>
+<ul>
+<li><code>{原视频名}_{语言代码}_final.mp4</code></li>
+<li>例如：<code>my_video_en_final.mp4</code>（英语版本）</li>
+</ul>
+<hr>
+<h2>3. 详细功能说明</h2>
+<h3>3.1 任务看板（Dashboard）</h3>
+<h4>3.1.1 界面布局</h4>
+<p>[截图：Dashboard 完整界面标注]</p>
+<p>任务看板包含以下区域：</p>
+<ol>
+<li><strong>顶部导航栏</strong></li>
+</ol>
+<p>   - 系统标题：Ascendia    - 系统状态指示器（CPU、内存、GPU 使用率）    - 创建任务按钮</p>
+<ol>
+<li><strong>任务列表</strong></li>
+</ol>
+<p>   - 显示所有创建的任务    - 每个任务卡片包含：      - 视频缩略图      - 任务名称      - 创建时间      - 处理状态      - 支持的语言      - 操作按钮</p>
+<ol>
+<li><strong>批量处理面板</strong></li>
+</ol>
+<p>   - 选择多个任务    - 一键批量处理    - 查看批量进度</p>
+<h4>3.1.2 创建新任务</h4>
+<strong>支持的视频格式：</strong>
+<ul>
+<li>MP4 (推荐)</li>
+<li>MOV</li>
+<li>AVI</li>
+<li>MKV</li>
+<li>FLV</li>
+<li>WebM</li>
+</ul>
+<strong>视频要求：</strong>
+<ul>
+<li>✅ 文件大小：最大 5GB</li>
+<li>✅ 分辨率：最低 480p，推荐 1080p</li>
+<li>✅ 视频编码：H.264 (推荐)、H.265、VP9</li>
+<li>✅ 音频编码：AAC、MP3、PCM</li>
+</ul>
+<p>[截图：创建任务对话框详细界面]</p>
+<strong>字幕文件要求：</strong>
+<ul>
+<li>✅ SRT 格式（推荐）：纯文本字幕</li>
+<li>✅ ASS/SSA 格式：支持样式和特效</li>
+<li>✅ 编码：UTF-8</li>
+<li>✅ 时间码格式：<code>00:00:00,000 --> 00:00:05,500</code></li>
+</ul>
+<blockquote><strong>⚠️ 注意：</strong> 如果上传的是 ASS 格式，系统会自动转换为 SRT 格式。</blockquote>
+<strong>创建失败的常见原因：</strong>
+<ul>
+<li>❌ 视频文件损坏</li>
+<li>❌ 不支持的视频编码</li>
+<li>❌ 字幕文件编码不是 UTF-8</li>
+<li>❌ 字幕时间码格式错误</li>
+</ul>
+<h4>3.1.3 任务卡片详解</h4>
+<p>[截图：任务卡片标注说明]</p>
+<p>每个任务卡片显示：</p>
+<ol>
+<li><strong>视频缩略图</strong>：第一帧截图</li>
+<li><strong>任务信息</strong>：</li>
+</ol>
+<p>   - 任务 ID：系统自动生成的唯一标识    - 视频名称：原始文件名    - 视频时长：自动检测    - 创建时间：任务创建时间</p>
+<ol>
+<li><strong>处理状态</strong>：</li>
+</ol>
+<p>   - 🟢 <strong>待处理</strong>：刚创建，未开始处理    - 🟡 <strong>处理中</strong>：正在处理    - 🔵 <strong>已完成</strong>：所有语言处理完成    - 🔴 <strong>失败</strong>：处理出错</p>
+<ol>
+<li><strong>语言进度</strong>：</li>
+</ol>
+<p>   - 显示每个语言的处理阶段    - 进度百分比</p>
+<ol>
+<li><strong>操作按钮</strong>：</li>
+</ol>
+<p>   - 📝 <strong>编辑</strong>：进入编辑器    - 📥 <strong>下载</strong>：下载所有语言的视频    - 🗑️ <strong>删除</strong>：删除任务（不可恢复）</p>
+<h4>3.1.4 批量处理功能</h4>
+<p>[截图：批量处理面板]</p>
+<strong>使用场景：</strong>
+<ul>
+<li>需要处理多个视频到相同的语言</li>
+<li>希望系统自动排队处理，无需人工等待</li>
+</ul>
+<strong>操作步骤：</strong>
+<ol>
+<li><strong>选择任务</strong></li>
+</ol>
+<p>   - 勾选需要批量处理的任务（多选）    - 可以通过状态筛选任务</p>
+<ol>
+<li><strong>配置批量参数</strong></li>
+</ol>
+<p>   - 选择目标语言（应用到所有任务）    - 选择音色方案    - 设置优先级</p>
+<ol>
+<li><strong>启动批量处理</strong></li>
+</ol>
+<p>   - 点击 "开始批量处理" 按钮    - 系统会按顺序处理任务    - 可以随时暂停/恢复</p>
+<p>[截图：批量处理进度界面]</p>
+<strong>批量处理进度显示：</strong>
+<ul>
+<li>当前正在处理的任务</li>
+<li>队列中等待的任务数量</li>
+<li>已完成的任务数量</li>
+<li>总体进度百分比</li>
+<li>预计完成时间</li>
+</ul>
+<strong>批量处理控制：</strong>
+<ul>
+<li>⏸️ <strong>暂停</strong>：暂停当前任务，可恢复</li>
+<li>▶️ <strong>恢复</strong>：继续处理</li>
+<li>⏹️ <strong>停止</strong>：停止所有任务（当前任务会完成）</li>
+<li>📊 <strong>查看详情</strong>：查看每个任务的详细进度</li>
+</ul>
+<h4>3.1.5 系统状态监控</h4>
+<p>[截图：系统状态面板]</p>
+<p>右上角显示实时系统状态：</p>
+<ul>
+<li><strong>CPU 使用率</strong>：</li>
+</ul>
+<p>  - 🟢 绿色 (0-60%)：正常   - 🟡 黄色 (60-80%)：较高   - 🔴 红色 (80-100%)：过载</p>
+<ul>
+<li><strong>内存使用率</strong>：</li>
+</ul>
+<p>  - 显示已用/总内存   - 建议保持低于 80%</p>
+<ul>
+<li><strong>GPU 使用率</strong>（如果有 NVIDIA 显卡）：</li>
+</ul>
+<p>  - 语音克隆时会占用 GPU   - 显示 VRAM 使用情况</p>
+<blockquote><strong>💡 提示：</strong> 如果 CPU/内存持续过载，建议减少并发处理的任务数量。</blockquote>
+<hr>
+<h3>3.2 任务编辑器（Editor）</h3>
+<h4>3.2.1 界面布局</h4>
+<p>[截图：编辑器完整界面标注]</p>
+<p>编辑器界面分为以下区域：</p>
+<pre><code class="language-">┌─────────────────────────────────────────────────────┐
+<p>│  顶部工具栏                                          │ │  [返回看板] [任务名称] [下载] [设置]                │ ├──────────────────┬──────────────────────────────────┤ │                  │                                  │ │  视频播放器       │  处理进度侧边栏                  │ │  (左侧占 60%)    │  (右侧占 40%)                   │ │                  │                                  │ │  - 视频画面       │  - 说话人识别                   │ │  - 播放控制       │  - 翻译进度                     │ │  - 进度条         │  - 语音克隆                     │ │                  │  - 音频拼接                      │ ├──────────────────┤  - 视频导出                      │ │                  │                                  │ │  字幕时间轴       │                                  │ │  (底部)          │                                  │ │                  │                                  │ │  - 字幕块可视化   │                                  │ │  - 时间刻度       │                                  │ │  - 说话人颜色标记 │                                  │ │                  │                                  │ ├──────────────────┴──────────────────────────────────┤ │  字幕详情编辑面板                                    │ │  (可展开/收起)                                       │ │  - 字幕文本编辑                                      │ │  - 说话人分配                                        │ │  - 时间码调整                                        │ └─────────────────────────────────────────────────────┘</code></pre></p>
+<h4>3.2.2 视频播放器</h4>
+<p>[截图：视频播放器控制面板]</p>
+<strong>播放控制：</strong>
+<ul>
+<li>▶️ <strong>播放/暂停</strong>：空格键快捷键</li>
+<li>⏮️ <strong>上一字幕</strong>：跳到前一条字幕的开始</li>
+<li>⏭️ <strong>下一字幕</strong>：跳到下一条字幕的开始</li>
+<li>🔊 <strong>音量控制</strong>：0-100% 可调</li>
+<li>⚙️ <strong>播放速度</strong>：0.5x、0.75x、1x、1.25x、1.5x、2x</li>
+</ul>
+<strong>进度条功能：</strong>
+<ul>
+<li>点击进度条任意位置直接跳转</li>
+<li>拖动播放头精确定位</li>
+<li>显示当前时间和总时长</li>
+<li>字幕块在进度条上可视化显示</li>
+</ul>
+<p>[截图：进度条字幕块显示]</p>
+<strong>快捷键：</strong>
+<ul>
+<li><code>Space</code>：播放/暂停</li>
+<li><code>←</code>：后退 5 秒</li>
+<li><code>→</code>：前进 5 秒</li>
+<li><code>↑</code>：音量增加</li>
+<li><code>↓</code>：音量减小</li>
+<li><code>F</code>：全屏切换</li>
+</ul>
+<h4>3.2.3 字幕时间轴</h4>
+<p>[截图：字幕时间轴详细视图]</p>
+<strong>功能说明：</strong>
+<ol>
+<li><strong>字幕块显示</strong></li>
+</ol>
+<p>   - 每条字幕显示为一个彩色块    - 颜色代表不同说话人：      - 🟦 蓝色：说话人 0      - 🟩 绿色：说话人 1      - 🟨 黄色：说话人 2      - 🟥 红色：说话人 3    - 块的长度代表字幕时长</p>
+<ol>
+<li><strong>时间刻度</strong></li>
+</ol>
+<p>   - 显示视频时间（秒）    - 可以缩放时间轴（鼠标滚轮）    - 当前播放位置显示红色竖线</p>
+<ol>
+<li><strong>字幕块操作</strong></li>
+</ol>
+<p>   - <strong>点击</strong>：选中字幕，跳转播放    - <strong>拖动</strong>：调整字幕开始时间    - <strong>拖动边缘</strong>：调整字幕时长    - <strong>双击</strong>：编辑字幕文本</p>
+<p>[截图：拖动调整字幕时间]</p>
+<blockquote><strong>💡 提示：</strong> 按住 <code>Shift</code> 键可以同时选中多个字幕块。</blockquote>
+<h4>3.2.4 字幕详情编辑</h4>
+<p>[截图：字幕详情编辑面板]</p>
+<p>点击任意字幕块后，底部会展开详情编辑面板：</p>
+<ol>
+<li><strong>字幕编号</strong>：显示当前字幕的序号</li>
+<li><strong>时间码编辑</strong>：</li>
+</ol>
+<p>   - 开始时间：<code>00:00:05.500</code>    - 结束时间：<code>00:00:10.200</code>    - 时长：自动计算</p>
+<ol>
+<li><strong>字幕文本编辑</strong>：</li>
+</ol>
+<p>   - 支持多行文本    - 实时保存    - 显示字符计数</p>
+<ol>
+<li><strong>说话人分配</strong>：</li>
+</ol>
+<p>   - 下拉选择说话人 ID    - 更改后字幕块颜色自动更新</p>
+<ol>
+<li><strong>翻译文本</strong>：</li>
+</ol>
+<p>   - 显示所有语言的翻译    - 可以手动修改翻译    - 修改后可重新生成该段音频</p>
+<strong>批量编辑：</strong>
+<ul>
+<li>选中多个字幕块（Shift + 点击）</li>
+<li>批量修改说话人</li>
+<li>批量调整时间偏移</li>
+</ul>
+<h4>3.2.5 处理进度侧边栏</h4>
+<p>[截图：处理进度面板完整视图]</p>
+<p>右侧显示处理流程的所有阶段：</p>
+<h5>阶段 1：说话人识别</h5>
+<strong>状态显示：</strong>
+<ul>
+<li>⏸️ <strong>未开始</strong>：灰色</li>
+<li>🔄 <strong>进行中</strong>：蓝色 + 进度条</li>
+<li>✅ <strong>已完成</strong>：绿色 + 完成时间</li>
+<li>❌ <strong>失败</strong>：红色 + 错误信息</li>
+</ul>
+<strong>识别结果：</strong>
+<ul>
+<li>检测到的说话人数量</li>
+<li>每个说话人的字幕数量</li>
+<li>平均置信度分数</li>
+</ul>
+<p>[截图：说话人识别结果展示]</p>
+<strong>手动调整说话人：</strong>
+<ul>
+<li>如果识别不准确，可以手动修改</li>
+<li>点击 "编辑说话人标签" 按钮</li>
+<li>在字幕列表中批量修改</li>
+</ul>
+<h5>阶段 2：翻译</h5>
+<strong>配置选项：</strong>
+<ul>
+<li>选择目标语言（可多选）</li>
+<li>选择翻译引擎（默认 Ollama）</li>
+<li>设置翻译风格：</li>
+</ul>
+<p>  - 直译：保持原文结构   - 意译：更自然的表达   - 创意：适应目标语言习惯</p>
+<p>[截图：翻译配置界面]</p>
+<strong>翻译进度：</strong>
+<ul>
+<li>当前语言：英语</li>
+<li>已翻译字幕数：45/100</li>
+<li>进度：45%</li>
+<li>预计剩余时间：2 分钟</li>
+</ul>
+<strong>翻译预览：</strong>
+<ul>
+<li>在处理过程中可以实时查看翻译结果</li>
+<li>发现问题可以暂停并修改</li>
+</ul>
+<h5>阶段 3：语音克隆</h5>
+<strong>配置选项：</strong>
+<ol>
+<li><strong>为每个说话人选择音色</strong></li>
+</ol>
+<p>[截图：音色选择界面]</p>
+<table>
+<thead><tr>
+<th>音色名称</th>
+<th>特点描述</th>
+<th>适合场景</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>🎩 沉稳绅士</td>
+<td>低沉、稳重、成熟</td>
+<td>旁白、商务视频、纪录片</td>
+</tr>
+<tr>
+<td>🌟 清爽少年</td>
+<td>清晰、活泼、年轻</td>
+<td>教程、科普、Vlog</td>
+</tr>
+<tr>
+<td>🎀 甜美女声</td>
+<td>温柔、甜美、亲切</td>
+<td>广告、儿童内容、导购</td>
+</tr>
+<tr>
+<td>👑 知性御姐</td>
+<td>优雅、专业、自信</td>
+<td>新闻、演讲、培训</td>
+</tr>
+</tbody>
+</table>
+<ol>
+<li><strong>高级参数调整</strong>（可选）</li>
+</ol>
+<p>   - 语速：0.8x - 1.5x    - 音调：-12 ~ +12 半音    - 能量：音量和力度</p>
+<strong>克隆进度：</strong>
+<ul>
+<li>当前说话人：说话人 1</li>
+<li>当前段落：23/100</li>
+<li>阶段进度：23%</li>
+<li>预计剩余时间：8 分钟</li>
+</ul>
+<p>[截图：语音克隆进度显示]</p>
+<strong>实时试听：</strong>
+<ul>
+<li>每完成一段克隆，可以点击试听</li>
+<li>如果不满意，可以：</li>
+</ul>
+<p>  - 更换音色重新克隆   - 调整参数重新克隆   - 手动修改该段文本</p>
+<h5>阶段 4：音频拼接</h5>
+<strong>处理内容：</strong>
+<ul>
+<li>合并所有克隆的音频段</li>
+<li>保留原视频的背景音乐和音效</li>
+<li>音量平衡和淡入淡出</li>
+<li>时间对齐</li>
+</ul>
+<strong>进度显示：</strong>
+<ul>
+<li>正在拼接音频片段...</li>
+<li>处理进度：75%</li>
+</ul>
+<strong>质量检查：</strong>
+<ul>
+<li>自动检测音量过大/过小</li>
+<li>检测音频间隙</li>
+<li>检测时间不同步</li>
+</ul>
+<h5>阶段 5：视频导出</h5>
+<strong>导出配置：</strong>
+<p>[截图：导出配置界面]</p>
+<ol>
+<li><strong>视频质量</strong></li>
+</ol>
+<p>   - 高质量（推荐）：H.264, CRF 18    - 标准质量：H.264, CRF 23    - 压缩版本：H.264, CRF 28    - 自定义：手动设置参数</p>
+<ol>
+<li><strong>分辨率</strong></li>
+</ol>
+<p>   - 保持原始分辨率（推荐）    - 4K (3840x2160)    - 1080p (1920x1080)    - 720p (1280x720)    - 480p (854x480)</p>
+<ol>
+<li><strong>字幕烧录</strong>（可选）</li>
+</ol>
+<p>   - ✅ 烧录字幕：字幕嵌入视频，无法关闭    - ❌ 不烧录：可以单独输出字幕文件</p>
+<ol>
+<li><strong>音频处理</strong></li>
+</ol>
+<p>   - 保留原始背景音：混合克隆音频和原音    - 仅克隆音频：完全替换原音轨    - 双音轨：同时保留两个音轨</p>
+<strong>导出进度：</strong>
+<ul>
+<li>正在合成视频...</li>
+<li>当前帧：1250/3000</li>
+<li>进度：42%</li>
+<li>预计剩余时间：3 分钟</li>
+</ul>
+<p>[截图：导出进度界面]</p>
+<strong>导出完成：</strong>
+<ul>
+<li>显示 ✅ 导出成功</li>
+<li>文件大小：125.3 MB</li>
+<li>输出路径：显示完整路径</li>
+<li>操作按钮：</li>
+</ul>
+<p>  - 📥 下载视频   - 📂 打开文件夹   - 👁️ 预览视频</p>
+<hr>
+<h3>3.3 高级功能</h3>
+<h4>3.3.1 单段重新生成</h4>
+<strong>使用场景：</strong>
+<ul>
+<li>某一句翻译不准确</li>
+<li>某一段语音克隆效果不好</li>
+<li>需要调整某段的音色或参数</li>
+</ul>
+<strong>操作步骤：</strong>
+<p>[截图：单段重新生成界面]</p>
+<ol>
+<li>在字幕时间轴点击需要重新生成的字幕块</li>
+<li>在详情面板点击 <strong>"重新生成"</strong> 按钮</li>
+<li>选择重新生成的内容：</li>
+</ol>
+<p>   - 仅翻译    - 仅语音克隆    - 翻译 + 语音克隆</p>
+<ol>
+<li>修改参数（如需要）</li>
+<li>点击 <strong>"开始生成"</strong></li>
+<li>等待完成后自动替换</li>
+</ol>
+<blockquote><strong>💡 提示：</strong> 重新生成单段比重新处理整个任务快得多，通常只需 10-30 秒。</blockquote>
+<h4>3.3.2 字幕时间轴批量调整</h4>
+<strong>使用场景：</strong>
+<ul>
+<li>字幕整体偏早或偏晚</li>
+<li>需要统一调整所有字幕的时间</li>
+</ul>
+<strong>操作步骤：</strong>
+<ol>
+<li>点击字幕时间轴上方的 <strong>"批量调整"</strong> 按钮</li>
+<li>选择调整方式：</li>
+</ol>
+<p>   - <strong>整体偏移</strong>：所有字幕前移/后移 X 秒    - <strong>按比例缩放</strong>：调整字幕时间轴的整体速度    - <strong>对齐到音频</strong>：自动检测音频并对齐字幕</p>
+<ol>
+<li>输入偏移量（例如 +2.5 秒表示所有字幕延后 2.5 秒）</li>
+<li>点击 <strong>"应用"</strong></li>
+<li>预览效果，满意后点击 <strong>"保存"</strong></li>
+</ol>
+<p>[截图：批量调整时间界面]</p>
+<h4>3.3.3 自定义音色</h4>
+<strong>高级用户功能：</strong>
+<p>如果预设的 4 种音色不满足需求，可以上传自定义音色：</p>
+<ol>
+<li>准备参考音频文件：</li>
+</ol>
+<p>   - 格式：WAV, MP3, FLAC    - 时长：至少 10 秒，推荐 30-60 秒    - 质量：清晰无噪音，单一说话人</p>
+<ol>
+<li>点击 <strong>"添加自定义音色"</strong> 按钮</li>
+<li>上传音频文件</li>
+<li>系统会自动提取声音特征</li>
+<li>给音色命名（例如："张三的声音"）</li>
+<li>保存后可在音色列表中选择</li>
+</ol>
+<p>[截图：自定义音色上传界面]</p>
+<blockquote><strong>⚠️ 注意：</strong> 自定义音色的质量取决于参考音频的质量。建议使用专业录音设备录制。</blockquote>
+<h4>3.3.4 多语言对比预览</h4>
+<strong>使用场景：</strong>
+<ul>
+<li>需要对比不同语言版本的效果</li>
+<li>检查翻译质量</li>
+</ul>
+<strong>操作步骤：</strong>
+<p>[截图：多语言对比界面]</p>
+<ol>
+<li>点击顶部工具栏的 <strong>"多语言对比"</strong> 按钮</li>
+<li>选择要对比的语言（最多 3 个）</li>
+<li>系统会并排显示不同语言的：</li>
+</ol>
+<p>   - 字幕文本    - 音频波形    - 同步播放</p>
+<ol>
+<li>可以暂停在某个位置对比细节</li>
+</ol>
+<hr>
+<h2>4. 最佳实践和技巧</h2>
+<h3>4.1 视频准备技巧</h3>
+<h4>4.1.1 视频质量建议</h4>
+<strong>推荐的视频参数：</strong>
+<table>
+<thead><tr>
+<th>参数</th>
+<th>推荐值</th>
+<th>说明</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>分辨率</td>
+<td>1920x1080 (1080p)</td>
+<td>最佳平衡质量和处理速度</td>
+</tr>
+<tr>
+<td>帧率</td>
+<td>24-30 fps</td>
+<td>更高帧率增加处理时间</td>
+</tr>
+<tr>
+<td>视频编码</td>
+<td>H.264 (MP4)</td>
+<td>兼容性最好</td>
+</tr>
+<tr>
+<td>音频编码</td>
+<td>AAC, 48kHz, 立体声</td>
+<td>标准音频格式</td>
+</tr>
+<tr>
+<td>比特率</td>
+<td>5-10 Mbps</td>
+<td>视频质量良好</td>
+</tr>
+</tbody>
+</table>
+<strong>优化建议：</strong>
+<ol>
+<li><strong>预处理视频</strong></li>
+</ol>
+<p>   - 使用视频编辑软件（如 Premiere, DaVinci）先剪辑    - 去除片头片尾不需要翻译的部分    - 减少视频时长可以大幅缩短处理时间</p>
+<ol>
+<li><strong>音频优化</strong></li>
+</ol>
+<p>   - 确保音频清晰，背景噪音最小    - 如果背景音乐太大声，建议先降低音乐音量    - 说话人之间音量差异不要太大</p>
+<ol>
+<li><strong>压缩大视频</strong></li>
+</ol>
+<p>   - 超过 1GB 的视频建议先压缩    - 使用 HandBrake 等工具压缩，CRF 23 即可</p>
+<h4>4.1.2 字幕准备技巧</h4>
+<strong>生成高质量字幕：</strong>
+<ol>
+<li><strong>使用专业工具</strong></li>
+</ol>
+<p>   - 推荐：剪映（免费，识别率高）    - 备选：Whisper、Subtitle Edit、Aegisub</p>
+<ol>
+<li><strong>字幕格式规范</strong></li>
+</ol>
+<p>   - 每条字幕 5-7 秒为宜    - 不超过 2 行文本    - 每行不超过 20-30 个字符    - 避免字幕跨越多个说话人</p>
+<ol>
+<li><strong>时间码对齐</strong></li>
+</ol>
+<p>   - 字幕开始时间应对齐说话开始    - 字幕结束时间不要太短（至少显示 0.8 秒）    - 字幕之间保留 0.1-0.3 秒间隙</p>
+<p>[截图：好的字幕 vs 不好的字幕对比]</p>
+<strong>字幕格式示例（SRT）：</strong>
+<pre><code class="language-srt">1
+<p>00:00:00,500 --&gt; 00:00:03,200 大家好，欢迎来到我的频道。</p>
+<p>2 00:00:03,500 --&gt; 00:00:07,800 今天我们要讲解如何使用 Ascendia 进行视频翻译。</p>
+<p>3 00:00:08,100 --&gt; 00:00:11,600 首先，我们需要准备好视频和字幕文件。</code></pre></p>
+<h3>4.2 说话人识别优化</h3>
+<h4>4.2.1 提高识别准确率</h4>
+<strong>影响说话人识别的因素：</strong>
+<ol>
+<li><strong>音频质量</strong></li>
+</ol>
+<p>   - ✅ 好：清晰、无噪音、无背景音乐    - ❌ 差：嘈杂、回声、音乐覆盖</p>
+<ol>
+<li><strong>说话人特征</strong></li>
+</ol>
+<p>   - ✅ 好：音色差异明显（男女混合、年龄差异大）    - ❌ 差：音色相似（两个成年男性、同龄女性）</p>
+<ol>
+<li><strong>说话时长</strong></li>
+</ol>
+<p>   - ✅ 好：每个说话人至少 10 条字幕    - ❌ 差：某个说话人只说 1-2 句</p>
+<strong>优化技巧：</strong>
+<ol>
+<li><strong>预先分类</strong></li>
+</ol>
+<p>   - 如果知道有几个说话人，可以在识别前设置    - 系统会据此调整聚类算法</p>
+<ol>
+<li><strong>分段处理</strong></li>
+</ol>
+<p>   - 如果视频很长（>30 分钟），建议分段处理    - 每段 10-15 分钟为宜</p>
+<ol>
+<li><strong>手动校正</strong></li>
+</ol>
+<p>   - 识别完成后，务必检查前 20 条字幕    - 如果有错误，手动修正    - 系统会学习你的修正</p>
+<p>[截图：说话人识别结果检查]</p>
+<h4>4.2.2 处理特殊情况</h4>
+<strong>旁白 + 对话：</strong>
+<ul>
+<li>旁白通常音质更好，音色更稳定</li>
+<li>系统会自动识别旁白为独立说话人</li>
+<li>如果识别错误，手动分配旁白为说话人 0</li>
+</ul>
+<strong>多人对话（>3人）：</strong>
+<ul>
+<li>系统最多支持 8 个说话人</li>
+<li>如果超过 4 人，识别准确率可能下降</li>
+<li>建议按重要性分类：主要角色 vs 次要角色</li>
+</ul>
+<strong>背景音乐/音效：</strong>
+<ul>
+<li>系统会自动过滤纯音乐片段</li>
+<li>如果音乐中有人声（如歌曲），可能被误识别</li>
+<li>手动删除这些字幕段</li>
+</ul>
+<h3>4.3 翻译质量优化</h3>
+<h4>4.3.1 翻译前检查</h4>
+<strong>源字幕质量：</strong>
+<ol>
+<li><strong>拼写和语法</strong></li>
+</ol>
+<p>   - 检查原文是否有错别字    - 修正语法错误    - 完善不完整的句子</p>
+<ol>
+<li><strong>专业术语</strong></li>
+</ol>
+<p>   - 统一术语翻译    - 例如：AI 翻译为 "人工智能" 还是保留 "AI"    - 可以在翻译前标注术语</p>
+<ol>
+<li><strong>语境信息</strong></li>
+</ol>
+<p>   - 确保字幕能够独立理解    - 避免过多指代词（他、她、这个、那个）</p>
+<p>[截图：翻译前字幕检查清单]</p>
+<h4>4.3.2 翻译后校对</h4>
+<strong>重点检查项：</strong>
+<ol>
+<li><strong>意思准确性</strong></li>
+</ol>
+<p>   - 核心信息是否传达准确    - 有没有明显错译    - 数字、日期、名称是否正确</p>
+<ol>
+<li><strong>语言流畅性</strong></li>
+</ol>
+<p>   - 目标语言是否自然    - 句子长度是否合适    - 符合目标语言习惯</p>
+<ol>
+<li><strong>文化适配</strong></li>
+</ol>
+<p>   - 俗语、成语的翻译    - 文化特定概念的解释    - 幽默、双关的处理</p>
+<strong>常见翻译问题及修正：</strong>
+<table>
+<thead><tr>
+<th>问题类型</th>
+<th>示例</th>
+<th>如何修正</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>直译生硬</td>
+<td>"I'm on my way" → "我在我的路上"</td>
+<td>改为 "我正在赶来"</td>
+</tr>
+<tr>
+<td>漏译</td>
+<td>忘记翻译某个句子</td>
+<td>检查字幕编号是否连续</td>
+</tr>
+<tr>
+<td>术语不统一</td>
+<td>AI 有时翻译成 "人工智能"，有时保留 "AI"</td>
+<td>统一为一种</td>
+</tr>
+<tr>
+<td>过长/过短</td>
+<td>翻译后文本长度差异太大</td>
+<td>调整表达方式</td>
+</tr>
+</tbody>
+</table>
+<p>[截图：翻译问题标注示例]</p>
+<h4>4.3.3 批量修正技巧</h4>
+<strong>查找替换功能：</strong>
+<ol>
+<li>点击工具栏的 <strong>"查找替换"</strong> 按钮</li>
+<li>输入要查找的文本</li>
+<li>输入替换文本</li>
+<li>选择范围：</li>
+</ol>
+<p>   - 当前语言    - 所有语言    - 仅选中的字幕</p>
+<ol>
+<li>点击 <strong>"全部替换"</strong> 或逐个确认</li>
+</ol>
+<strong>术语表功能：</strong>
+<ol>
+<li>创建术语对照表（CSV 格式）</li>
+<li>导入到系统</li>
+<li>系统会自动应用术语翻译</li>
+<li>减少手动修改工作量</li>
+</ol>
+<h3>4.4 语音克隆效果优化</h3>
+<h4>4.4.1 选择合适的音色</h4>
+<strong>音色选择原则：</strong>
+<ol>
+<li><strong>匹配原说话人特征</strong></li>
+</ol>
+<p>   - 男性 → 沉稳绅士 / 清爽少年    - 女性 → 甜美女声 / 知性御姐    - 年龄相近</p>
+<ol>
+<li><strong>匹配内容风格</strong></li>
+</ol>
+<p>   - 严肃内容（新闻、纪录片）→ 沉稳绅士 / 知性御姐    - 轻松内容（Vlog、教程）→ 清爽少年 / 甜美女声</p>
+<ol>
+<li><strong>保持一致性</strong></li>
+</ol>
+<p>   - 同一个说话人在整个视频中使用同一音色    - 不同语言版本建议使用相同音色，保持识别度</p>
+<p>[截图：音色选择对照表]</p>
+<strong>音色测试技巧：</strong>
+<ol>
+<li>选择一段有代表性的字幕（10-15秒）</li>
+<li>分别用不同音色试听</li>
+<li>对比效果，选择最自然的</li>
+<li>应用到所有字幕</li>
+</ol>
+<h4>4.4.2 参数调整技巧</h4>
+<strong>语速调整：</strong>
+<ul>
+<li><strong>0.8x</strong>：适合信息密集、需要仔细听的内容</li>
+<li><strong>1.0x</strong>：标准速度，最自然</li>
+<li><strong>1.2x</strong>：适合节奏紧凑的内容</li>
+</ul>
+<strong>音调调整：</strong>
+<ul>
+<li><strong>-3 ~ -5 半音</strong>：降低音调，更稳重</li>
+<li><strong>0 半音</strong>：保持原音调（推荐）</li>
+<li><strong>+3 ~ +5 半音</strong>：提高音调，更活泼</li>
+</ul>
+<strong>能量调整：</strong>
+<ul>
+<li><strong>低能量</strong>：轻声、温柔的语气</li>
+<li><strong>标准能量</strong>：正常说话（推荐）</li>
+<li><strong>高能量</strong>：激动、强调的语气</li>
+</ul>
+<p>[截图：参数调整界面]</p>
+<blockquote><strong>💡 提示：</strong> 过度调整参数可能导致不自然。建议从默认值开始，小幅调整。</blockquote>
+<h4>4.4.3 处理不自然的语音</h4>
+<strong>常见问题及解决：</strong>
+<ol>
+<li><strong>机器人音</strong></li>
+</ol>
+<p>   - 原因：参考音频质量差，或文本不自然    - 解决：重新生成，尝试不同音色</p>
+<ol>
+<li><strong>发音错误</strong></li>
+</ol>
+<p>   - 原因：多音字、外来词、专业术语    - 解决：修改文本，用拼音或同音字替换</p>
+<ol>
+<li><strong>停顿不自然</strong></li>
+</ol>
+<p>   - 原因：标点符号使用不当    - 解决：调整标点，添加逗号引导停顿</p>
+<ol>
+<li><strong>音量不稳定</strong></li>
+</ol>
+<p>   - 原因：原文本有大小写、感叹号等    - 解决：拼接阶段会自动平衡音量</p>
+<strong>重点段落优化：</strong>
+<ul>
+<li>开头 3 句：给观众第一印象，务必完美</li>
+<li>结尾总结：最后的印象，认真检查</li>
+<li>关键信息：重要数据、结论等</li>
+</ul>
+<h3>4.5 导出优化</h3>
+<h4>4.5.1 画质设置</h4>
+<strong>根据用途选择画质：</strong>
+<table>
+<thead><tr>
+<th>用途</th>
+<th>推荐设置</th>
+<th>文件大小</th>
+<th>处理时间</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>YouTube 上传</td>
+<td>1080p, CRF 18</td>
+<td>较大</td>
+<td>较长</td>
+</tr>
+<tr>
+<td>社交媒体分享</td>
+<td>1080p, CRF 23</td>
+<td>中等</td>
+<td>中等</td>
+</tr>
+<tr>
+<td>微信/WhatsApp</td>
+<td>720p, CRF 26</td>
+<td>较小</td>
+<td>较快</td>
+</tr>
+<tr>
+<td>预览/草稿</td>
+<td>480p, CRF 28</td>
+<td>最小</td>
+<td>最快</td>
+</tr>
+</tbody>
+</table>
+<strong>编码建议：</strong>
+<ul>
+<li>H.264：兼容性最好，所有平台支持</li>
+<li>H.265 (HEVC)：文件更小，但部分老设备不支持</li>
+</ul>
+<p>[截图：画质对比示例]</p>
+<h4>4.5.2 字幕烧录</h4>
+<strong>是否烧录字幕？</strong>
+<table>
+<thead><tr>
+<th>选择</th>
+<th>优点</th>
+<th>缺点</th>
+<th>适合场景</th>
+</tr></thead>
+<tbody>
+<tr>
+<td><strong>烧录</strong></td>
+<td>所有平台都能看到字幕</td>
+<td>无法关闭，无法修改</td>
+<td>社交媒体、公开分享</td>
+</tr>
+<tr>
+<td><strong>不烧录</strong></td>
+<td>可以关闭，多语言切换</td>
+<td>某些平台不支持</td>
+<td>YouTube, Bilibili（支持字幕文件）</td>
+</tr>
+</tbody>
+</table>
+<strong>烧录样式建议：</strong>
+<ul>
+<li>字体：黑体或微软雅黑（中文）, Arial (英文)</li>
+<li>大小：视频高度的 5-6%（1080p 约 50-60px）</li>
+<li>位置：底部居中，距底边 10%</li>
+<li>颜色：白色字体 + 黑色描边</li>
+<li>背景：半透明黑色条（可选）</li>
+</ul>
+<p>[截图：字幕烧录样式对比]</p>
+<h4>4.5.3 多音轨设置</h4>
+<strong>使用场景：</strong>
+<ul>
+<li>保留原音：观众可以对比原音和配音</li>
+<li>双语学习：在原音基础上学习外语</li>
+</ul>
+<strong>音轨配置：</strong>
+<ul>
+<li>音轨 1：克隆音频 + 背景音乐（默认）</li>
+<li>音轨 2：原始音频（可选）</li>
+</ul>
+<blockquote><strong>💡 提示：</strong> YouTube 支持多音轨，观众可以在设置中切换。</blockquote>
+<hr>
+<h2>5. 常见问题和故障排除</h2>
+<h3>5.1 启动和连接问题</h3>
+<h4>Q1: 双击 start_all.bat 后没有反应</h4>
+<strong>可能原因和解决方案：</strong>
+<ol>
+<li><strong>Conda 环境未安装或路径错误</strong></li>
+</ol>
+<p>   - 检查：打开 start_all.bat，查看第 21-24 行的路径    - 解决：修改路径为你的实际 Conda 安装路径    ```batch    set "CONDA_ACTIVATE=C:\Miniconda3\Scripts\activate.bat"    set "CONDA_ENV=ui"    ```</p>
+<ol>
+<li><strong>端口被占用</strong></li>
+</ol>
+<p>   - 检查：系统会尝试清理端口，但可能失败    - 解决：手动结束占用端口的进程    ```batch    # 检查端口占用    netstat -ano | findstr "8000"    netstat -ano | findstr "5173"</p>
+<p>   # 结束进程    taskkill /F /PID [进程ID]    ```</p>
+<ol>
+<li><strong>防火墙阻止</strong></li>
+</ol>
+<p>   - 解决：允许 Python 和 Node.js 通过防火墙</p>
+<h4>Q2: 浏览器打开后显示 "无法连接"</h4>
+<strong>解决步骤：</strong>
+<ol>
+<li><strong>检查后端是否启动</strong></li>
+</ol>
+<p>   - 查看是否有 "Ascendia-Backend" 窗口    - 窗口中应该显示：<code>Uvicorn running on http://0.0.0.0:8000</code></p>
+<ol>
+<li><strong>手动访问后端</strong></li>
+</ol>
+<p>   - 在浏览器访问：http://localhost:8000/docs    - 如果能打开 API 文档，说明后端正常</p>
+<ol>
+<li><strong>检查前端是否启动</strong></li>
+</ol>
+<p>   - 查看是否有 "Ascendia-Frontend" 窗口    - 窗口中应该显示：<code>Local: http://localhost:5173</code></p>
+<ol>
+<li><strong>清除浏览器缓存</strong></li>
+</ol>
+<p>   - 按 <code>Ctrl + Shift + Delete</code>    - 清除缓存和 Cookie    - 刷新页面</p>
+<h4>Q3: 系统运行缓慢或卡顿</h4>
+<strong>优化建议：</strong>
+<ol>
+<li><strong>关闭其他程序</strong></li>
+</ol>
+<p>   - 尤其是 Chrome、Adobe 等占用资源大的程序</p>
+<ol>
+<li><strong>增加虚拟内存</strong></li>
+</ol>
+<p>   - Windows 设置 → 系统 → 关于 → 高级系统设置    - 性能设置 → 高级 → 虚拟内存    - 设置为物理内存的 1.5-2 倍</p>
+<ol>
+<li><strong>使用 GPU 加速</strong></li>
+</ol>
+<p>   - 确保安装了 NVIDIA 显卡驱动    - 系统会自动检测并使用 GPU</p>
+<hr>
+<h3>5.2 上传和创建任务问题</h3>
+<h4>Q4: 上传视频失败</h4>
+<strong>常见错误信息和解决方案：</strong>
+<ol>
+<li><strong>"视频文件格式不支持"</strong></li>
+</ol>
+<p>   - 原因：视频编码不支持    - 解决：使用 HandBrake 转换为 H.264 编码的 MP4    - 设置：预设选择 "Fast 1080p30"</p>
+<ol>
+<li><strong>"文件太大，无法上传"</strong></li>
+</ol>
+<p>   - 限制：最大 5GB    - 解决：使用 HandBrake 压缩视频    - 参数：CRF 23, H.264, 音频 AAC</p>
+<ol>
+<li><strong>"上传超时"</strong></li>
+</ol>
+<p>   - 原因：网络慢或文件过大    - 解决：      - 压缩视频文件      - 检查本地网络连接      - 重试上传</p>
+<h4>Q5: 字幕文件解析失败</h4>
+<strong>常见问题：</strong>
+<ol>
+<li><strong>编码错误</strong></li>
+</ol>
+<p>   ```    错误：UnicodeDecodeError: 'gbk' codec can't decode    ```    - 原因：字幕文件不是 UTF-8 编码    - 解决：用记事本打开 → 另存为 → 编码选择 "UTF-8"</p>
+<ol>
+<li><strong>格式错误</strong></li>
+</ol>
+<p>   ```    错误：Invalid SRT format    ```    - 原因：时间码格式不正确    - 正确格式：<code>00:00:05,500 --> 00:00:10,200</code>    - 错误格式：<code>00:00:05.500 --> 00:00:10.200</code> （逗号写成了点）</p>
+<ol>
+<li><strong>ASS 格式问题</strong></li>
+</ol>
+<p>   - 系统会自动转换 ASS 为 SRT    - 如果转换失败，手动使用 Subtitle Edit 转换</p>
+<p>[截图：字幕格式错误示例]</p>
+<hr>
+<h3>5.3 处理过程问题</h3>
+<h4>Q6: 说话人识别失败或不准确</h4>
+<strong>问题和解决：</strong>
+<ol>
+<li><strong>识别出的说话人数量不对</strong></li>
+</ol>
+<p>   - 情况：应该是 2 人，识别成 3 人    - 解决：      - 手动合并说话人：选中所有需要合并的字幕，批量修改说话人 ID      - 重新识别：调整参数后重新运行</p>
+<ol>
+<li><strong>同一个人被识别为多个说话人</strong></li>
+</ol>
+<p>   - 原因：音质变化大（距离麦克风远近）    - 解决：手动合并，或提高音频质量重新处理</p>
+<ol>
+<li><strong>不同人被识别为同一个说话人</strong></li>
+</ol>
+<p>   - 原因：音色太相似    - 解决：      - 手动分割说话人      - 在翻译前修正</p>
+<p>[截图：说话人识别修正界面]</p>
+<h4>Q7: 翻译进度卡住不动</h4>
+<strong>可能原因：</strong>
+<ol>
+<li><strong>LLM 服务未响应</strong></li>
+</ol>
+<p>   - 检查：后端窗口是否有错误信息    - 解决：重启系统，或检查 Ollama 是否运行</p>
+<ol>
+<li><strong>网络问题</strong></li>
+</ol>
+<p>   - 如果使用在线翻译 API，检查网络连接</p>
+<ol>
+<li><strong>内存不足</strong></li>
+</ol>
+<p>   - 翻译大量文本时可能占用大量内存    - 解决：关闭其他程序，或重启系统</p>
+<strong>恢复方法：</strong>
+<ul>
+<li>刷新页面，系统会从上次中断处继续</li>
+<li>或点击 "重新翻译"</li>
+</ul>
+<h4>Q8: 语音克隆时报错</h4>
+<strong>常见错误：</strong>
+<ol>
+<li><strong>"CUDA out of memory"</strong></li>
+</ol>
+<p>   ```    RuntimeError: CUDA out of memory    ```    - 原因：显存不足（通常需要 4GB+ 显存）    - 解决：      - 关闭其他占用 GPU 的程序      - 使用 CPU 模式（较慢）      - 减少批处理大小</p>
+<ol>
+<li><strong>"Fish-Speech model not found"</strong></li>
+</ol>
+<p>   - 原因：模型文件丢失或路径错误    - 解决：检查 backend/models 目录，重新下载模型</p>
+<ol>
+<li><strong>生成的音频为空或无声</strong></li>
+</ol>
+<p>   - 原因：文本格式问题或模型异常    - 解决：      - 检查翻译文本是否正常      - 重新生成该段      - 尝试不同音色</p>
+<h4>Q9: 视频导出失败</h4>
+<strong>错误信息和解决：</strong>
+<ol>
+<li><strong>"FFmpeg error"</strong></li>
+</ol>
+<p>   - 检查：后端窗口的详细错误信息    - 常见原因：      - 硬盘空间不足      - 文件路径包含特殊字符      - 音视频不同步</p>
+<ol>
+<li><strong>导出的视频播放异常</strong></li>
+</ol>
+<p>   - 症状：有画面无声音，或有声音无画面    - 解决：      - 检查原视频是否正常      - 重新导出，选择不同的编码设置      - 使用 VLC 播放器测试</p>
+<ol>
+<li><strong>导出进度到 99% 卡住</strong></li>
+</ol>
+<p>   - 原因：正在写入文件索引（大文件需要时间）    - 解决：耐心等待，不要中断</p>
+<p>[截图：导出错误日志查看]</p>
+<hr>
+<h3>5.4 结果质量问题</h3>
+<h4>Q10: 翻译质量不好</h4>
+<strong>改善方法：</strong>
+<ol>
+<li><strong>检查原文质量</strong></li>
+</ol>
+<p>   - 确保原文没有错别字    - 句子完整、语法正确</p>
+<ol>
+<li><strong>手动修正翻译</strong></li>
+</ol>
+<p>   - 不要完全依赖机器翻译    - 重点检查专业术语、数字、日期</p>
+<ol>
+<li><strong>使用更好的翻译引擎</strong></li>
+</ol>
+<p>   - 默认：Ollama（免费，质量中等）    - 可选：OpenAI GPT（质量高，需付费 API）    - 可选：Google Translate API</p>
+<ol>
+<li><strong>分段翻译</strong></li>
+</ol>
+<p>   - 长段落可能翻译质量下降    - 建议拆分为短句</p>
+<h4>Q11: 语音克隆不够自然</h4>
+<strong>优化技巧：</strong>
+<ol>
+<li><strong>选择合适的音色</strong></li>
+</ol>
+<p>   - 尝试所有 4 种预设音色    - 选择最接近原音的</p>
+<ol>
+<li><strong>调整参数</strong></li>
+</ol>
+<p>   - 语速：±0.1 步进调整    - 音调：±1 半音步进调整    - 能量：根据情感调整</p>
+<ol>
+<li><strong>修改文本</strong></li>
+</ol>
+<p>   - 添加标点引导停顿：      - 逗号（，）：短停顿      - 句号（。）：中停顿      - 感叹号（！）：上扬语气      - 问号（？）：疑问语气</p>
+<ol>
+<li><strong>逐句优化</strong></li>
+</ol>
+<p>   - 对不满意的句子单独重新生成    - 多次尝试，选择最好的</p>
+<p>[截图：语音优化对比]</p>
+<h4>Q12: 音频和视频不同步</h4>
+<strong>排查步骤：</strong>
+<ol>
+<li><strong>检查原视频</strong></li>
+</ol>
+<p>   - 使用 VLC 播放原视频    - 确认原视频音画同步</p>
+<ol>
+<li><strong>检查字幕时间</strong></li>
+</ol>
+<p>   - 字幕时间是否对齐    - 是否有大的时间间隔</p>
+<ol>
+<li><strong>重新拼接音频</strong></li>
+</ol>
+<p>   - 在导出前重新运行"音频拼接"步骤    - 确保时间对齐</p>
+<ol>
+<li><strong>调整导出设置</strong></li>
+</ol>
+<p>   - 使用"保持原始帧率"    - 不要修改视频速度</p>
+<hr>
+<h3>5.5 批量处理问题</h3>
+<h4>Q13: 批量处理中断</h4>
+<strong>恢复方法：</strong>
+<ol>
+<li><strong>查看批量状态</strong></li>
+</ol>
+<p>   - 进入任务看板    - 点击"批量处理状态"</p>
+<ol>
+<li><strong>识别中断点</strong></li>
+</ol>
+<p>   - 查看哪个任务失败    - 查看错误日志</p>
+<ol>
+<li><strong>恢复处理</strong></li>
+</ol>
+<p>   - 点击"恢复批量处理"    - 系统会跳过已完成的任务    - 从失败任务重新开始</p>
+<ol>
+<li><strong>单独处理失败任务</strong></li>
+</ol>
+<p>   - 进入失败任务的编辑器    - 检查并修复问题    - 单独重新处理</p>
+<h4>Q14: 批量处理速度慢</h4>
+<strong>加速方法：</strong>
+<ol>
+<li><strong>减少并发任务</strong></li>
+</ol>
+<p>   - 默认：一次处理一个任务    - 如果资源充足，可以在设置中增加并发数</p>
+<ol>
+<li><strong>优先处理短视频</strong></li>
+</ol>
+<p>   - 在批量队列中调整顺序    - 先处理短视频（<5分钟）</p>
+<ol>
+<li><strong>夜间处理</strong></li>
+</ol>
+<p>   - 设置批量任务在夜间运行    - 第二天早上查看结果</p>
+<ol>
+<li><strong>使用 GPU</strong></li>
+</ol>
+<p>   - 确保 GPU 驱动正常    - 系统会自动使用 GPU 加速克隆</p>
+<hr>
+<h3>5.6 系统维护问题</h3>
+<h4>Q15: 如何清理缓存文件</h4>
+<strong>缓存文件位置：</strong>
+<pre><code class="language-">workspace/LocalClip-Editor/uploads/
+<p>├── task_xxx/ │   ├── input/           # 原始视频 │   ├── processed/       # 中间文件（可删除） │   │   ├── audio_segments/ │   │   └── speaker_data.json │   └── outputs/         # 输出文件</code></pre></p>
+<strong>清理步骤：</strong>
+<ol>
+<li><strong>清理单个任务</strong></li>
+</ol>
+<p>   - 在任务卡片点击"删除"    - 会删除该任务的所有文件</p>
+<ol>
+<li><strong>批量清理</strong></li>
+</ol>
+<p>   - 关闭系统    - 手动删除 <code>uploads/</code> 目录下的任务文件夹    - 保留数据库文件：<code>backend/database.db</code></p>
+<ol>
+<li><strong>仅清理中间文件</strong></li>
+</ol>
+<p>   - 保留输入和输出    - 删除 <code>processed/</code> 目录下的文件</p>
+<blockquote><strong>⚠️ 警告：</strong> 删除任务会永久删除所有相关文件，无法恢复！</blockquote>
+<h4>Q16: 如何备份数据</h4>
+<strong>备份内容：</strong>
+<ol>
+<li><strong>任务文件</strong></li>
+</ol>
+<p>   - 位置：<code>uploads/</code>    - 建议：定期复制到外部硬盘</p>
+<ol>
+<li><strong>数据库</strong></li>
+</ol>
+<p>   - 位置：<code>backend/database.db</code>    - 包含：任务信息、处理历史</p>
+<ol>
+<li><strong>配置文件</strong></li>
+</ol>
+<p>   - 位置：<code>backend/config/</code>    - 包含：自定义音色、术语表</p>
+<strong>备份方法：</strong>
+<pre><code class="language-batch"># 创建备份目录
+<p>mkdir D:\Ascendia_Backup</p>
+<p># 复制任务文件 xcopy /E /I uploads D:\Ascendia_Backup\uploads</p>
+<p># 复制数据库 copy backend\database.db D:\Ascendia_Backup\</p>
+<p># 复制配置 xcopy /E /I backend\config D:\Ascendia_Backup\config</code></pre></p>
+<h4>Q17: 如何更新系统</h4>
+<strong>更新步骤：</strong>
+<ol>
+<li><strong>备份数据</strong>（参考 Q16）</li>
+</ol>
+<ol>
+<li><strong>关闭系统</strong></li>
+</ol>
+<p>   - 点击前端界面的"关闭系统"按钮    - 或直接关闭两个命令行窗口</p>
+<ol>
+<li><strong>下载新版本</strong></li>
+</ol>
+<p>   - 从官方渠道下载    - 解压到新目录</p>
+<ol>
+<li><strong>迁移数据</strong></li>
+</ol>
+<p>   - 复制旧版本的 <code>uploads/</code> 到新版本    - 复制 <code>backend/database.db</code> 到新版本    - 复制自定义配置</p>
+<ol>
+<li><strong>启动新版本</strong></li>
+</ol>
+<p>   - 运行 <code>start_all.bat</code>    - 检查功能是否正常</p>
+<hr>
+<h2>6. 附录</h2>
+<h3>6.1 快捷键参考</h3>
+<h4>视频播放器</h4>
+<table>
+<thead><tr>
+<th>快捷键</th>
+<th>功能</th>
+</tr></thead>
+<tbody>
+<tr>
+<td><code>Space</code></td>
+<td>播放/暂停</td>
+</tr>
+<tr>
+<td><code>←</code></td>
+<td>后退 5 秒</td>
+</tr>
+<tr>
+<td><code>→</code></td>
+<td>前进 5 秒</td>
+</tr>
+<tr>
+<td><code>↑</code></td>
+<td>音量增加</td>
+</tr>
+<tr>
+<td><code>↓</code></td>
+<td>音量减小</td>
+</tr>
+<tr>
+<td><code>F</code></td>
+<td>全屏切换</td>
+</tr>
+<tr>
+<td><code>M</code></td>
+<td>静音切换</td>
+</tr>
+<tr>
+<td><code>0-9</code></td>
+<td>跳转到视频 0%-90% 位置</td>
+</tr>
+</tbody>
+</table>
+<h4>字幕编辑</h4>
+<table>
+<thead><tr>
+<th>快捷键</th>
+<th>功能</th>
+</tr></thead>
+<tbody>
+<tr>
+<td><code>Ctrl + S</code></td>
+<td>保存字幕</td>
+</tr>
+<tr>
+<td><code>Ctrl + Z</code></td>
+<td>撤销</td>
+</tr>
+<tr>
+<td><code>Ctrl + Y</code></td>
+<td>重做</td>
+</tr>
+<tr>
+<td><code>Ctrl + F</code></td>
+<td>查找字幕</td>
+</tr>
+<tr>
+<td><code>Ctrl + H</code></td>
+<td>查找替换</td>
+</tr>
+<tr>
+<td><code>Ctrl + A</code></td>
+<td>全选字幕</td>
+</tr>
+<tr>
+<td><code>Delete</code></td>
+<td>删除选中字幕</td>
+</tr>
+<tr>
+<td><code>Ctrl + D</code></td>
+<td>复制选中字幕</td>
+</tr>
+</tbody>
+</table>
+<h4>字幕时间轴</h4>
+<table>
+<thead><tr>
+<th>快捷键</th>
+<th>功能</th>
+</tr></thead>
+<tbody>
+<tr>
+<td><code>Shift + 点击</code></td>
+<td>多选字幕</td>
+</tr>
+<tr>
+<td><code>Ctrl + 滚轮</code></td>
+<td>缩放时间轴</td>
+</tr>
+<tr>
+<td><code>拖动</code></td>
+<td>移动字幕</td>
+</tr>
+<tr>
+<td><code>拖动边缘</code></td>
+<td>调整字幕时长</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h3>6.2 支持的语言列表</h3>
+<table>
+<thead><tr>
+<th>语言代码</th>
+<th>语言名称</th>
+<th>英文名称</th>
+<th>翻译质量</th>
+<th>克隆质量</th>
+</tr></thead>
+<tbody>
+<tr>
+<td><code>en</code></td>
+<td>英语</td>
+<td>English</td>
+<td>⭐⭐⭐⭐⭐</td>
+<td>⭐⭐⭐⭐⭐</td>
+</tr>
+<tr>
+<td><code>ko</code></td>
+<td>韩语</td>
+<td>Korean</td>
+<td>⭐⭐⭐⭐⭐</td>
+<td>⭐⭐⭐⭐</td>
+</tr>
+<tr>
+<td><code>ja</code></td>
+<td>日语</td>
+<td>Japanese</td>
+<td>⭐⭐⭐⭐⭐</td>
+<td>⭐⭐⭐⭐</td>
+</tr>
+<tr>
+<td><code>fr</code></td>
+<td>法语</td>
+<td>French</td>
+<td>⭐⭐⭐⭐</td>
+<td>⭐⭐⭐⭐</td>
+</tr>
+<tr>
+<td><code>de</code></td>
+<td>德语</td>
+<td>German</td>
+<td>⭐⭐⭐⭐</td>
+<td>⭐⭐⭐⭐</td>
+</tr>
+<tr>
+<td><code>es</code></td>
+<td>西班牙语</td>
+<td>Spanish</td>
+<td>⭐⭐⭐⭐</td>
+<td>⭐⭐⭐⭐</td>
+</tr>
+<tr>
+<td><code>id</code></td>
+<td>印尼语</td>
+<td>Indonesian</td>
+<td>⭐⭐⭐</td>
+<td>⭐⭐⭐</td>
+</tr>
+</tbody>
+</table>
+<blockquote><strong>说明：</strong> 翻译和克隆质量评级基于社区反馈和测试结果。</blockquote>
+<hr>
+<h3>6.3 系统要求</h3>
+<h4>最低配置</h4>
+<ul>
+<li><strong>操作系统</strong>：Windows 10 (64-bit)</li>
+<li><strong>处理器</strong>：Intel Core i5 或 AMD Ryzen 5</li>
+<li><strong>内存</strong>：8 GB RAM</li>
+<li><strong>存储</strong>：100 GB 可用空间（含模型文件）</li>
+<li><strong>显卡</strong>：集成显卡（仅支持 CPU 模式）</li>
+</ul>
+<h4>推荐配置</h4>
+<ul>
+<li><strong>操作系统</strong>：Windows 11 (64-bit)</li>
+<li><strong>处理器</strong>：Intel Core i7 或 AMD Ryzen 7</li>
+<li><strong>内存</strong>：16 GB RAM</li>
+<li><strong>存储</strong>：200 GB SSD</li>
+<li><strong>显卡</strong>：NVIDIA GTX 2080 或以上（16GB+ 显存）</li>
+</ul>
+<h4>高性能配置</h4>
+<ul>
+<li><strong>处理器</strong>：Intel Core i9 或 AMD Ryzen 9</li>
+<li><strong>内存</strong>：32 GB RAM</li>
+<li><strong>存储</strong>：500 GB NVMe SSD</li>
+<li><strong>显卡</strong>：NVIDIA RTX 5090 或以上（24GB+ 显存）</li>
+</ul>
+<hr>
+<h3>6.4 文件格式参考</h3>
+<h4>视频格式</h4>
+<table>
+<thead><tr>
+<th>格式</th>
+<th>扩展名</th>
+<th>推荐度</th>
+<th>说明</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>MP4</td>
+<td>.mp4</td>
+<td>⭐⭐⭐⭐⭐</td>
+<td>最佳兼容性</td>
+</tr>
+<tr>
+<td>MOV</td>
+<td>.mov</td>
+<td>⭐⭐⭐⭐</td>
+<td>Apple 设备常用</td>
+</tr>
+<tr>
+<td>AVI</td>
+<td>.avi</td>
+<td>⭐⭐⭐</td>
+<td>老格式，文件较大</td>
+</tr>
+<tr>
+<td>MKV</td>
+<td>.mkv</td>
+<td>⭐⭐⭐</td>
+<td>支持多音轨、字幕</td>
+</tr>
+<tr>
+<td>WebM</td>
+<td>.webm</td>
+<td>⭐⭐</td>
+<td>网络视频格式</td>
+</tr>
+<tr>
+<td>FLV</td>
+<td>.flv</td>
+<td>⭐⭐</td>
+<td>Flash 视频，较少使用</td>
+</tr>
+</tbody>
+</table>
+<h4>字幕格式</h4>
+<table>
+<thead><tr>
+<th>格式</th>
+<th>扩展名</th>
+<th>推荐度</th>
+<th>说明</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>SRT</td>
+<td>.srt</td>
+<td>⭐⭐⭐⭐⭐</td>
+<td>纯文本，兼容性最好</td>
+</tr>
+<tr>
+<td>ASS</td>
+<td>.ass</td>
+<td>⭐⭐⭐⭐</td>
+<td>支持样式，自动转换为 SRT</td>
+</tr>
+<tr>
+<td>SSA</td>
+<td>.ssa</td>
+<td>⭐⭐⭐</td>
+<td>ASS 的前身</td>
+</tr>
+<tr>
+<td>VTT</td>
+<td>.vtt</td>
+<td>⭐⭐</td>
+<td>网络字幕格式（需转换）</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h3>6.5 错误代码参考</h3>
+<table>
+<thead><tr>
+<th>错误代码</th>
+<th>错误信息</th>
+<th>常见原因</th>
+<th>解决方案</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>E001</td>
+<td>视频文件上传失败</td>
+<td>文件过大或网络中断</td>
+<td>压缩视频或检查网络</td>
+</tr>
+<tr>
+<td>E002</td>
+<td>字幕解析失败</td>
+<td>格式错误或编码问题</td>
+<td>检查字幕格式和编码</td>
+</tr>
+<tr>
+<td>E003</td>
+<td>说话人识别失败</td>
+<td>音频质量差</td>
+<td>提高音频质量或手动分配</td>
+</tr>
+<tr>
+<td>E004</td>
+<td>翻译服务不可用</td>
+<td>LLM 服务未运行</td>
+<td>检查 Ollama 或重启系统</td>
+</tr>
+<tr>
+<td>E005</td>
+<td>语音克隆失败</td>
+<td>GPU 内存不足</td>
+<td>关闭其他程序或使用 CPU 模式</td>
+</tr>
+<tr>
+<td>E006</td>
+<td>音频拼接失败</td>
+<td>文件损坏或权限问题</td>
+<td>重新生成或检查文件权限</td>
+</tr>
+<tr>
+<td>E007</td>
+<td>视频导出失败</td>
+<td>硬盘空间不足</td>
+<td>清理硬盘或更换输出目录</td>
+</tr>
+<tr>
+<td>E008</td>
+<td>数据库错误</td>
+<td>数据库文件损坏</td>
+<td>备份数据后重建数据库</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h3>6.6 性能优化参考</h3>
+<h4>处理时间预估（4分钟视频）</h4>
+<table>
+<thead><tr>
+<th>阶段</th>
+<th>CPU 模式</th>
+<th>GPU 模式</th>
+<th>影响因素</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>说话人识别</td>
+<td>30-40秒</td>
+<td>15-20秒</td>
+<td>字幕数量、音频复杂度</td>
+</tr>
+<tr>
+<td>翻译</td>
+<td>20-30秒</td>
+<td>20-30秒</td>
+<td>字符数量、语言对</td>
+</tr>
+<tr>
+<td>语音克隆</td>
+<td>3-5分钟</td>
+<td>1-2分钟</td>
+<td>字幕数量、音色选择</td>
+</tr>
+<tr>
+<td>音频拼接</td>
+<td>10-15秒</td>
+<td>10-15秒</td>
+<td>音频段数量</td>
+</tr>
+<tr>
+<td>视频导出</td>
+<td>1-2分钟</td>
+<td>45-60秒</td>
+<td>分辨率、画质设置</td>
+</tr>
+<tr>
+<td><strong>总计</strong></td>
+<td><strong>5-8分钟</strong></td>
+<td><strong>2-4分钟</strong></td>
+<td>-</td>
+</tr>
+</tbody>
+</table>
+<blockquote><strong>说明：</strong> 时间会随视频长度线性增加。30分钟视频预计需要 60-120 分钟。</blockquote>
+<hr>
+<h3>6.7 术语对照表</h3>
+<table>
+<thead><tr>
+<th>中文术语</th>
+<th>英文术语</th>
+<th>说明</th>
+</tr></thead>
+<tbody>
+<tr>
+<td>说话人识别</td>
+<td>Speaker Diarization</td>
+<td>识别视频中不同的说话人</td>
+</tr>
+<tr>
+<td>语音克隆</td>
+<td>Voice Cloning / TTS</td>
+<td>使用 AI 生成语音</td>
+</tr>
+<tr>
+<td>音色</td>
+<td>Voice Tone / Timbre</td>
+<td>声音的特色和品质</td>
+</tr>
+<tr>
+<td>时间码</td>
+<td>Timestamp</td>
+<td>字幕的开始和结束时间</td>
+</tr>
+<tr>
+<td>字幕烧录</td>
+<td>Subtitle Burning / Hard-sub</td>
+<td>将字幕嵌入视频画面</td>
+</tr>
+<tr>
+<td>软字幕</td>
+<td>Soft Subtitle</td>
+<td>可开关的字幕文件</td>
+</tr>
+<tr>
+<td>硬字幕</td>
+<td>Hard Subtitle</td>
+<td>烧录到视频的字幕</td>
+</tr>
+<tr>
+<td>音频拼接</td>
+<td>Audio Stitching</td>
+<td>合并多个音频片段</td>
+</tr>
+<tr>
+<td>批量处理</td>
+<td>Batch Processing</td>
+<td>一次处理多个任务</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h3>6.8 联系和支持</h3>
+<h4>获取帮助</h4>
+<ol>
+<li><strong>官方文档</strong></li>
+</ol>
+<p>   - 本地文档：<code>docs/</code> 目录    - 在线文档：[待补充]</p>
+<ol>
+<li><strong>问题反馈</strong></li>
+</ol>
+<p>   - GitHub Issues：[待补充]    - 邮箱：[待补充]</p>
+<ol>
+<li><strong>社区交流</strong></li>
+</ol>
+<p>   - Discord：[待补充]    - QQ 群：[待补充]</p>
+<h4>常见问题更新</h4>
+<p>本指南会定期更新，添加新的常见问题和解决方案。</p>
+<strong>当前版本</strong>：v1.0
+<strong>更新日期</strong>：2026-01-29
+<strong>适用系统版本</strong>：Ascendia v1.x
+<hr>
+<h2>🎉 结语</h2>
+<p>感谢使用 Ascendia 视频翻译系统！</p>
+<p>希望这份指南能帮助你快速上手，创造出优质的多语言视频内容。如果有任何问题或建议，欢迎反馈给我们。</p>
+<strong>祝你创作愉快！</strong> 🚀
+<hr>
+<strong>文档信息：</strong>
+<ul>
+<li>📖 总页数：约 25 页</li>
+<li>✍️ 编写者：System Guide Generator</li>
+<li>📅 创建日期：2026-01-29</li>
+<li>🔄 版本：1.0.0</li>
+</ul>
+    </div>
+</body>
+</html>

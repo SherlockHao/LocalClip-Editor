@@ -22,6 +22,7 @@ from models.task import Task
 from progress_manager import update_task_progress, mark_task_failed, mark_task_completed
 from path_utils import task_path_manager
 from running_task_tracker import running_task_tracker
+from power_manager import prevent_sleep_enable, prevent_sleep_disable
 import shutil
 from pathlib import Path
 
@@ -455,6 +456,7 @@ async def run_speaker_diarization_task(
 
     try:
         print(f"\n========== 开始说话人识别任务: {task_id} ==========", flush=True)
+        prevent_sleep_enable()
         print(f"视频路径: {video_path}", flush=True)
         print(f"字幕路径: {subtitle_path}", flush=True)
 
@@ -658,6 +660,7 @@ async def run_speaker_diarization_task(
 
         await mark_task_completed(task_id, "default", "speaker_diarization")
         # 完成时停止追踪
+        prevent_sleep_disable()
         running_task_tracker.complete_task(task_id, "default", "speaker_diarization")
         print(f"[说话人识别] ✅ 任务完成: {task_id}", flush=True)
         print(f"[说话人识别] ⏱️  总耗时: {duration_str}", flush=True)
@@ -674,6 +677,7 @@ async def run_speaker_diarization_task(
         traceback.print_exc()
         await mark_task_failed(task_id, "default", "speaker_diarization", str(e))
         # 失败时停止追踪
+        prevent_sleep_disable()
         running_task_tracker.fail_task(task_id, str(e))
 
 
@@ -753,6 +757,7 @@ async def run_translation_task(
     """
     try:
         print(f"\n========== 开始翻译任务: {task_id} -> {target_language} ==========", flush=True)
+        prevent_sleep_enable()
 
         await update_task_progress(
             task_id, target_language, "translation",
@@ -792,6 +797,7 @@ async def run_translation_task(
             # 清除取消请求标志
             running_task_tracker.clear_cancel_request()
             # 停止追踪
+            prevent_sleep_disable()
             running_task_tracker.complete_task(task_id, target_language, "translation")
             # 标记任务完成（虽然被取消，但翻译部分已完成）
             await mark_task_completed(
@@ -816,6 +822,7 @@ async def run_translation_task(
                 }
             )
             # 完成时停止追踪
+            prevent_sleep_disable()
             running_task_tracker.complete_task(task_id, target_language, "translation")
             print(f"[翻译] ✅ 任务完成: {task_id} -> {target_language}", flush=True)
             print(f"[翻译] 翻译文件: {result['target_file']}", flush=True)
@@ -827,6 +834,7 @@ async def run_translation_task(
         traceback.print_exc()
         await mark_task_failed(task_id, target_language, "translation", str(e))
         # 失败时停止追踪
+        prevent_sleep_disable()
         running_task_tracker.fail_task(task_id, str(e))
 
 
@@ -958,6 +966,7 @@ async def run_voice_cloning_task(
     """
     try:
         print(f"\n========== 开始语音克隆任务: {task_id} -> {language} ==========", flush=True)
+        prevent_sleep_enable()
 
         await update_task_progress(
             task_id, language, "voice_cloning",
@@ -1005,6 +1014,7 @@ async def run_voice_cloning_task(
             }
         )
         # 完成时停止追踪
+        prevent_sleep_disable()
         running_task_tracker.complete_task(task_id, language, "voice_cloning")
         print(f"[语音克隆] ✅ 任务完成: {task_id} -> {language}", flush=True)
         print(f"[语音克隆] 输出目录: {result['output_dir']}", flush=True)
@@ -1016,6 +1026,7 @@ async def run_voice_cloning_task(
         traceback.print_exc()
         await mark_task_failed(task_id, language, "voice_cloning", str(e))
         # 失败时停止追踪
+        prevent_sleep_disable()
         running_task_tracker.fail_task(task_id, str(e))
 
 
@@ -1570,6 +1581,7 @@ async def stitch_cloned_audio(
 
         # 注册运行任务
         running_task_tracker.start_task(task_id, language, "stitch")
+        prevent_sleep_enable()
 
         # 获取路径
         cloned_audio_dir = task_path_manager.get_cloned_audio_dir(task_id, language)
@@ -1809,6 +1821,19 @@ async def stitch_cloned_audio(
                     volume_ratio = np.clip(volume_ratio, 0.1, 10.0)
                     processed_audio = processed_audio * volume_ratio
 
+            # 检查音量是否低于 -40dB，如果是则提升到 -40dB
+            current_rms = np.sqrt(np.mean(processed_audio**2))
+            if current_rms > 1e-9:  # 避免 log10(0)
+                current_db = 20 * np.log10(current_rms)
+                target_db = -40.0
+
+                if current_db < target_db:
+                    # 计算需要的提升系数
+                    db_boost = target_db - current_db
+                    boost_ratio = 10 ** (db_boost / 20)
+                    processed_audio = processed_audio * boost_ratio
+                    print(f"[音频拼接] 音量提升 - 片段 {idx}: {current_db:.1f}dB -> {target_db:.1f}dB (x{boost_ratio:.2f})", flush=True)
+
             processed_segments.append({
                 "audio": processed_audio,
                 "start_time": actual_start,
@@ -1879,6 +1904,7 @@ async def stitch_cloned_audio(
             }
         )
         # 完成时停止追踪
+        prevent_sleep_disable()
         running_task_tracker.complete_task(task_id, language, "stitch")
 
         return {
@@ -1894,6 +1920,7 @@ async def stitch_cloned_audio(
 
     except HTTPException:
         # 失败时停止追踪
+        prevent_sleep_disable()
         running_task_tracker.fail_task(task_id, "HTTPException")
         raise
     except Exception as e:
@@ -1901,6 +1928,7 @@ async def stitch_cloned_audio(
         import traceback
         traceback.print_exc()
         # 失败时停止追踪
+        prevent_sleep_disable()
         running_task_tracker.fail_task(task_id, str(e))
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -2572,6 +2600,7 @@ async def export_video_task(
     try:
         start_time = time.time()
         print(f"[视频导出] 开始处理...", flush=True)
+        prevent_sleep_enable()
 
         await update_task_progress(task_id, language, "export", 10, "准备视频编码...")
 
@@ -2612,6 +2641,7 @@ async def export_video_task(
             print(f"[视频导出] FFmpeg 错误: {stderr}", flush=True)
             await mark_task_failed(task_id, language, "export", f"FFmpeg 错误: {stderr[:500]}")
             # 失败时停止追踪
+            prevent_sleep_disable()
             running_task_tracker.fail_task(task_id, f"FFmpeg 错误")
             return
 
@@ -2621,6 +2651,7 @@ async def export_video_task(
         if not output_path.exists():
             await mark_task_failed(task_id, language, "export", "输出视频文件未生成")
             # 失败时停止追踪
+            prevent_sleep_disable()
             running_task_tracker.fail_task(task_id, "输出视频文件未生成")
             return
 
@@ -2628,6 +2659,7 @@ async def export_video_task(
         if file_size == 0:
             await mark_task_failed(task_id, language, "export", "输出视频文件为空")
             # 失败时停止追踪
+            prevent_sleep_disable()
             running_task_tracker.fail_task(task_id, "输出视频文件为空")
             return
 
@@ -2661,6 +2693,7 @@ async def export_video_task(
             }
         )
         # 完成时停止追踪
+        prevent_sleep_disable()
         running_task_tracker.complete_task(task_id, language, "export")
 
     except Exception as e:
@@ -2669,6 +2702,7 @@ async def export_video_task(
         traceback.print_exc()
         await mark_task_failed(task_id, language, "export", str(e))
         # 失败时停止追踪
+        prevent_sleep_disable()
         running_task_tracker.fail_task(task_id, str(e))
 
 

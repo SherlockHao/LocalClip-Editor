@@ -518,39 +518,35 @@ async def get_cancel_status():
 @app.post("/api/open-folder")
 async def open_folder(request: Request):
     """
-    打开本地文件夹（仅限 Windows）
+    打开本地文件夹（固定打开 Ascendia_Output 文件夹）
     """
     import subprocess
     import platform
 
     try:
+        # 前端仍然会发送 path 参数，但我们不使用它
         data = await request.json()
-        folder_path = data.get("path")
 
-        if not folder_path:
-            raise HTTPException(status_code=400, detail="缺少文件夹路径")
+        # 固定打开的文件夹路径
+        fixed_folder_path = r"C:\Users\Administrator\Desktop\Ascendia_Output"
+        folder = Path(fixed_folder_path)
 
-        # 确保路径存在
-        folder = Path(folder_path)
+        # 如果文件夹不存在，自动创建
         if not folder.exists():
-            raise HTTPException(status_code=404, detail="文件夹不存在")
+            folder.mkdir(parents=True, exist_ok=True)
+            print(f"[打开文件夹] 创建文件夹: {fixed_folder_path}")
 
         # 根据操作系统打开文件夹
         system = platform.system()
         if system == "Windows":
-            # Windows: 使用 explorer
             subprocess.Popen(["explorer", str(folder)])
         elif system == "Darwin":
-            # macOS: 使用 open
             subprocess.Popen(["open", str(folder)])
         else:
-            # Linux: 使用 xdg-open
             subprocess.Popen(["xdg-open", str(folder)])
 
-        return {"success": True, "message": "文件夹已打开"}
+        return {"success": True, "message": f"已打开文件夹: {fixed_folder_path}"}
 
-    except HTTPException:
-        raise
     except Exception as e:
         print(f"[打开文件夹] 错误: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
