@@ -1560,8 +1560,12 @@ async def stitch_cloned_audio(
     import soundfile as sf
     import numpy as np
     import time
+    import librosa
     from scipy.io import wavfile
     from audio_optimizer import AudioOptimizer
+
+    # 目标采样率：统一到 44100 Hz（与 Fish-Speech 一致）
+    TARGET_SAMPLE_RATE = 44100
 
     start_time = time.time()
 
@@ -1706,7 +1710,7 @@ async def stitch_cloned_audio(
 
         # 步骤4: 读取所有音频片段
         segments_with_timing = []
-        sample_rate = None
+        sample_rate = TARGET_SAMPLE_RATE  # 使用统一的目标采样率
 
         for idx, result in enumerate(cloned_results):
             cloned_audio_path = result.get("cloned_audio_path")
@@ -1725,13 +1729,25 @@ async def stitch_cloned_audio(
                 continue
 
             audio_data, sr = sf.read(audio_file_path)
+
+            # 采样率统一：检测并重采样到目标采样率
+            if sr != TARGET_SAMPLE_RATE:
+                print(f"[音频拼接] 片段 {idx}: 检测到采样率 {sr} Hz，重采样到 {TARGET_SAMPLE_RATE} Hz", flush=True)
+                # 使用 librosa 进行高质量重采样
+                audio_data = librosa.resample(
+                    audio_data,
+                    orig_sr=sr,
+                    target_sr=TARGET_SAMPLE_RATE
+                )
+                sr = TARGET_SAMPLE_RATE
+
             if sample_rate is None:
-                sample_rate = sr
+                sample_rate = TARGET_SAMPLE_RATE
 
             start_t = result.get("start_time", 0)
             end_t = result.get("end_time", 0)
             timestamp_duration = end_t - start_t
-            actual_duration = len(audio_data) / sample_rate
+            actual_duration = len(audio_data) / TARGET_SAMPLE_RATE
 
             segments_with_timing.append({
                 "index": idx,
